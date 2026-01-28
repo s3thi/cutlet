@@ -1,0 +1,16 @@
+# Build outputs
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.out
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Editor/IDE
+.vscode/
+.idea/
