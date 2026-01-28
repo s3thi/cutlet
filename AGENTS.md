@@ -9,4 +9,5 @@ Cutlet is written in C and has no external dependencies except platform librarie
 ## Important instructions
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.
+- Run `make test` after every code change.
 - Comment your code to include guidance and context for future coding agents (and possibly humans).

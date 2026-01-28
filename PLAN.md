@@ -113,8 +113,11 @@ Example:
 3) **Global RW locks** + serialized eval (global write lock).
 4) Tests for tokenizer + socket protocol + concurrency correctness.
 
-## Open follow‑ups for next session
-- Decide on exact token output format.
+## Open follow-ups for next session
+- Token output format chosen:
+  - Success: `OK [IDENT foo] [NUMBER 42] [STRING hi]`
+  - Error: `ERR 1:5 message`
+  - Blank/whitespace-only lines should return `OK` with an empty list.
 - Define error messages (positioning, line/col vs index).
 - Specify the exact Unicode identifier rules and the allowed "special" characters set.
 - Decide on Windows socket abstraction strategy early.

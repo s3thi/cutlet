@@ -12,34 +12,63 @@ SRC_DIR = src
 TEST_DIR = tests
 BUILD_DIR = build
 
-# Source files
-SRCS = $(SRC_DIR)/tokenizer.c
-OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))
+# Library source files (everything except main.c)
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c
+LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
+
+# Main binary
+MAIN_SRC = $(SRC_DIR)/main.c
+BIN = $(BUILD_DIR)/cutlet
 
 # Test files
-TEST_SRCS = $(TEST_DIR)/test_tokenizer.c
-TEST_BIN = $(BUILD_DIR)/test_tokenizer
+TEST_TOKENIZER_SRC = $(TEST_DIR)/test_tokenizer.c
+TEST_TOKENIZER_BIN = $(BUILD_DIR)/test_tokenizer
 
-# Default target
+TEST_REPL_SRC = $(TEST_DIR)/test_repl.c
+TEST_REPL_BIN = $(BUILD_DIR)/test_repl
+
+# Default target: build the cutlet binary
 .PHONY: all
-all: $(BUILD_DIR) $(OBJS)
+all: $(BIN)
 
 # Create build directory
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Compile source files
+# Compile source files to object files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Build and run tests
-.PHONY: test
-test: $(TEST_BIN)
-	./$(TEST_BIN)
+# Build the main cutlet binary
+$(BIN): $(MAIN_SRC) $(LIB_SRCS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(LDFLAGS)
 
-# Build test binary
-$(TEST_BIN): $(TEST_SRCS) $(SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_SRCS) $(SRCS) $(LDFLAGS)
+# Build and run all tests
+.PHONY: test
+test: test-tokenizer test-repl test-cli
+
+# Run tokenizer tests
+.PHONY: test-tokenizer
+test-tokenizer: $(TEST_TOKENIZER_BIN)
+	./$(TEST_TOKENIZER_BIN)
+
+# Run REPL tests
+.PHONY: test-repl
+test-repl: $(TEST_REPL_BIN)
+	./$(TEST_REPL_BIN)
+
+# Run CLI integration tests
+.PHONY: test-cli
+test-cli: $(BIN)
+	./$(TEST_DIR)/test_cli.sh
+
+# Build tokenizer test binary
+$(TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(LDFLAGS)
+
+# Build REPL test binary
+$(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(LDFLAGS)
 
 # Clean build artifacts
 .PHONY: clean
@@ -52,7 +81,10 @@ help:
 	@echo "Cutlet build system"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all    - Build all source files (default)"
-	@echo "  test   - Build and run tests"
-	@echo "  clean  - Remove build artifacts"
-	@echo "  help   - Show this help message"
+	@echo "  all           - Build the cutlet binary (default)"
+	@echo "  test          - Build and run all tests"
+	@echo "  test-tokenizer - Run tokenizer tests only"
+	@echo "  test-repl     - Run REPL tests only"
+	@echo "  test-cli      - Run CLI integration tests only"
+	@echo "  clean         - Remove build artifacts"
+	@echo "  help          - Show this help message"
