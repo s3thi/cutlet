@@ -3,13 +3,12 @@
  *
  * Test coverage for repl_format_line():
  * - Empty and whitespace-only input
- * - Single tokens (NUMBER, STRING, IDENT)
+ * - Single tokens (NUMBER, STRING, IDENT, OPERATOR)
  * - Multiple tokens
  * - Error formatting with position
  * - NULL input handling
  * - Special characters in strings
- * - Unicode identifiers
- * - Kebab-case identifiers
+ * - Symbol sandwich identifiers
  *
  * Uses the same simple test harness as test_tokenizer.c.
  */
@@ -115,11 +114,6 @@ TEST(test_single_number_positive) {
     PASS();
 }
 
-TEST(test_single_number_negative) {
-    ASSERT(format_matches("-7", "OK [NUMBER -7]"), "negative number");
-    PASS();
-}
-
 TEST(test_single_number_large) {
     ASSERT(format_matches("1234567890", "OK [NUMBER 1234567890]"), "large number");
     PASS();
@@ -178,11 +172,6 @@ TEST(test_single_ident_simple) {
     PASS();
 }
 
-TEST(test_single_ident_underscore_start) {
-    ASSERT(format_matches("_foo", "OK [IDENT _foo]"), "underscore start");
-    PASS();
-}
-
 TEST(test_single_ident_with_digits) {
     ASSERT(format_matches("foo123", "OK [IDENT foo123]"), "ident with digits");
     PASS();
@@ -205,6 +194,35 @@ TEST(test_single_ident_uppercase) {
 
 TEST(test_single_ident_mixed_case) {
     ASSERT(format_matches("FooBar", "OK [IDENT FooBar]"), "mixed case ident");
+    PASS();
+}
+
+TEST(test_single_ident_symbol_sandwich) {
+    ASSERT(format_matches("hello+world", "OK [IDENT hello+world]"), "symbol sandwich ident");
+    PASS();
+}
+
+TEST(test_single_ident_underscore_sandwich) {
+    ASSERT(format_matches("my_var_name", "OK [IDENT my_var_name]"), "underscore sandwich ident");
+    PASS();
+}
+
+/* ============================================================
+ * Single OPERATOR token tests
+ * ============================================================ */
+
+TEST(test_single_operator_plus) {
+    ASSERT(format_matches("+", "OK [OPERATOR +]"), "plus operator");
+    PASS();
+}
+
+TEST(test_single_operator_minus) {
+    ASSERT(format_matches("-", "OK [OPERATOR -]"), "minus operator");
+    PASS();
+}
+
+TEST(test_single_operator_at) {
+    ASSERT(format_matches("@", "OK [OPERATOR @]"), "at operator");
     PASS();
 }
 
@@ -253,32 +271,22 @@ TEST(test_tokens_with_extra_whitespace) {
     PASS();
 }
 
-TEST(test_negative_number_in_sequence) {
-    ASSERT(format_matches("foo -42 bar", "OK [IDENT foo] [NUMBER -42] [IDENT bar]"),
-           "negative number in sequence");
+TEST(test_operator_in_sequence) {
+    ASSERT(format_matches("foo + bar", "OK [IDENT foo] [OPERATOR +] [IDENT bar]"),
+           "operator in sequence");
+    PASS();
+}
+
+TEST(test_minus_operator_and_number) {
+    /* "- 42" is OPERATOR then NUMBER (space-separated) */
+    ASSERT(format_matches("- 42", "OK [OPERATOR -] [NUMBER 42]"),
+           "minus operator then number");
     PASS();
 }
 
 /* ============================================================
  * Error formatting tests
  * ============================================================ */
-
-TEST(test_error_invalid_char) {
-    char *result = repl_format_line("@");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    /* Error format: ERR line:col message */
-    ASSERT(strncmp(result, "ERR 1:1 ", 8) == 0, "error should start with ERR 1:1");
-    free(result);
-    PASS();
-}
-
-TEST(test_error_invalid_char_after_whitespace) {
-    char *result = repl_format_line("  @");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR 1:3 ", 8) == 0, "error should start with ERR 1:3");
-    free(result);
-    PASS();
-}
 
 TEST(test_error_unterminated_string) {
     char *result = repl_format_line("\"hello");
@@ -304,54 +312,38 @@ TEST(test_error_adjacent_tokens_number_string) {
     PASS();
 }
 
-TEST(test_error_trailing_hyphen) {
+TEST(test_error_trailing_symbol) {
+    /* foo- : symbol at end of ident not followed by letter */
     char *result = repl_format_line("foo-");
     ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "trailing hyphen should be error");
+    ASSERT(strncmp(result, "ERR ", 4) == 0, "trailing symbol should be error");
     free(result);
     PASS();
 }
 
-TEST(test_error_position_multiline) {
-    /* Error on line 2, column 1 */
-    char *result = repl_format_line("foo\n@");
+TEST(test_error_underscore_start) {
+    /* _foo: symbol at SOI, followed by non-whitespace => operator error */
+    char *result = repl_format_line("_foo");
     ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR 2:1 ", 8) == 0, "error should be at line 2 col 1");
+    ASSERT(strncmp(result, "ERR ", 4) == 0, "underscore start should be error");
     free(result);
     PASS();
 }
 
-TEST(test_error_after_valid_tokens) {
-    /* Valid tokens followed by error */
-    char *result = repl_format_line("foo 42 @");
+TEST(test_error_negative_number) {
+    /* -10: symbol at SOI followed by digit, not whitespace => error */
+    char *result = repl_format_line("-10");
     ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR 1:8 ", 8) == 0, "error at position after valid tokens");
+    ASSERT(strncmp(result, "ERR ", 4) == 0, "negative number should be error");
     free(result);
     PASS();
 }
 
-/* ============================================================
- * Unicode identifier tests
- * ============================================================ */
-
-TEST(test_unicode_cyrillic) {
-    ASSERT(format_matches("привет", "OK [IDENT привет]"), "Cyrillic identifier");
-    PASS();
-}
-
-TEST(test_unicode_greek) {
-    ASSERT(format_matches("λ", "OK [IDENT λ]"), "Greek letter");
-    PASS();
-}
-
-TEST(test_unicode_devanagari) {
-    ASSERT(format_matches("नमस्ते", "OK [IDENT नमस्ते]"), "Devanagari identifier");
-    PASS();
-}
-
-TEST(test_unicode_mixed_with_ascii) {
-    ASSERT(format_matches("foo привет bar", "OK [IDENT foo] [IDENT привет] [IDENT bar]"),
-           "Unicode mixed with ASCII");
+TEST(test_error_number_adjacent_ident) {
+    char *result = repl_format_line("42foo");
+    ASSERT_NOT_NULL(result, "result should not be null");
+    ASSERT(strncmp(result, "ERR ", 4) == 0, "number adjacent ident should be error");
+    free(result);
     PASS();
 }
 
@@ -359,36 +351,8 @@ TEST(test_unicode_mixed_with_ascii) {
  * Edge cases
  * ============================================================ */
 
-TEST(test_lone_minus) {
-    char *result = repl_format_line("-");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "lone minus should be error");
-    free(result);
-    PASS();
-}
-
-TEST(test_minus_space_number) {
-    /* "- 42" is error (lone minus) then number, but first error wins */
-    char *result = repl_format_line("- 42");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "minus space number should error");
-    free(result);
-    PASS();
-}
-
 TEST(test_string_with_numbers_inside) {
     ASSERT(format_matches("\"123\"", "OK [STRING 123]"), "string containing numbers");
-    PASS();
-}
-
-TEST(test_ident_then_negative_number) {
-    ASSERT(format_matches("x -5", "OK [IDENT x] [NUMBER -5]"), "ident then negative number");
-    PASS();
-}
-
-TEST(test_multiple_negative_numbers) {
-    ASSERT(format_matches("-1 -2 -3", "OK [NUMBER -1] [NUMBER -2] [NUMBER -3]"),
-           "multiple negative numbers");
     PASS();
 }
 
@@ -401,7 +365,6 @@ TEST(test_result_is_heap_allocated) {
     char *result2 = repl_format_line("bar");
     ASSERT_NOT_NULL(result1, "first result not null");
     ASSERT_NOT_NULL(result2, "second result not null");
-    /* Both should be independently valid */
     ASSERT_STR_EQ(result1, "OK [IDENT foo]", "first result correct");
     ASSERT_STR_EQ(result2, "OK [IDENT bar]", "second result correct");
     free(result1);
@@ -427,7 +390,6 @@ int main(void) {
     printf("\nSingle NUMBER tokens:\n");
     RUN_TEST(test_single_number_zero);
     RUN_TEST(test_single_number_positive);
-    RUN_TEST(test_single_number_negative);
     RUN_TEST(test_single_number_large);
     RUN_TEST(test_number_with_leading_whitespace);
     RUN_TEST(test_number_with_trailing_whitespace);
@@ -442,12 +404,18 @@ int main(void) {
     printf("\nSingle IDENT tokens:\n");
     RUN_TEST(test_single_ident_letter);
     RUN_TEST(test_single_ident_simple);
-    RUN_TEST(test_single_ident_underscore_start);
     RUN_TEST(test_single_ident_with_digits);
     RUN_TEST(test_single_ident_kebab_case);
     RUN_TEST(test_single_ident_multiple_hyphens);
     RUN_TEST(test_single_ident_uppercase);
     RUN_TEST(test_single_ident_mixed_case);
+    RUN_TEST(test_single_ident_symbol_sandwich);
+    RUN_TEST(test_single_ident_underscore_sandwich);
+
+    printf("\nSingle OPERATOR tokens:\n");
+    RUN_TEST(test_single_operator_plus);
+    RUN_TEST(test_single_operator_minus);
+    RUN_TEST(test_single_operator_at);
 
     printf("\nMultiple tokens:\n");
     RUN_TEST(test_two_numbers);
@@ -457,30 +425,20 @@ int main(void) {
     RUN_TEST(test_ident_number_string);
     RUN_TEST(test_many_tokens);
     RUN_TEST(test_tokens_with_extra_whitespace);
-    RUN_TEST(test_negative_number_in_sequence);
+    RUN_TEST(test_operator_in_sequence);
+    RUN_TEST(test_minus_operator_and_number);
 
     printf("\nError formatting:\n");
-    RUN_TEST(test_error_invalid_char);
-    RUN_TEST(test_error_invalid_char_after_whitespace);
     RUN_TEST(test_error_unterminated_string);
     RUN_TEST(test_error_adjacent_tokens_string_ident);
     RUN_TEST(test_error_adjacent_tokens_number_string);
-    RUN_TEST(test_error_trailing_hyphen);
-    RUN_TEST(test_error_position_multiline);
-    RUN_TEST(test_error_after_valid_tokens);
-
-    printf("\nUnicode identifiers:\n");
-    RUN_TEST(test_unicode_cyrillic);
-    RUN_TEST(test_unicode_greek);
-    RUN_TEST(test_unicode_devanagari);
-    RUN_TEST(test_unicode_mixed_with_ascii);
+    RUN_TEST(test_error_trailing_symbol);
+    RUN_TEST(test_error_underscore_start);
+    RUN_TEST(test_error_negative_number);
+    RUN_TEST(test_error_number_adjacent_ident);
 
     printf("\nEdge cases:\n");
-    RUN_TEST(test_lone_minus);
-    RUN_TEST(test_minus_space_number);
     RUN_TEST(test_string_with_numbers_inside);
-    RUN_TEST(test_ident_then_negative_number);
-    RUN_TEST(test_multiple_negative_numbers);
 
     printf("\nReturn value tests:\n");
     RUN_TEST(test_result_is_heap_allocated);

@@ -67,21 +67,21 @@ test_output "mixed tokens" 'foo 42 "bar"' "OK [IDENT foo] [NUMBER 42] [STRING ba
 
 echo
 echo "Edge cases:"
-test_output "negative number" "-7" "OK [NUMBER -7]"
+test_output "operator alone" "+" "OK [OPERATOR +]"
+test_output "minus operator" "-" "OK [OPERATOR -]"
 test_output "kebab-case" "kebab-case" "OK [IDENT kebab-case]"
+test_output "symbol sandwich" "hello+world" "OK [IDENT hello+world]"
 test_output "empty string" '""' "OK [STRING ]"
 test_output "whitespace only" "   " "OK"
+test_output "operator between idents" "a + b" "OK [IDENT a] [OPERATOR +] [IDENT b]"
+test_output "operator between numbers" "1 + 2" "OK [NUMBER 1] [OPERATOR +] [NUMBER 2]"
 
 echo
 echo "Error cases:"
-test_error_prefix "invalid char" "@" "ERR 1:1 "
 test_error_prefix "unterminated string" '"hello' "ERR 1:1 "
-test_error_prefix "adjacent tokens" '"a"b' "ERR 1:4 "
-
-echo
-echo "Unicode:"
-test_output "cyrillic" "привет" "OK [IDENT привет]"
-test_output "greek" "λ" "OK [IDENT λ]"
+test_error_prefix "adjacent tokens string+ident" '"a"b' "ERR 1:1 "
+test_error_prefix "negative number error" "-10" "ERR 1:1 "
+test_error_prefix "number adjacent ident" "42foo" "ERR 1:1 "
 
 echo
 echo "Multiple lines:"

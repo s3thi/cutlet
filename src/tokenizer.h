@@ -2,13 +2,16 @@
  * tokenizer.h - Cutlet tokenizer interface
  *
  * Token types supported in v0:
- * - NUMBER: integer only (0, 42, -7)
+ * - NUMBER: integer only, digits only (0, 42)
  * - STRING: double-quoted, no escapes ("hi")
- * - IDENT: letters/underscore start, letters/digits/underscore after (foo, _x1)
+ * - IDENT: ASCII letter start, letters/digits continue, symbols sandwiched
+ *          between letters are part of the identifier (hello+world, my_var)
+ * - OPERATOR: symbol chars surrounded by whitespace/SOI/EOI (+, -, etc.)
  * - EOF: end of input
  * - ERROR: tokenization error with position info
  *
- * Whitespace is ignored. Any other character is an error.
+ * Symbol chars: anything that is not whitespace, ASCII letter, digit, or '"'.
+ * Whitespace is ignored between tokens.
  */
 
 #ifndef CUTLET_TOKENIZER_H
@@ -19,9 +22,10 @@
 
 /* Token types for the minimal v0 tokenizer */
 typedef enum {
-    TOK_NUMBER,   /* Integer literal */
+    TOK_NUMBER,   /* Integer literal (digits only) */
     TOK_STRING,   /* Double-quoted string */
-    TOK_IDENT,    /* Identifier */
+    TOK_IDENT,    /* Identifier (ASCII letters, digits, symbol sandwiches) */
+    TOK_OPERATOR, /* Operator (symbol chars delimited by whitespace) */
     TOK_EOF,      /* End of input */
     TOK_ERROR     /* Tokenization error */
 } TokenType;
@@ -29,9 +33,10 @@ typedef enum {
 /*
  * Token structure
  *
- * For NUMBER: value points to the digit string (may include leading -)
+ * For NUMBER: value points to the digit string
  * For STRING: value points to the string contents (without quotes)
  * For IDENT: value points to the identifier
+ * For OPERATOR: value points to the operator symbol(s)
  * For ERROR: value points to the error message
  *
  * Position info is 0-indexed from start of input.

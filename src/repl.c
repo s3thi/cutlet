@@ -114,10 +114,11 @@ static char *strbuf_take(StringBuf *buf) {
  */
 static const char *format_type_name(TokenType type) {
     switch (type) {
-        case TOK_NUMBER: return "NUMBER";
-        case TOK_STRING: return "STRING";
-        case TOK_IDENT:  return "IDENT";
-        default:         return "UNKNOWN";
+        case TOK_NUMBER:   return "NUMBER";
+        case TOK_STRING:   return "STRING";
+        case TOK_IDENT:    return "IDENT";
+        case TOK_OPERATOR: return "OPERATOR";
+        default:           return "UNKNOWN";
     }
 }
 
