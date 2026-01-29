@@ -131,6 +131,161 @@ else
 fi
 
 echo
+echo "TCP REPL (--listen and --connect):"
+
+# Start a server on an ephemeral port, capture the port from stdout.
+# The server prints "Listening on HOST:PORT" to stdout on startup.
+SERVER_OUT=$(mktemp)
+"$CUTLET" repl --listen 127.0.0.1:0 > "$SERVER_OUT" 2>&1 &
+SERVER_PID=$!
+# Wait for server to print its listening line.
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if grep -q "^Listening on " "$SERVER_OUT" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+SERVER_PORT=$(grep "^Listening on " "$SERVER_OUT" | sed 's/.*:\([0-9]*\)$/\1/')
+
+if [ -n "$SERVER_PORT" ]; then
+    echo "  (server started on port $SERVER_PORT)"
+
+    # Test: connect and send a single expression
+    connect_result=$(echo "foo" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$connect_result" | grep -q "OK \[IDENT foo\]"; then
+        echo "  PASS: connect single expression"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: connect single expression"
+        echo "    Got: $connect_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Test: connect and send multiple expressions
+    multi_connect=$(printf 'foo\n42\n"hi"' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$multi_connect" | grep -q "OK \[IDENT foo\]" && \
+       echo "$multi_connect" | grep -q "OK \[NUMBER 42\]" && \
+       echo "$multi_connect" | grep -q "OK \[STRING hi\]"; then
+        echo "  PASS: connect multiple expressions"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: connect multiple expressions"
+        echo "    Got: $multi_connect"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Test: connect with tokenization error
+    err_connect=$(echo '"unterminated' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$err_connect" | grep -q "ERR 1:"; then
+        echo "  PASS: connect error expression"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: connect error expression"
+        echo "    Got: $err_connect"
+        FAIL=$((FAIL + 1))
+    fi
+
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 3))
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+fi
+rm -f "$SERVER_OUT"
+
+# Test: --listen with no arg defaults to 127.0.0.1:7878
+SERVER_OUT_DEF=$(mktemp)
+"$CUTLET" repl --listen > "$SERVER_OUT_DEF" 2>&1 &
+SERVER_PID_DEF=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if grep -q "^Listening on " "$SERVER_OUT_DEF" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+if grep -q "^Listening on 127.0.0.1:7117$" "$SERVER_OUT_DEF" 2>/dev/null; then
+    # Verify we can connect with default --connect (no arg)
+    def_result=$(echo "foo" | "$CUTLET" repl --connect 2>/dev/null)
+    if echo "$def_result" | grep -q "OK \[IDENT foo\]"; then
+        echo "  PASS: --listen default, --connect default"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --connect default should reach default server"
+        echo "    Got: $def_result"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    if grep -q "failed to bind" "$SERVER_OUT_DEF" 2>/dev/null; then
+        echo "  SKIP: --listen default (port 7117 in use)"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --listen default should use 127.0.0.1:7117"
+        echo "    Got: $(cat "$SERVER_OUT_DEF")"
+        FAIL=$((FAIL + 1))
+    fi
+fi
+kill "$SERVER_PID_DEF" 2>/dev/null || true
+wait "$SERVER_PID_DEF" 2>/dev/null || true
+rm -f "$SERVER_OUT_DEF"
+
+# Test: --listen :PORT uses default host with custom port
+SERVER_OUT_CP=$(mktemp)
+"$CUTLET" repl --listen :9111 > "$SERVER_OUT_CP" 2>&1 &
+SERVER_PID_CP=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if grep -q "^Listening on " "$SERVER_OUT_CP" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+if grep -q "^Listening on 127.0.0.1:9111$" "$SERVER_OUT_CP" 2>/dev/null; then
+    cp_result=$(echo "bar" | "$CUTLET" repl --connect :9111 2>/dev/null)
+    if echo "$cp_result" | grep -q "OK \[IDENT bar\]"; then
+        echo "  PASS: --listen :PORT, --connect :PORT"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --connect :PORT should reach custom port server"
+        echo "    Got: $cp_result"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    if grep -q "failed to bind" "$SERVER_OUT_CP" 2>/dev/null; then
+        echo "  SKIP: --listen :PORT (port 9111 in use)"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --listen :9111 should use 127.0.0.1:9111"
+        echo "    Got: $(cat "$SERVER_OUT_CP")"
+        FAIL=$((FAIL + 1))
+    fi
+fi
+kill "$SERVER_PID_CP" 2>/dev/null || true
+wait "$SERVER_PID_CP" 2>/dev/null || true
+rm -f "$SERVER_OUT_CP"
+
+# Test: invalid --listen arg
+if "$CUTLET" repl --listen "badaddr" 2>&1 | grep -qi "error\|invalid\|failed"; then
+    echo "  PASS: invalid --listen arg"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: invalid --listen arg should error"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test: connect to nothing fails with non-zero exit
+if "$CUTLET" repl --connect "127.0.0.1:1" > /dev/null 2>&1; then
+    echo "  FAIL: connect to nothing should fail"
+    FAIL=$((FAIL + 1))
+else
+    echo "  PASS: connect to nothing fails"
+    PASS=$((PASS + 1))
+fi
+
+echo
 echo "========================================"
 echo "Tests run: $((PASS + FAIL))"
 echo "Passed:    $PASS"

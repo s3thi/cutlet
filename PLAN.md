@@ -121,11 +121,12 @@ Example:
 
 ## Implementation staging (suggested)
 1) **Tokenizer REPL** on stdin/stdout.
-2) **Threaded TCP server** that plugs into the same REPL core.
+2) **Threaded TCP server** that plugs into the same REPL core (see `TCP.md` for the detailed test-first plan).
 3) **Global RW locks** + serialized eval (global write lock).
-4) Tests for tokenizer + socket protocol + concurrency correctness.
+4) Socket protocol + concurrency tests (tokenizer tests already exist).
 
 ## Open follow-ups for next session
+- TCP REPL test plan and protocol checklist are in `TCP.md`.
 - Token output format chosen:
   - Success: `OK [IDENT foo] [NUMBER 42] [STRING hi] [OPERATOR +]`
   - Error: `ERR 1:5 message`
