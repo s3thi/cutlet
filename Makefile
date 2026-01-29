@@ -97,15 +97,27 @@ format:
 format-check:
 	clang-format --dry-run --Werror $(FORMAT_FILES)
 
+# ---------- Compile database ----------
+
+# Generate compile_commands.json using bear. Required for accurate linting.
+.PHONY: compile-db
+compile-db:
+	@command -v bear >/dev/null 2>&1 || { echo "Error: 'bear' is not installed. Install it (e.g. brew install bear) and re-run."; exit 1; }
+	bear -- $(MAKE) clean all test
+
 # ---------- Static analysis (clang-tidy) ----------
 
 # clang-tidy binary — use Homebrew LLVM if available, else PATH.
 CLANG_TIDY ?= $(shell command -v /opt/homebrew/opt/llvm/bin/clang-tidy 2>/dev/null || echo clang-tidy)
 
-# Lint all tracked C source files (headers are checked via includes).
+# Only lint .c translation units; headers are checked indirectly via includes.
+LINT_FILES = $(shell git ls-files '*.c')
+
+# Lint requires a compile database. Run `make compile-db` first.
 .PHONY: lint
 lint:
-	$(CLANG_TIDY) $(FORMAT_FILES) -- -std=c23
+	@test -f compile_commands.json || { echo "Error: compile_commands.json not found. Run 'make compile-db' first."; exit 1; }
+	$(CLANG_TIDY) $(LINT_FILES) -p . --extra-arg=-isysroot --extra-arg=$(shell xcrun --show-sdk-path)
 
 # ---------- Combined checks ----------
 
@@ -116,7 +128,7 @@ check: format-check lint
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) compile_commands.json
 
 # Help
 .PHONY: help
@@ -132,7 +144,8 @@ help:
 	@echo "  test-cli      - Run CLI integration tests only"
 	@echo "  format        - Auto-format all C source and header files"
 	@echo "  format-check  - Check formatting (fails on diff)"
-	@echo "  lint          - Run clang-tidy static analysis"
+	@echo "  compile-db    - Generate compile_commands.json (requires bear)"
+	@echo "  lint          - Run clang-tidy static analysis (requires compile-db)"
 	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"

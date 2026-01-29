@@ -19,8 +19,5 @@ Checks: >
 # Only show warnings from project headers, not system headers.
 HeaderFilterRegex: 'src/.*\.h$'
 
-# Pass compiler flags so clang-tidy understands the code.
-ExtraArgs:
-  - '-std=c23'
 
 WarningsAsErrors: '*'
