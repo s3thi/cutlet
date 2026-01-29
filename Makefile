@@ -82,6 +82,37 @@ $(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
 $(TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread
 
+# ---------- Formatting (clang-format) ----------
+
+# All tracked C source and header files.
+FORMAT_FILES = $(shell git ls-files '*.c' '*.h')
+
+# Apply formatting in-place.
+.PHONY: format
+format:
+	clang-format -i $(FORMAT_FILES)
+
+# Check formatting without modifying files. Exits non-zero on diff.
+.PHONY: format-check
+format-check:
+	clang-format --dry-run --Werror $(FORMAT_FILES)
+
+# ---------- Static analysis (clang-tidy) ----------
+
+# clang-tidy binary — use Homebrew LLVM if available, else PATH.
+CLANG_TIDY ?= $(shell command -v /opt/homebrew/opt/llvm/bin/clang-tidy 2>/dev/null || echo clang-tidy)
+
+# Lint all tracked C source files (headers are checked via includes).
+.PHONY: lint
+lint:
+	$(CLANG_TIDY) $(FORMAT_FILES) -- -std=c23
+
+# ---------- Combined checks ----------
+
+# Required pre-commit checks.
+.PHONY: check
+check: format-check lint
+
 # Clean build artifacts
 .PHONY: clean
 clean:
@@ -99,5 +130,9 @@ help:
 	@echo "  test-repl     - Run REPL tests only"
 	@echo "  test-repl-server - Run TCP REPL server tests only"
 	@echo "  test-cli      - Run CLI integration tests only"
+	@echo "  format        - Auto-format all C source and header files"
+	@echo "  format-check  - Check formatting (fails on diff)"
+	@echo "  lint          - Run clang-tidy static analysis"
+	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"

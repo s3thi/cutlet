@@ -27,22 +27,24 @@ static int tests_failed = 0;
 
 #define TEST(name) static void name(void)
 
-#define RUN_TEST(name) do { \
-    tests_run++; \
-    printf("  %-50s ", #name); \
-    fflush(stdout); \
-    name(); \
-} while(0)
+#define RUN_TEST(name)                                                                             \
+    do {                                                                                           \
+        tests_run++;                                                                               \
+        printf("  %-50s ", #name);                                                                 \
+        fflush(stdout);                                                                            \
+        name();                                                                                    \
+    } while (0)
 
-#define ASSERT(cond, msg) do { \
-    if (!(cond)) { \
-        printf("FAIL\n"); \
-        printf("    Assertion failed: %s\n", msg); \
-        printf("    At %s:%d\n", __FILE__, __LINE__); \
-        tests_failed++; \
-        return; \
-    } \
-} while(0)
+#define ASSERT(cond, msg)                                                                          \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            printf("FAIL\n");                                                                      \
+            printf("    Assertion failed: %s\n", msg);                                             \
+            printf("    At %s:%d\n", __FILE__, __LINE__);                                          \
+            tests_failed++;                                                                        \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
 
 #define ASSERT_EQ(a, b, msg) ASSERT((a) == (b), msg)
 #define ASSERT_NE(a, b, msg) ASSERT((a) != (b), msg)
@@ -53,16 +55,20 @@ static int tests_failed = 0;
 #define ASSERT_NULL(ptr, msg) ASSERT((ptr) == NULL, msg)
 #define ASSERT_NOT_NULL(ptr, msg) ASSERT((ptr) != NULL, msg)
 
-#define PASS() do { \
-    printf("PASS\n"); \
-    tests_passed++; \
-} while(0)
+#define PASS()                                                                                     \
+    do {                                                                                           \
+        printf("PASS\n");                                                                          \
+        tests_passed++;                                                                            \
+    } while (0)
 
 /* Helper to check a token matches expected values */
 static int token_matches(Token *tok, TokenType type, const char *value, size_t value_len) {
-    if (tok->type != type) return 0;
-    if (tok->value_len != value_len) return 0;
-    if (value_len > 0 && strncmp(tok->value, value, value_len) != 0) return 0;
+    if (tok->type != type)
+        return 0;
+    if (tok->value_len != value_len)
+        return 0;
+    if (value_len > 0 && strncmp(tok->value, value, value_len) != 0)
+        return 0;
     return 1;
 }
 
@@ -368,7 +374,8 @@ TEST(test_ident_symbol_sandwich_complex) {
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello_-_world", 13), "expected IDENT 'hello_-_world'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello_-_world", 13),
+                "expected IDENT 'hello_-_world'");
 
     tokenizer_destroy(tok);
     PASS();

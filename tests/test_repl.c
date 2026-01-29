@@ -28,36 +28,40 @@ static int tests_failed = 0;
 
 #define TEST(name) static void name(void)
 
-#define RUN_TEST(name) do { \
-    tests_run++; \
-    printf("  %-50s ", #name); \
-    fflush(stdout); \
-    name(); \
-} while(0)
+#define RUN_TEST(name)                                                                             \
+    do {                                                                                           \
+        tests_run++;                                                                               \
+        printf("  %-50s ", #name);                                                                 \
+        fflush(stdout);                                                                            \
+        name();                                                                                    \
+    } while (0)
 
-#define ASSERT(cond, msg) do { \
-    if (!(cond)) { \
-        printf("FAIL\n"); \
-        printf("    Assertion failed: %s\n", msg); \
-        printf("    At %s:%d\n", __FILE__, __LINE__); \
-        tests_failed++; \
-        return; \
-    } \
-} while(0)
+#define ASSERT(cond, msg)                                                                          \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            printf("FAIL\n");                                                                      \
+            printf("    Assertion failed: %s\n", msg);                                             \
+            printf("    At %s:%d\n", __FILE__, __LINE__);                                          \
+            tests_failed++;                                                                        \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
 
 #define ASSERT_EQ(a, b, msg) ASSERT((a) == (b), msg)
 #define ASSERT_STR_EQ(a, b, msg) ASSERT(strcmp((a), (b)) == 0, msg)
 #define ASSERT_NOT_NULL(ptr, msg) ASSERT((ptr) != NULL, msg)
 
-#define PASS() do { \
-    printf("PASS\n"); \
-    tests_passed++; \
-} while(0)
+#define PASS()                                                                                     \
+    do {                                                                                           \
+        printf("PASS\n");                                                                          \
+        tests_passed++;                                                                            \
+    } while (0)
 
 /* Helper to run format and compare result */
 static int format_matches(const char *input, const char *expected) {
     char *result = repl_format_line(input);
-    if (result == NULL) return 0;
+    if (result == NULL)
+        return 0;
     int match = strcmp(result, expected) == 0;
     if (!match) {
         printf("\n    Expected: %s\n    Got:      %s\n", expected, result);
@@ -259,14 +263,13 @@ TEST(test_ident_number_string) {
 
 TEST(test_many_tokens) {
     ASSERT(format_matches("a 1 \"x\" b 2 \"y\"",
-           "OK [IDENT a] [NUMBER 1] [STRING x] [IDENT b] [NUMBER 2] [STRING y]"),
+                          "OK [IDENT a] [NUMBER 1] [STRING x] [IDENT b] [NUMBER 2] [STRING y]"),
            "many tokens");
     PASS();
 }
 
 TEST(test_tokens_with_extra_whitespace) {
-    ASSERT(format_matches("  foo   42   \"bar\"  ",
-           "OK [IDENT foo] [NUMBER 42] [STRING bar]"),
+    ASSERT(format_matches("  foo   42   \"bar\"  ", "OK [IDENT foo] [NUMBER 42] [STRING bar]"),
            "tokens with extra whitespace");
     PASS();
 }
@@ -279,8 +282,7 @@ TEST(test_operator_in_sequence) {
 
 TEST(test_minus_operator_and_number) {
     /* "- 42" is OPERATOR then NUMBER (space-separated) */
-    ASSERT(format_matches("- 42", "OK [OPERATOR -] [NUMBER 42]"),
-           "minus operator then number");
+    ASSERT(format_matches("- 42", "OK [OPERATOR -] [NUMBER 42]"), "minus operator then number");
     PASS();
 }
 

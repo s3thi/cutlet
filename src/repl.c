@@ -12,9 +12,9 @@
 
 #include "repl.h"
 #include "tokenizer.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 /* Initial buffer size for result string */
 #define INITIAL_BUF_SIZE 256
@@ -34,7 +34,8 @@ typedef struct {
  */
 static bool strbuf_init(StringBuf *buf) {
     buf->data = malloc(INITIAL_BUF_SIZE);
-    if (!buf->data) return false;
+    if (!buf->data)
+        return false;
     buf->data[0] = '\0';
     buf->len = 0;
     buf->capacity = INITIAL_BUF_SIZE;
@@ -47,7 +48,8 @@ static bool strbuf_init(StringBuf *buf) {
  */
 static bool strbuf_ensure(StringBuf *buf, size_t additional) {
     size_t needed = buf->len + additional + 1; /* +1 for null terminator */
-    if (needed <= buf->capacity) return true;
+    if (needed <= buf->capacity)
+        return true;
 
     size_t new_cap = buf->capacity;
     while (new_cap < needed) {
@@ -55,7 +57,8 @@ static bool strbuf_ensure(StringBuf *buf, size_t additional) {
     }
 
     char *new_data = realloc(buf->data, new_cap);
-    if (!new_data) return false;
+    if (!new_data)
+        return false;
 
     buf->data = new_data;
     buf->capacity = new_cap;
@@ -68,7 +71,8 @@ static bool strbuf_ensure(StringBuf *buf, size_t additional) {
  */
 static bool strbuf_append(StringBuf *buf, const char *str) {
     size_t str_len = strlen(str);
-    if (!strbuf_ensure(buf, str_len)) return false;
+    if (!strbuf_ensure(buf, str_len))
+        return false;
     memcpy(buf->data + buf->len, str, str_len + 1);
     buf->len += str_len;
     return true;
@@ -79,7 +83,8 @@ static bool strbuf_append(StringBuf *buf, const char *str) {
  * Returns false on allocation failure.
  */
 static bool strbuf_append_n(StringBuf *buf, const char *str, size_t n) {
-    if (!strbuf_ensure(buf, n)) return false;
+    if (!strbuf_ensure(buf, n))
+        return false;
     memcpy(buf->data + buf->len, str, n);
     buf->len += n;
     buf->data[buf->len] = '\0';
@@ -114,11 +119,16 @@ static char *strbuf_take(StringBuf *buf) {
  */
 static const char *format_type_name(TokenType type) {
     switch (type) {
-        case TOK_NUMBER:   return "NUMBER";
-        case TOK_STRING:   return "STRING";
-        case TOK_IDENT:    return "IDENT";
-        case TOK_OPERATOR: return "OPERATOR";
-        default:           return "UNKNOWN";
+    case TOK_NUMBER:
+        return "NUMBER";
+    case TOK_STRING:
+        return "STRING";
+    case TOK_IDENT:
+        return "IDENT";
+    case TOK_OPERATOR:
+        return "OPERATOR";
+    default:
+        return "UNKNOWN";
     }
 }
 

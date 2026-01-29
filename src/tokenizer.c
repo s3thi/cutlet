@@ -20,10 +20,10 @@
  */
 
 #include "tokenizer.h"
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Maximum size for error messages and token value buffer */
 #define MAX_ERROR_MSG 256
@@ -31,11 +31,11 @@
 
 /* Tokenizer state */
 struct Tokenizer {
-    const char *input;      /* Input string (not owned) */
-    size_t input_len;       /* Length of input */
-    size_t pos;             /* Current byte position (0-indexed) */
-    size_t line;            /* Current line (1-indexed) */
-    size_t col;             /* Current column (1-indexed) */
+    const char *input; /* Input string (not owned) */
+    size_t input_len;  /* Length of input */
+    size_t pos;        /* Current byte position (0-indexed) */
+    size_t line;       /* Current line (1-indexed) */
+    size_t col;        /* Current column (1-indexed) */
 
     /* Value buffer for token values */
     char *value_buf;
@@ -57,17 +57,11 @@ struct Tokenizer {
  * Character classification helpers
  * ============================================================ */
 
-static bool is_ascii_digit(char c) {
-    return c >= '0' && c <= '9';
-}
+static bool is_ascii_digit(char c) { return c >= '0' && c <= '9'; }
 
-static bool is_ascii_letter(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
+static bool is_ascii_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
-static bool is_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
+static bool is_whitespace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 /*
  * A symbol char is anything that is not whitespace, not ASCII letter,
@@ -77,11 +71,16 @@ static bool is_whitespace(char c) {
  * UTF-8 sequences which are not valid identifier starts).
  */
 static bool is_symbol_char(char c) {
-    if (is_whitespace(c)) return false;
-    if (is_ascii_letter(c)) return false;
-    if (is_ascii_digit(c)) return false;
-    if (c == '"') return false;
-    if (c == '\0') return false;
+    if (is_whitespace(c))
+        return false;
+    if (is_ascii_letter(c))
+        return false;
+    if (is_ascii_digit(c))
+        return false;
+    if (c == '"')
+        return false;
+    if (c == '\0')
+        return false;
     return true;
 }
 
@@ -135,7 +134,7 @@ Tokenizer *tokenizer_create(const char *input) {
     tok->error_msg[0] = '\0';
     tok->at_eof = false;
     tok->at_error = false;
-    tok->had_whitespace = true;  /* SOI counts as whitespace */
+    tok->had_whitespace = true; /* SOI counts as whitespace */
 
     return tok;
 }
@@ -182,7 +181,8 @@ static size_t skip_whitespace(Tokenizer *tok) {
 /*
  * Set an error token with position info.
  */
-static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_pos, size_t error_line, size_t error_col) {
+static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_pos,
+                      size_t error_line, size_t error_col) {
     tok->at_error = true;
 
     out->type = TOK_ERROR;
@@ -197,7 +197,8 @@ static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_
  * Read a number token (digits only, no negatives).
  * Called when current char is a digit.
  */
-static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line, size_t start_col) {
+static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                        size_t start_col) {
     size_t value_start = tok->pos;
 
     /* Consume digits */
@@ -239,7 +240,8 @@ static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
  * Read a string token (double-quoted, no escapes).
  * Called when current char is '"'.
  */
-static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line, size_t start_col) {
+static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                        size_t start_col) {
     /* Skip opening quote */
     tok->pos++;
     tok->col++;
@@ -313,7 +315,8 @@ static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
  *   - Next char must be an ASCII letter (not digit, not ws, not EOF)
  *   - If either check fails, emit error
  */
-static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line, size_t start_col) {
+static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                       size_t start_col) {
     size_t value_start = tok->pos;
 
     /* Track what kind of char we last consumed (letter or digit)
@@ -364,7 +367,8 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
 
             /* After symbol run, next char must be an ASCII letter */
             if (tok->pos >= tok->input_len || !is_ascii_letter(tok->input[tok->pos])) {
-                snprintf(tok->error_msg, MAX_ERROR_MSG, "symbol not followed by letter in identifier");
+                snprintf(tok->error_msg, MAX_ERROR_MSG,
+                         "symbol not followed by letter in identifier");
                 set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
                 return true;
             }
@@ -404,7 +408,8 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
  * Called when current char is a symbol char preceded by whitespace/SOI.
  * Consumes a run of symbol chars. Next char must be whitespace or EOF.
  */
-static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line, size_t start_col) {
+static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                          size_t start_col) {
     size_t value_start = tok->pos;
 
     /* Consume run of symbol chars */
@@ -540,19 +545,26 @@ bool tokenizer_reset(Tokenizer *tok) {
     tok->at_eof = false;
     tok->at_error = false;
     tok->error_msg[0] = '\0';
-    tok->had_whitespace = true;  /* SOI counts as whitespace */
+    tok->had_whitespace = true; /* SOI counts as whitespace */
 
     return true;
 }
 
 const char *token_type_str(TokenType type) {
     switch (type) {
-        case TOK_NUMBER:   return "NUMBER";
-        case TOK_STRING:   return "STRING";
-        case TOK_IDENT:    return "IDENT";
-        case TOK_OPERATOR: return "OPERATOR";
-        case TOK_EOF:      return "EOF";
-        case TOK_ERROR:    return "ERROR";
-        default:           return "UNKNOWN";
+    case TOK_NUMBER:
+        return "NUMBER";
+    case TOK_STRING:
+        return "STRING";
+    case TOK_IDENT:
+        return "IDENT";
+    case TOK_OPERATOR:
+        return "OPERATOR";
+    case TOK_EOF:
+        return "EOF";
+    case TOK_ERROR:
+        return "ERROR";
+    default:
+        return "UNKNOWN";
     }
 }

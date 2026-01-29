@@ -17,15 +17,15 @@
  */
 
 #include "../src/repl_server.h"
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <errno.h>
-#include <pthread.h>
+#include <unistd.h>
 
 /* ============================================================
  * Simple test harness (same as other test files)
@@ -37,31 +37,34 @@ static int tests_failed = 0;
 
 #define TEST(name) static void name(void)
 
-#define RUN_TEST(name) do { \
-    tests_run++; \
-    printf("  %-55s ", #name); \
-    fflush(stdout); \
-    name(); \
-} while(0)
+#define RUN_TEST(name)                                                                             \
+    do {                                                                                           \
+        tests_run++;                                                                               \
+        printf("  %-55s ", #name);                                                                 \
+        fflush(stdout);                                                                            \
+        name();                                                                                    \
+    } while (0)
 
-#define ASSERT(cond, msg) do { \
-    if (!(cond)) { \
-        printf("FAIL\n"); \
-        printf("    Assertion failed: %s\n", msg); \
-        printf("    At %s:%d\n", __FILE__, __LINE__); \
-        tests_failed++; \
-        return; \
-    } \
-} while(0)
+#define ASSERT(cond, msg)                                                                          \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            printf("FAIL\n");                                                                      \
+            printf("    Assertion failed: %s\n", msg);                                             \
+            printf("    At %s:%d\n", __FILE__, __LINE__);                                          \
+            tests_failed++;                                                                        \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
 
 #define ASSERT_EQ(a, b, msg) ASSERT((a) == (b), msg)
 #define ASSERT_STR_EQ(a, b, msg) ASSERT(strcmp((a), (b)) == 0, msg)
 #define ASSERT_NOT_NULL(ptr, msg) ASSERT((ptr) != NULL, msg)
 
-#define PASS() do { \
-    printf("PASS\n"); \
-    tests_passed++; \
-} while(0)
+#define PASS()                                                                                     \
+    do {                                                                                           \
+        printf("PASS\n");                                                                          \
+        tests_passed++;                                                                            \
+    } while (0)
 
 /* ============================================================
  * Socket helpers
@@ -70,10 +73,11 @@ static int tests_failed = 0;
 /* Connect to localhost on the given port. Returns fd or -1. */
 static int connect_to(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
+    if (fd < 0)
+        return -1;
 
     /* Set a 2-second recv timeout to avoid hanging tests. */
-    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+    struct timeval tv = {.tv_sec = 2, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
@@ -106,9 +110,11 @@ static ssize_t recv_line(int fd, char *buf, size_t bufsz) {
     size_t pos = 0;
     while (pos < bufsz - 1) {
         ssize_t n = recv(fd, buf + pos, 1, 0);
-        if (n <= 0) return -1;
+        if (n <= 0)
+            return -1;
         pos++;
-        if (buf[pos - 1] == '\n') break;
+        if (buf[pos - 1] == '\n')
+            break;
     }
     buf[pos] = '\0';
     return (ssize_t)pos;
@@ -389,12 +395,17 @@ static void *client_thread_fn(void *arg) {
     ca->ok = false;
 
     int fd = connect_to(ca->port);
-    if (fd < 0) return NULL;
+    if (fd < 0)
+        return NULL;
 
-    if (!send_line(fd, ca->request)) { close(fd); return NULL; }
+    if (!send_line(fd, ca->request)) {
+        close(fd);
+        return NULL;
+    }
 
     ssize_t n = recv_line(fd, ca->response, sizeof(ca->response));
-    if (n > 0) ca->ok = true;
+    if (n > 0)
+        ca->ok = true;
 
     close(fd);
     return NULL;
@@ -406,8 +417,8 @@ TEST(test_two_concurrent_clients) {
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
-    ClientArg c1 = { .port = port, .request = "100 alpha\n" };
-    ClientArg c2 = { .port = port, .request = "200 beta\n" };
+    ClientArg c1 = {.port = port, .request = "100 alpha\n"};
+    ClientArg c2 = {.port = port, .request = "200 beta\n"};
 
     pthread_t t1, t2;
     pthread_create(&t1, NULL, client_thread_fn, &c1);
@@ -588,9 +599,8 @@ TEST(test_multiple_tokens) {
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf,
-        "-> 1 OK [IDENT foo] [NUMBER 42] [STRING bar] [OPERATOR +]\n",
-        "multiple tokens");
+    ASSERT_STR_EQ(buf, "-> 1 OK [IDENT foo] [NUMBER 42] [STRING bar] [OPERATOR +]\n",
+                  "multiple tokens");
 
     close(fd);
     repl_server_stop(srv);

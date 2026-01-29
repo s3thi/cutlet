@@ -1,0 +1,8 @@
+# Cutlet formatting configuration.
+# Based on LLVM style — the most widely used clang-format preset.
+# Run: make format       (apply formatting)
+#      make format-check (check without modifying)
+
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100

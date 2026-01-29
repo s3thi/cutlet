@@ -18,17 +18,17 @@
 #include "repl_server.h"
 #include "repl.h"
 
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-#include <ctype.h>
-#include <unistd.h>
-#include <errno.h>
-#include <pthread.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <unistd.h>
 
 #define MAX_LINE_LEN 4096
 
@@ -40,7 +40,7 @@ struct ReplServer {
     int listen_fd;
     uint16_t port;
     pthread_t accept_thread;
-    volatile bool shutdown;  /* Signals accept loop and client threads to stop. */
+    volatile bool shutdown; /* Signals accept loop and client threads to stop. */
 };
 
 /* ============================================================
@@ -82,7 +82,8 @@ static ssize_t read_line(int fd, char *buf, size_t max_len) {
 static void drain_until_newline(int fd) {
     char c;
     while (recv(fd, &c, 1, 0) == 1) {
-        if (c == '\n') return;
+        if (c == '\n')
+            return;
     }
 }
 
@@ -93,7 +94,8 @@ static bool send_all(int fd, const char *data, size_t len) {
     size_t sent = 0;
     while (sent < len) {
         ssize_t n = send(fd, data + sent, len - sent, 0);
-        if (n <= 0) return false;
+        if (n <= 0)
+            return false;
         sent += (size_t)n;
     }
     return true;
@@ -110,7 +112,8 @@ static bool send_response(int fd, const char *id, const char *body) {
     /* "-> " + id + " " + body + "\n" + '\0' */
     size_t total = 3 + id_len + 1 + body_len + 1;
     char *resp = malloc(total + 1);
-    if (!resp) return false;
+    if (!resp)
+        return false;
 
     snprintf(resp, total + 1, "-> %s %s\n", id, body);
     bool ok = send_all(fd, resp, total);
@@ -188,7 +191,7 @@ static bool handle_request(int fd, char *line) {
 typedef struct {
     int client_fd;
     ReplServer *server;
-    char addr_str[64];  /* "HOST:PORT" of the connected client. */
+    char addr_str[64]; /* "HOST:PORT" of the connected client. */
 } ClientArg;
 
 static void *client_thread_fn(void *arg) {
@@ -239,19 +242,19 @@ static void *accept_loop(void *arg) {
     while (!srv->shutdown) {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
-        int client_fd = accept(srv->listen_fd,
-                               (struct sockaddr *)&client_addr, &addr_len);
+        int client_fd = accept(srv->listen_fd, (struct sockaddr *)&client_addr, &addr_len);
 
         if (client_fd < 0) {
             /* If we're shutting down, the listen socket was closed. */
-            if (srv->shutdown) break;
+            if (srv->shutdown)
+                break;
             /* Transient error — keep going. */
             continue;
         }
 
         /* Set a recv timeout on the client socket so threads don't
          * block forever if a client goes silent. */
-        struct timeval tv = { .tv_sec = 30, .tv_usec = 0 };
+        struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
         setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
         ClientArg *ca = malloc(sizeof(ClientArg));
@@ -265,8 +268,7 @@ static void *accept_loop(void *arg) {
         /* Format client address for logging. */
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, ip, sizeof(ip));
-        snprintf(ca->addr_str, sizeof(ca->addr_str), "%s:%u",
-                 ip, ntohs(client_addr.sin_port));
+        snprintf(ca->addr_str, sizeof(ca->addr_str), "%s:%u", ip, ntohs(client_addr.sin_port));
 
         pthread_t tid;
         if (pthread_create(&tid, NULL, client_thread_fn, ca) != 0) {
@@ -285,11 +287,11 @@ static void *accept_loop(void *arg) {
  * Public API
  * ============================================================ */
 
-ReplServer *repl_server_start(const char *host, uint16_t port,
-                              const char **err_out) {
+ReplServer *repl_server_start(const char *host, uint16_t port, const char **err_out) {
     ReplServer *srv = calloc(1, sizeof(ReplServer));
     if (!srv) {
-        if (err_out) *err_out = "out of memory";
+        if (err_out)
+            *err_out = "out of memory";
         return NULL;
     }
     srv->listen_fd = -1;
@@ -297,7 +299,8 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
     /* Create TCP socket. */
     srv->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (srv->listen_fd < 0) {
-        if (err_out) *err_out = "failed to create socket";
+        if (err_out)
+            *err_out = "failed to create socket";
         free(srv);
         return NULL;
     }
@@ -312,14 +315,16 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
         .sin_port = htons(port),
     };
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
-        if (err_out) *err_out = "invalid host address";
+        if (err_out)
+            *err_out = "invalid host address";
         close(srv->listen_fd);
         free(srv);
         return NULL;
     }
 
     if (bind(srv->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        if (err_out) *err_out = "failed to bind";
+        if (err_out)
+            *err_out = "failed to bind";
         close(srv->listen_fd);
         free(srv);
         return NULL;
@@ -327,7 +332,8 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
 
     /* Listen with a modest backlog. */
     if (listen(srv->listen_fd, 16) < 0) {
-        if (err_out) *err_out = "failed to listen";
+        if (err_out)
+            *err_out = "failed to listen";
         close(srv->listen_fd);
         free(srv);
         return NULL;
@@ -336,9 +342,9 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
     /* Retrieve the actual port (important for ephemeral port 0). */
     struct sockaddr_in bound_addr;
     socklen_t bound_len = sizeof(bound_addr);
-    if (getsockname(srv->listen_fd, (struct sockaddr *)&bound_addr,
-                    &bound_len) < 0) {
-        if (err_out) *err_out = "failed to get socket name";
+    if (getsockname(srv->listen_fd, (struct sockaddr *)&bound_addr, &bound_len) < 0) {
+        if (err_out)
+            *err_out = "failed to get socket name";
         close(srv->listen_fd);
         free(srv);
         return NULL;
@@ -347,7 +353,8 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
 
     /* Start the accept loop thread. */
     if (pthread_create(&srv->accept_thread, NULL, accept_loop, srv) != 0) {
-        if (err_out) *err_out = "failed to create accept thread";
+        if (err_out)
+            *err_out = "failed to create accept thread";
         close(srv->listen_fd);
         free(srv);
         return NULL;
@@ -357,12 +364,14 @@ ReplServer *repl_server_start(const char *host, uint16_t port,
 }
 
 uint16_t repl_server_port(const ReplServer *server) {
-    if (!server) return 0;
+    if (!server)
+        return 0;
     return server->port;
 }
 
 void repl_server_stop(ReplServer *server) {
-    if (!server) return;
+    if (!server)
+        return;
 
     /* Signal shutdown and close the listening socket to unblock accept(). */
     server->shutdown = true;
@@ -380,7 +389,7 @@ void repl_server_stop(ReplServer *server) {
      * in recv and the 30s timeout fires). For tests, a short sleep
      * gives in-flight clients time to finish.
      */
-    usleep(100000);  /* 100ms grace period for client threads. */
+    usleep(100000); /* 100ms grace period for client threads. */
 
     free(server);
 }

@@ -23,8 +23,8 @@
 #ifndef CUTLET_REPL_SERVER_H
 #define CUTLET_REPL_SERVER_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /*
  * Opaque handle for a running TCP REPL server.
@@ -40,8 +40,7 @@ typedef struct ReplServer ReplServer;
  * Returns a server handle on success, NULL on failure.
  * On failure, if err_out is non-NULL, a static error message is stored.
  */
-ReplServer *repl_server_start(const char *host, uint16_t port,
-                              const char **err_out);
+ReplServer *repl_server_start(const char *host, uint16_t port, const char **err_out);
 
 /*
  * Get the port the server is actually listening on.

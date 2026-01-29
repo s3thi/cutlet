@@ -17,14 +17,14 @@
 #include "repl.h"
 #include "repl_server.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include <unistd.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <unistd.h>
 
 /* Maximum line length for input */
 #define MAX_LINE_LEN 4096
@@ -43,7 +43,8 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  repl                      Start the REPL (read-eval-print loop)\n");
     fprintf(stderr, "  repl --listen [HOST:PORT]  Start a TCP REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
-    fprintf(stderr, "  repl --connect [HOST:PORT] Connect to a running REPL server (default: %s:%d)\n",
+    fprintf(stderr,
+            "  repl --connect [HOST:PORT] Connect to a running REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
 }
 
@@ -99,36 +100,42 @@ static int run_repl(void) {
  * On success, writes the host into host_buf (must be at least host_buf_len)
  * and the port into *port_out.
  */
-static bool parse_host_port(const char *arg, char *host_buf,
-                            size_t host_buf_len, uint16_t *port_out) {
+static bool parse_host_port(const char *arg, char *host_buf, size_t host_buf_len,
+                            uint16_t *port_out) {
     /* No arg or empty string: use all defaults. */
     if (!arg || *arg == '\0') {
-        if (strlen(DEFAULT_HOST) >= host_buf_len) return false;
+        if (strlen(DEFAULT_HOST) >= host_buf_len)
+            return false;
         strcpy(host_buf, DEFAULT_HOST);
         *port_out = DEFAULT_PORT;
         return true;
     }
 
     const char *colon = strrchr(arg, ':');
-    if (!colon) return false;
+    if (!colon)
+        return false;
 
     /* ":PORT" form — default host. */
     if (colon == arg) {
-        if (strlen(DEFAULT_HOST) >= host_buf_len) return false;
+        if (strlen(DEFAULT_HOST) >= host_buf_len)
+            return false;
         strcpy(host_buf, DEFAULT_HOST);
     } else {
         size_t host_len = (size_t)(colon - arg);
-        if (host_len >= host_buf_len) return false;
+        if (host_len >= host_buf_len)
+            return false;
         memcpy(host_buf, arg, host_len);
         host_buf[host_len] = '\0';
     }
 
     const char *port_str = colon + 1;
-    if (*port_str == '\0') return false;
+    if (*port_str == '\0')
+        return false;
 
     char *end;
     long port_val = strtol(port_str, &end, 10);
-    if (*end != '\0' || port_val < 0 || port_val > 65535) return false;
+    if (*end != '\0' || port_val < 0 || port_val > 65535)
+        return false;
 
     *port_out = (uint16_t)port_val;
     return true;
@@ -225,7 +232,7 @@ static int run_connect(const char *addr) {
     }
 
     /* Set a recv timeout so we don't hang forever. */
-    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     int is_tty = isatty(fileno(stdin));
@@ -238,7 +245,8 @@ static int run_connect(const char *addr) {
             fflush(stdout);
         }
 
-        if (fgets(line, sizeof(line), stdin) == NULL) break;
+        if (fgets(line, sizeof(line), stdin) == NULL)
+            break;
 
         /* Strip trailing newline/CRLF. */
         size_t len = strlen(line);
@@ -250,7 +258,8 @@ static int run_connect(const char *addr) {
         req_id++;
         char sendbuf[MAX_LINE_LEN + 32];
         int slen = snprintf(sendbuf, sizeof(sendbuf), "%lu %s\n", req_id, line);
-        if (slen < 0 || (size_t)slen >= sizeof(sendbuf)) continue;
+        if (slen < 0 || (size_t)slen >= sizeof(sendbuf))
+            continue;
 
         /* Send request. */
         ssize_t sent = send(fd, sendbuf, (size_t)slen, 0);
@@ -271,7 +280,8 @@ static int run_connect(const char *addr) {
                 return 1;
             }
             rpos++;
-            if (recvbuf[rpos - 1] == '\n') break;
+            if (recvbuf[rpos - 1] == '\n')
+                break;
         }
         recvbuf[rpos] = '\0';
 
@@ -284,14 +294,17 @@ static int run_connect(const char *addr) {
         if (strncmp(body, "-> ", 3) == 0) {
             body += 3;
             /* Skip the ID (digits). */
-            while (*body && *body != ' ' && *body != '\n') body++;
+            while (*body && *body != ' ' && *body != '\n')
+                body++;
             /* Skip the space after ID. */
-            if (*body == ' ') body++;
+            if (*body == ' ')
+                body++;
         }
 
         /* Remove trailing newline for clean output. */
         size_t blen = strlen(body);
-        if (blen > 0 && body[blen - 1] == '\n') body[blen - 1] = '\0';
+        if (blen > 0 && body[blen - 1] == '\n')
+            body[blen - 1] = '\0';
 
         puts(body);
         fflush(stdout);

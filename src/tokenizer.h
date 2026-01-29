@@ -17,8 +17,8 @@
 #ifndef CUTLET_TOKENIZER_H
 #define CUTLET_TOKENIZER_H
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Token types for the minimal v0 tokenizer */
 typedef enum {
@@ -44,11 +44,11 @@ typedef enum {
  */
 typedef struct {
     TokenType type;
-    const char *value;   /* Token value (owned by tokenizer) */
-    size_t value_len;    /* Length of value */
-    size_t pos;          /* 0-indexed position in input */
-    size_t line;         /* 1-indexed line number */
-    size_t col;          /* 1-indexed column number */
+    const char *value; /* Token value (owned by tokenizer) */
+    size_t value_len;  /* Length of value */
+    size_t pos;        /* 0-indexed position in input */
+    size_t line;       /* 1-indexed line number */
+    size_t col;        /* 1-indexed column number */
 } Token;
 
 /*
