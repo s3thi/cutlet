@@ -119,6 +119,45 @@ lint:
 	@test -f compile_commands.json || { echo "Error: compile_commands.json not found. Run 'make compile-db' first."; exit 1; }
 	$(CLANG_TIDY) $(LINT_FILES) -p . --extra-arg=-isysroot --extra-arg=$(shell xcrun --show-sdk-path)
 
+# ---------- Sanitizer builds (ASan + UBSan, LSan via ASan) ----------
+
+# Separate build directory so sanitizer flags don't mix with regular objects.
+SANITIZE_BUILD_DIR = build-sanitize
+SANITIZE_CFLAGS = -std=c23 -Wall -Wextra -Wpedantic -g -O1 \
+	-fno-omit-frame-pointer \
+	-fsanitize=address,undefined \
+	-fno-sanitize-recover=all
+SANITIZE_LDFLAGS = -fsanitize=address,undefined
+
+SANITIZE_BIN = $(SANITIZE_BUILD_DIR)/cutlet
+SANITIZE_TEST_TOKENIZER_BIN = $(SANITIZE_BUILD_DIR)/test_tokenizer
+SANITIZE_TEST_REPL_BIN = $(SANITIZE_BUILD_DIR)/test_repl
+SANITIZE_TEST_REPL_SERVER_BIN = $(SANITIZE_BUILD_DIR)/test_repl_server
+
+$(SANITIZE_BUILD_DIR):
+	mkdir -p $(SANITIZE_BUILD_DIR)
+
+# Build sanitizer-instrumented binaries.
+$(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+
+$(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
+
+$(SANITIZE_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+
+$(SANITIZE_TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+
+# Run the full test suite under sanitizers.
+.PHONY: test-sanitize
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_BIN)
+	./$(SANITIZE_TEST_TOKENIZER_BIN)
+	./$(SANITIZE_TEST_REPL_BIN)
+	./$(SANITIZE_TEST_REPL_SERVER_BIN)
+	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
+
 # ---------- Combined checks ----------
 
 # Required pre-commit checks.
@@ -128,7 +167,7 @@ check: format-check lint
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) compile_commands.json
+	rm -rf $(BUILD_DIR) $(SANITIZE_BUILD_DIR) compile_commands.json
 
 # Help
 .PHONY: help
@@ -146,6 +185,7 @@ help:
 	@echo "  format-check  - Check formatting (fails on diff)"
 	@echo "  compile-db    - Generate compile_commands.json (requires bear)"
 	@echo "  lint          - Run clang-tidy static analysis (requires compile-db)"
+	@echo "  test-sanitize - Run tests under ASan+UBSan+LSan"
 	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"

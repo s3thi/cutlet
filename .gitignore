@@ -1,5 +1,6 @@
 # Build outputs
 build/
+build-sanitize/
 *.o
 *.a
 *.so
@@ -10,6 +11,9 @@ build/
 # macOS
 .DS_Store
 *.dSYM/
+
+# Caches
+.cache/
 
 # Editor/IDE
 .vscode/
