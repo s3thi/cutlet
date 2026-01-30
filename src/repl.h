@@ -31,4 +31,19 @@
  */
 char *repl_format_line(const char *input);
 
+/*
+ * Format a single line of input into an AST REPL response.
+ *
+ * Uses the parser to produce AST output instead of raw tokens.
+ *
+ * Return format:
+ * - On successful parse: "AST [TYPE value]"
+ * - On parse error: "ERR line:col message"
+ * - On empty/whitespace input: "AST"
+ *
+ * The caller is responsible for freeing the returned string.
+ * Returns NULL on allocation failure.
+ */
+char *repl_format_line_ast(const char *input);
+
 #endif /* CUTLET_REPL_H */

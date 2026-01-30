@@ -13,7 +13,7 @@ TEST_DIR = tests
 BUILD_DIR = build
 
 # Library source files (everything except main.c)
-LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
 
 # Main binary
@@ -26,6 +26,9 @@ TEST_TOKENIZER_BIN = $(BUILD_DIR)/test_tokenizer
 
 TEST_REPL_SRC = $(TEST_DIR)/test_repl.c
 TEST_REPL_BIN = $(BUILD_DIR)/test_repl
+
+TEST_PARSER_SRC = $(TEST_DIR)/test_parser.c
+TEST_PARSER_BIN = $(BUILD_DIR)/test_parser
 
 TEST_REPL_SERVER_SRC = $(TEST_DIR)/test_repl_server.c
 TEST_REPL_SERVER_BIN = $(BUILD_DIR)/test_repl_server
@@ -48,7 +51,7 @@ $(BIN): $(MAIN_SRC) $(LIB_SRCS) | $(BUILD_DIR)
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-repl-server test-cli
+test: test-tokenizer test-repl test-parser test-repl-server test-cli
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -59,6 +62,11 @@ test-tokenizer: $(TEST_TOKENIZER_BIN)
 .PHONY: test-repl
 test-repl: $(TEST_REPL_BIN)
 	./$(TEST_REPL_BIN)
+
+# Run parser tests
+.PHONY: test-parser
+test-parser: $(TEST_PARSER_BIN)
+	./$(TEST_PARSER_BIN)
 
 # Run REPL server tests
 .PHONY: test-repl-server
@@ -73,6 +81,10 @@ test-cli: $(BIN)
 # Build tokenizer test binary
 $(TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(LDFLAGS)
+
+# Build parser test binary
+$(TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(LDFLAGS)
 
 # Build REPL test binary
 $(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
@@ -100,7 +112,7 @@ format-check:
 # ---------- Compile database ----------
 
 # All source files that contribute to the compile database.
-ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_REPL_SERVER_SRC)
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_REPL_SERVER_SRC)
 
 # Auto-generate compile_commands.json when missing or when any source file changes.
 compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
@@ -137,6 +149,7 @@ SANITIZE_LDFLAGS = -fsanitize=address,undefined
 SANITIZE_BIN = $(SANITIZE_BUILD_DIR)/cutlet
 SANITIZE_TEST_TOKENIZER_BIN = $(SANITIZE_BUILD_DIR)/test_tokenizer
 SANITIZE_TEST_REPL_BIN = $(SANITIZE_BUILD_DIR)/test_repl
+SANITIZE_TEST_PARSER_BIN = $(SANITIZE_BUILD_DIR)/test_parser
 SANITIZE_TEST_REPL_SERVER_BIN = $(SANITIZE_BUILD_DIR)/test_repl_server
 
 $(SANITIZE_BUILD_DIR):
@@ -149,6 +162,9 @@ $(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
 $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
 
+$(SANITIZE_TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
+
 $(SANITIZE_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
 
@@ -157,9 +173,10 @@ $(SANITIZE_TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(SANITI
 
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize
-test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_BIN)
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_BIN)
 	./$(SANITIZE_TEST_TOKENIZER_BIN)
 	./$(SANITIZE_TEST_REPL_BIN)
+	./$(SANITIZE_TEST_PARSER_BIN)
 	./$(SANITIZE_TEST_REPL_SERVER_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
 

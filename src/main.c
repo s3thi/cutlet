@@ -37,7 +37,8 @@
  * Print usage information.
  */
 static void print_usage(const char *prog) {
-    fprintf(stderr, "Usage: %s repl [--listen [HOST:PORT] | --connect [HOST:PORT]]\n", prog);
+    fprintf(stderr, "Usage: %s repl [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
+            prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  repl                      Start the REPL (read-eval-print loop)\n");
@@ -53,7 +54,7 @@ static void print_usage(const char *prog) {
  * Reads lines from stdin, formats each, prints result to stdout.
  * Returns 0 on success (EOF), 1 on error.
  */
-static int run_repl(void) {
+static int run_repl(bool ast_mode) {
     char line[MAX_LINE_LEN];
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
@@ -69,7 +70,7 @@ static int run_repl(void) {
         }
 
         /* Format and print result */
-        char *result = repl_format_line(line);
+        char *result = ast_mode ? repl_format_line_ast(line) : repl_format_line(line);
         if (result == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
             return 1;
@@ -325,18 +326,26 @@ int main(int argc, char *argv[]) {
     const char *cmd = argv[1];
 
     if (strcmp(cmd, "repl") == 0) {
+        /* Check for --ast flag */
+        bool ast_mode = false;
+        int arg_idx = 2;
+        if (arg_idx < argc && strcmp(argv[arg_idx], "--ast") == 0) {
+            ast_mode = true;
+            arg_idx++;
+        }
+
         /* Check for --listen or --connect flags. */
-        if (argc >= 3 && strcmp(argv[2], "--listen") == 0) {
-            return run_listen(argc >= 4 ? argv[3] : NULL);
+        if (arg_idx < argc && strcmp(argv[arg_idx], "--listen") == 0) {
+            return run_listen(arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
         }
-        if (argc >= 3 && strcmp(argv[2], "--connect") == 0) {
-            return run_connect(argc >= 4 ? argv[3] : NULL);
+        if (arg_idx < argc && strcmp(argv[arg_idx], "--connect") == 0) {
+            return run_connect(arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
         }
-        if (argc == 2) {
-            return run_repl();
+        if (arg_idx == argc) {
+            return run_repl(ast_mode);
         }
         /* Unknown repl flag */
-        fprintf(stderr, "Unknown repl option: %s\n", argv[2]);
+        fprintf(stderr, "Unknown repl option: %s\n", argv[arg_idx]);
         print_usage(argv[0]);
         return 1;
     } else if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {

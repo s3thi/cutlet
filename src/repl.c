@@ -11,6 +11,7 @@
  */
 
 #include "repl.h"
+#include "parser.h"
 #include "tokenizer.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -222,4 +223,38 @@ char *repl_format_line(const char *input) {
 
     tokenizer_destroy(tok);
     return strbuf_take(&buf);
+}
+
+char *repl_format_line_ast(const char *input) {
+    /* Handle NULL as empty */
+    if (input == NULL) {
+        input = "";
+    }
+
+    /* Check for whitespace-only / empty input: return "AST" */
+    const char *p = input;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+        p++;
+    }
+    if (*p == '\0') {
+        char *result = malloc(4);
+        if (!result)
+            return NULL;
+        memcpy(result, "AST", 4);
+        return result;
+    }
+
+    AstNode *node = NULL;
+    ParseError err;
+
+    if (parser_parse_single(input, &node, &err)) {
+        char *formatted = ast_format(node);
+        ast_free(node);
+        return formatted;
+    }
+
+    /* Format error: ERR line:col message */
+    char buf[320];
+    snprintf(buf, sizeof(buf), "ERR %zu:%zu %s", err.line, err.col, err.message);
+    return strdup(buf);
 }

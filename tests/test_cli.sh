@@ -17,8 +17,9 @@ test_output() {
     name="$1"
     input="$2"
     expected="$3"
+    extra_flag="$4"
 
-    actual=$(echo "$input" | "$CUTLET" repl)
+    actual=$(echo "$input" | "$CUTLET" repl $extra_flag)
 
     if [ "$actual" = "$expected" ]; then
         echo "  PASS: $name"
@@ -37,8 +38,9 @@ test_error_prefix() {
     name="$1"
     input="$2"
     prefix="$3"
+    extra_flag="$4"
 
-    actual=$(echo "$input" | "$CUTLET" repl)
+    actual=$(echo "$input" | "$CUTLET" repl $extra_flag)
 
     case "$actual" in
         "$prefix"*)
@@ -100,6 +102,17 @@ else
     echo "$multi_result"
     FAIL=$((FAIL + 1))
 fi
+
+echo
+echo "AST mode (--ast):"
+test_output "ast number" "42" "AST [NUMBER 42]" "--ast"
+test_output "ast string" '"hello"' "AST [STRING hello]" "--ast"
+test_output "ast ident" "foo" "AST [IDENT foo]" "--ast"
+test_output "ast empty" "" "AST" "--ast"
+test_output "ast whitespace" "   " "AST" "--ast"
+test_error_prefix "ast operator error" "+" "ERR 1:1 " "--ast"
+test_error_prefix "ast extra token error" "foo bar" "ERR 1:" "--ast"
+test_error_prefix "ast tokenizer error" "42foo" "ERR 1:1 " "--ast"
 
 echo
 echo "CLI arguments:"
