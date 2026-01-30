@@ -1,22 +1,18 @@
 /*
  * tokenizer.c - Cutlet tokenizer implementation
  *
- * Implements the v0 tokenizer with:
+ * Implements the simplified tokenizer with Python/Ruby-style rules:
  * - NUMBER: integer literals (digits only, no negatives)
- * - STRING: double-quoted strings (no escapes)
- * - IDENT: ASCII letter start, letters/digits continue, symbol sandwiches
- *          between ASCII letters are part of the identifier
- * - OPERATOR: symbol chars delimited by whitespace (or SOI/EOI)
+ * - STRING: double-quoted strings (no escapes, no adjacency error)
+ * - IDENT: [A-Za-z_][A-Za-z0-9_]* (ASCII only, no symbol sandwiches)
+ * - OPERATOR: one or more symbol chars (no whitespace delimiter required)
  *
  * Key rules:
- * - Symbol char: anything that is not whitespace, ASCII letter, digit, or '"'
- * - In an identifier, symbols can appear between letters (sandwich).
- *   After a symbol run, the next char must be an ASCII letter (not digit).
- *   Before a symbol run, the previous char must be an ASCII letter (not digit).
- * - Operators are symbol runs preceded by whitespace/SOI and followed by whitespace/EOI.
- * - Numbers must be followed by whitespace or EOF.
- * - Strings must be followed by whitespace or EOF.
- * - Errors and EOF are sticky.
+ * - Symbol char: anything that is not whitespace, ASCII letter, digit, '_', or '"'
+ * - Underscore is an ident-start and ident-continue character (not a symbol)
+ * - Tokens may be adjacent without whitespace (Python/Ruby style)
+ * - The only adjacency error: number followed by ident-start char [A-Za-z_]
+ * - Errors and EOF are sticky
  */
 
 #include "tokenizer.h"
@@ -47,10 +43,6 @@ struct Tokenizer {
     /* Sticky state flags */
     bool at_eof;
     bool at_error;
-
-    /* Whether whitespace (or SOI) preceded the current token position.
-     * Set by skip_whitespace or at start of input. */
-    bool had_whitespace;
 };
 
 /* ============================================================
@@ -63,23 +55,32 @@ static bool is_ascii_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A'
 
 static bool is_whitespace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
+/* Ident start: ASCII letter or underscore */
+static bool is_ident_start(char c) { return is_ascii_letter(c) || c == '_'; }
+
+/* Ident continue: ASCII letter, digit, or underscore */
+static bool is_ident_continue(char c) {
+    return is_ascii_letter(c) || is_ascii_digit(c) || c == '_';
+}
+
 /*
  * A symbol char is anything that is not whitespace, not ASCII letter,
- * not ASCII digit, and not '"'. This includes _, -, +, *, /, @, #, etc.
- * We only consider ASCII bytes here; non-ASCII (high bit set) bytes are
- * also treated as symbol chars for now (they'll typically be part of
- * UTF-8 sequences which are not valid identifier starts).
+ * not ASCII digit, not '_', and not '"'. This differs from the old tokenizer
+ * in that underscore is no longer a symbol — it's part of identifiers.
+ * Non-ASCII bytes are treated as symbol chars for now.
  */
 static bool is_symbol_char(char c) {
+    if (c == '\0')
+        return false;
     if (is_whitespace(c))
         return false;
     if (is_ascii_letter(c))
         return false;
     if (is_ascii_digit(c))
         return false;
-    if (c == '"')
+    if (c == '_')
         return false;
-    if (c == '\0')
+    if (c == '"')
         return false;
     return true;
 }
@@ -134,7 +135,6 @@ Tokenizer *tokenizer_create(const char *input) {
     tok->error_msg[0] = '\0';
     tok->at_eof = false;
     tok->at_error = false;
-    tok->had_whitespace = true; /* SOI counts as whitespace */
 
     return tok;
 }
@@ -194,8 +194,12 @@ static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_
 }
 
 /*
- * Read a number token (digits only, no negatives).
+ * Read a number token (digits only).
  * Called when current char is a digit.
+ *
+ * After consuming digits, the only error is if the next char is an
+ * ident-start character (letter or underscore). All other adjacency
+ * (operator, string, EOF, whitespace) is allowed.
  */
 static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                         size_t start_col) {
@@ -209,9 +213,9 @@ static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
 
     size_t value_len = tok->pos - value_start;
 
-    /* After consuming digits, next char must be whitespace or EOF */
-    if (tok->pos < tok->input_len && !is_whitespace(tok->input[tok->pos])) {
-        snprintf(tok->error_msg, MAX_ERROR_MSG, "adjacent tokens without whitespace");
+    /* Error if next char is an ident-start character (letter or underscore) */
+    if (tok->pos < tok->input_len && is_ident_start(tok->input[tok->pos])) {
+        snprintf(tok->error_msg, MAX_ERROR_MSG, "number followed by identifier character");
         set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
         return true;
     }
@@ -239,6 +243,8 @@ static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
 /*
  * Read a string token (double-quoted, no escapes).
  * Called when current char is '"'.
+ *
+ * No adjacency error after the closing quote — any token may follow.
  */
 static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                         size_t start_col) {
@@ -259,12 +265,7 @@ static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
             tok->pos++;
             tok->col++;
 
-            /* After closing quote, next char must be whitespace or EOF */
-            if (tok->pos < tok->input_len && !is_whitespace(tok->input[tok->pos])) {
-                snprintf(tok->error_msg, MAX_ERROR_MSG, "adjacent tokens without whitespace");
-                set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
-                return true;
-            }
+            /* No adjacency check — any token may follow a string */
 
             /* Copy content to buffer */
             if (!ensure_value_buf(tok, content_len + 1)) {
@@ -304,84 +305,29 @@ static bool read_string(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
 
 /*
  * Read an identifier token.
- * Called when current char is an ASCII letter.
+ * Called when current char is an ident-start char (letter or underscore).
  *
- * Identifier structure:
- * - Starts with ASCII letter
- * - Continues with letters and digits freely
- * - When a symbol char is encountered:
- *   - Previous char must have been an ASCII letter (not digit)
- *   - Consume the entire run of symbol chars
- *   - Next char must be an ASCII letter (not digit, not ws, not EOF)
- *   - If either check fails, emit error
+ * Simple rule: [A-Za-z_][A-Za-z0-9_]*
+ * No symbol sandwich logic. Identifier ends when a non-ident-continue
+ * character is encountered.
  */
 static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                        size_t start_col) {
     size_t value_start = tok->pos;
 
-    /* Track what kind of char we last consumed (letter or digit)
-     * to enforce the sandwich rule */
-    char prev_kind = 'L'; /* 'L' = letter, 'D' = digit */
-
-    /* Consume the first letter (already validated by caller) */
+    /* Consume ident-start (already validated by caller) */
     tok->pos++;
     tok->col++;
 
-    while (tok->pos < tok->input_len) {
-        char c = tok->input[tok->pos];
-
-        if (is_ascii_letter(c)) {
-            prev_kind = 'L';
-            tok->pos++;
-            tok->col++;
-            continue;
-        }
-
-        if (is_ascii_digit(c)) {
-            prev_kind = 'D';
-            tok->pos++;
-            tok->col++;
-            continue;
-        }
-
-        if (c == '"') {
-            /* Quote after ident without whitespace => error */
-            snprintf(tok->error_msg, MAX_ERROR_MSG, "adjacent tokens without whitespace");
-            set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
-            return true;
-        }
-
-        if (is_symbol_char(c)) {
-            /* Symbol sandwich: previous must be letter */
-            if (prev_kind != 'L') {
-                snprintf(tok->error_msg, MAX_ERROR_MSG, "symbol after digit in identifier");
-                set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
-                return true;
-            }
-
-            /* Consume the entire run of symbol chars */
-            while (tok->pos < tok->input_len && is_symbol_char(tok->input[tok->pos])) {
-                tok->pos++;
-                tok->col++;
-            }
-
-            /* After symbol run, next char must be an ASCII letter */
-            if (tok->pos >= tok->input_len || !is_ascii_letter(tok->input[tok->pos])) {
-                snprintf(tok->error_msg, MAX_ERROR_MSG,
-                         "symbol not followed by letter in identifier");
-                set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
-                return true;
-            }
-
-            /* The next iteration will consume the letter */
-            continue;
-        }
-
-        /* Whitespace or other boundary - end of identifier */
-        break;
+    /* Consume ident-continue characters */
+    while (tok->pos < tok->input_len && is_ident_continue(tok->input[tok->pos])) {
+        tok->pos++;
+        tok->col++;
     }
 
     size_t value_len = tok->pos - value_start;
+
+    /* No adjacency check — any token may follow an identifier */
 
     /* Copy value to buffer */
     if (!ensure_value_buf(tok, value_len + 1)) {
@@ -405,8 +351,8 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
 
 /*
  * Read an operator token.
- * Called when current char is a symbol char preceded by whitespace/SOI.
- * Consumes a run of symbol chars. Next char must be whitespace or EOF.
+ * Called when current char is a symbol char.
+ * Consumes a run of symbol chars. No whitespace delimiter required.
  */
 static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                           size_t start_col) {
@@ -420,12 +366,7 @@ static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t s
 
     size_t value_len = tok->pos - value_start;
 
-    /* After symbol run, next must be whitespace or EOF */
-    if (tok->pos < tok->input_len && !is_whitespace(tok->input[tok->pos])) {
-        snprintf(tok->error_msg, MAX_ERROR_MSG, "operator not followed by whitespace");
-        set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
-        return true;
-    }
+    /* No adjacency check — any token may follow an operator */
 
     /* Copy value to buffer */
     if (!ensure_value_buf(tok, value_len + 1)) {
@@ -475,9 +416,8 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
         return true;
     }
 
-    /* Skip whitespace and record whether we skipped any */
-    size_t ws_skipped = skip_whitespace(tok);
-    bool preceded_by_whitespace = tok->had_whitespace || ws_skipped > 0;
+    /* Skip whitespace */
+    skip_whitespace(tok);
 
     /* Check for EOF */
     if (tok->pos >= tok->input_len) {
@@ -498,9 +438,6 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
 
     char c = tok->input[tok->pos];
 
-    /* After producing a token, the next call won't have SOI whitespace */
-    tok->had_whitespace = false;
-
     /* String */
     if (c == '"') {
         return read_string(tok, out, token_start_pos, token_start_line, token_start_col);
@@ -511,21 +448,14 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
         return read_number(tok, out, token_start_pos, token_start_line, token_start_col);
     }
 
-    /* Identifier (ASCII letter) */
-    if (is_ascii_letter(c)) {
+    /* Identifier (letter or underscore) */
+    if (is_ident_start(c)) {
         return read_ident(tok, out, token_start_pos, token_start_line, token_start_col);
     }
 
-    /* Symbol char: could be operator (if preceded by whitespace) or error */
+    /* Symbol char => operator (no whitespace requirement) */
     if (is_symbol_char(c)) {
-        if (preceded_by_whitespace) {
-            return read_operator(tok, out, token_start_pos, token_start_line, token_start_col);
-        } else {
-            /* Symbol not preceded by whitespace and not part of ident */
-            snprintf(tok->error_msg, MAX_ERROR_MSG, "unexpected symbol character");
-            set_error(tok, out, tok->error_msg, token_start_pos, token_start_line, token_start_col);
-            return true;
-        }
+        return read_operator(tok, out, token_start_pos, token_start_line, token_start_col);
     }
 
     /* Anything else (shouldn't normally reach here with ASCII input) */
@@ -545,7 +475,6 @@ bool tokenizer_reset(Tokenizer *tok) {
     tok->at_eof = false;
     tok->at_error = false;
     tok->error_msg[0] = '\0';
-    tok->had_whitespace = true; /* SOI counts as whitespace */
 
     return true;
 }

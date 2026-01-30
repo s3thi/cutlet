@@ -182,12 +182,18 @@ TEST(test_single_ident_with_digits) {
 }
 
 TEST(test_single_ident_kebab_case) {
-    ASSERT(format_matches("kebab-case", "OK [IDENT kebab-case]"), "kebab-case");
+    /* kebab-case is now IDENT, OPERATOR, IDENT (no symbol sandwich) */
+    ASSERT(format_matches("kebab-case", "OK [IDENT kebab] [OPERATOR -] [IDENT case]"),
+           "kebab-case");
     PASS();
 }
 
 TEST(test_single_ident_multiple_hyphens) {
-    ASSERT(format_matches("a-b-c-d", "OK [IDENT a-b-c-d]"), "multiple hyphens");
+    /* a-b-c-d is now multiple tokens (no symbol sandwich) */
+    ASSERT(format_matches(
+               "a-b-c-d",
+               "OK [IDENT a] [OPERATOR -] [IDENT b] [OPERATOR -] [IDENT c] [OPERATOR -] [IDENT d]"),
+           "multiple hyphens");
     PASS();
 }
 
@@ -202,7 +208,9 @@ TEST(test_single_ident_mixed_case) {
 }
 
 TEST(test_single_ident_symbol_sandwich) {
-    ASSERT(format_matches("hello+world", "OK [IDENT hello+world]"), "symbol sandwich ident");
+    /* hello+world is now IDENT, OPERATOR, IDENT (no symbol sandwich) */
+    ASSERT(format_matches("hello+world", "OK [IDENT hello] [OPERATOR +] [IDENT world]"),
+           "no symbol sandwich");
     PASS();
 }
 
@@ -298,46 +306,35 @@ TEST(test_error_unterminated_string) {
     PASS();
 }
 
-TEST(test_error_adjacent_tokens_string_ident) {
-    char *result = repl_format_line("\"a\"foo");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "adjacent tokens should be error");
-    free(result);
+TEST(test_adjacent_tokens_string_ident) {
+    /* "a"foo is now valid: STRING, IDENT */
+    ASSERT(format_matches("\"a\"foo", "OK [STRING a] [IDENT foo]"),
+           "adjacent string+ident is valid");
     PASS();
 }
 
-TEST(test_error_adjacent_tokens_number_string) {
-    char *result = repl_format_line("42\"hi\"");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "adjacent number+string should be error");
-    free(result);
+TEST(test_adjacent_tokens_number_string) {
+    /* 42"hi" is now valid: NUMBER, STRING */
+    ASSERT(format_matches("42\"hi\"", "OK [NUMBER 42] [STRING hi]"),
+           "adjacent number+string is valid");
     PASS();
 }
 
-TEST(test_error_trailing_symbol) {
-    /* foo- : symbol at end of ident not followed by letter */
-    char *result = repl_format_line("foo-");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "trailing symbol should be error");
-    free(result);
+TEST(test_trailing_symbol) {
+    /* foo- is now valid: IDENT, OPERATOR */
+    ASSERT(format_matches("foo-", "OK [IDENT foo] [OPERATOR -]"), "trailing symbol is valid");
     PASS();
 }
 
-TEST(test_error_underscore_start) {
-    /* _foo: symbol at SOI, followed by non-whitespace => operator error */
-    char *result = repl_format_line("_foo");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "underscore start should be error");
-    free(result);
+TEST(test_underscore_start) {
+    /* _foo is now a valid identifier */
+    ASSERT(format_matches("_foo", "OK [IDENT _foo]"), "underscore start is valid ident");
     PASS();
 }
 
-TEST(test_error_negative_number) {
-    /* -10: symbol at SOI followed by digit, not whitespace => error */
-    char *result = repl_format_line("-10");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "negative number should be error");
-    free(result);
+TEST(test_negative_number) {
+    /* -10 is now valid: OPERATOR, NUMBER */
+    ASSERT(format_matches("-10", "OK [OPERATOR -] [NUMBER 10]"), "negative number is op+num");
     PASS();
 }
 
@@ -432,11 +429,11 @@ int main(void) {
 
     printf("\nError formatting:\n");
     RUN_TEST(test_error_unterminated_string);
-    RUN_TEST(test_error_adjacent_tokens_string_ident);
-    RUN_TEST(test_error_adjacent_tokens_number_string);
-    RUN_TEST(test_error_trailing_symbol);
-    RUN_TEST(test_error_underscore_start);
-    RUN_TEST(test_error_negative_number);
+    RUN_TEST(test_adjacent_tokens_string_ident);
+    RUN_TEST(test_adjacent_tokens_number_string);
+    RUN_TEST(test_trailing_symbol);
+    RUN_TEST(test_underscore_start);
+    RUN_TEST(test_negative_number);
     RUN_TEST(test_error_number_adjacent_ident);
 
     printf("\nEdge cases:\n");

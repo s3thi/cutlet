@@ -69,8 +69,8 @@ echo
 echo "Edge cases:"
 test_output "operator alone" "+" "OK [OPERATOR +]"
 test_output "minus operator" "-" "OK [OPERATOR -]"
-test_output "kebab-case" "kebab-case" "OK [IDENT kebab-case]"
-test_output "symbol sandwich" "hello+world" "OK [IDENT hello+world]"
+test_output "kebab-case" "kebab-case" "OK [IDENT kebab] [OPERATOR -] [IDENT case]"
+test_output "no symbol sandwich" "hello+world" "OK [IDENT hello] [OPERATOR +] [IDENT world]"
 test_output "empty string" '""' "OK [STRING ]"
 test_output "whitespace only" "   " "OK"
 test_output "operator between idents" "a + b" "OK [IDENT a] [OPERATOR +] [IDENT b]"
@@ -79,8 +79,8 @@ test_output "operator between numbers" "1 + 2" "OK [NUMBER 1] [OPERATOR +] [NUMB
 echo
 echo "Error cases:"
 test_error_prefix "unterminated string" '"hello' "ERR 1:1 "
-test_error_prefix "adjacent tokens string+ident" '"a"b' "ERR 1:1 "
-test_error_prefix "negative number error" "-10" "ERR 1:1 "
+test_output "adjacent string+ident" '"a"b' "OK [STRING a] [IDENT b]"
+test_output "negative number" "-10" "OK [OPERATOR -] [NUMBER 10]"
 test_error_prefix "number adjacent ident" "42foo" "ERR 1:1 "
 
 echo

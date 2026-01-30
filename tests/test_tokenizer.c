@@ -1,11 +1,13 @@
 /*
  * test_tokenizer.c - Tests for the Cutlet tokenizer
  *
- * Test coverage for the v0 tokenizer:
+ * Test coverage for the simplified tokenizer:
  * - NUMBER tokens (positive integers only, digits only)
  * - STRING tokens (double-quoted, no escapes)
- * - IDENT tokens (ASCII letters, digits, symbol sandwiches)
- * - OPERATOR tokens (symbol chars delimited by whitespace)
+ * - IDENT tokens (Python/Ruby style: [A-Za-z_][A-Za-z0-9_]*)
+ * - OPERATOR tokens (one or more symbol chars, no whitespace delimiter required)
+ * - Adjacency: tokens may be adjacent without whitespace
+ * - Only adjacency error: number followed by ident-start char
  * - Whitespace handling
  * - Error cases with position info
  *
@@ -241,6 +243,7 @@ TEST(test_string_multiple) {
 
 /* ============================================================
  * IDENT token tests
+ * Python/Ruby style: [A-Za-z_][A-Za-z0-9_]*
  * ============================================================ */
 
 TEST(test_ident_single_letter) {
@@ -333,19 +336,15 @@ TEST(test_ident_multiple) {
     PASS();
 }
 
-/* ============================================================
- * Identifier with symbol sandwich tests
- * Symbols between ASCII letters are part of the identifier.
- * ============================================================ */
-
-TEST(test_ident_symbol_sandwich_plus) {
-    /* hello+world => IDENT("hello+world") */
-    Tokenizer *tok = tokenizer_create("hello+world");
+/* Underscore-started identifiers (now valid) */
+TEST(test_ident_underscore_only) {
+    /* _ => IDENT("_") */
+    Tokenizer *tok = tokenizer_create("_");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello+world", 11), "expected IDENT 'hello+world'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "_", 1), "expected IDENT '_'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
@@ -354,35 +353,50 @@ TEST(test_ident_symbol_sandwich_plus) {
     PASS();
 }
 
-TEST(test_ident_symbol_sandwich_underscore) {
-    /* hello_world => IDENT("hello_world") */
-    Tokenizer *tok = tokenizer_create("hello_world");
+TEST(test_ident_underscore_start) {
+    /* _foo => IDENT("_foo") */
+    Tokenizer *tok = tokenizer_create("_foo");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello_world", 11), "expected IDENT 'hello_world'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "_foo", 4), "expected IDENT '_foo'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_ident_symbol_sandwich_complex) {
-    /* hello_-_world => IDENT("hello_-_world") */
-    Tokenizer *tok = tokenizer_create("hello_-_world");
+TEST(test_ident_trailing_underscore) {
+    /* foo_ => IDENT("foo_") */
+    Tokenizer *tok = tokenizer_create("foo_");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello_-_world", 13),
-                "expected IDENT 'hello_-_world'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo_", 4), "expected IDENT 'foo_'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_ident_letter_digit_letter) {
-    /* a_b2 => IDENT("a_b2") - symbol between letters, then digit at end */
+TEST(test_ident_dunder_init) {
+    /* __init__ => IDENT("__init__") */
+    Tokenizer *tok = tokenizer_create("__init__");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "__init__", 8), "expected IDENT '__init__'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_a_b2) {
+    /* a_b2 => IDENT("a_b2") - underscores are ident-continue */
     Tokenizer *tok = tokenizer_create("a_b2");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -394,56 +408,103 @@ TEST(test_ident_letter_digit_letter) {
     PASS();
 }
 
-TEST(test_ident_symbol_sandwich_hyphen) {
-    /* kebab-case => IDENT("kebab-case") */
+TEST(test_ident_ab_12) {
+    /* ab_12 => IDENT("ab_12") - underscores and digits are ident-continue */
+    Tokenizer *tok = tokenizer_create("ab_12");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "ab_12", 5), "expected IDENT 'ab_12'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
+ * Former symbol sandwich tests - now produce multiple tokens
+ * ============================================================ */
+
+TEST(test_no_sandwich_plus) {
+    /* hello+world => IDENT("hello"), OPERATOR("+"), IDENT("world") */
+    Tokenizer *tok = tokenizer_create("hello+world");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello", 5), "expected IDENT 'hello'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "world", 5), "expected IDENT 'world'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_no_sandwich_hyphen) {
+    /* kebab-case => IDENT("kebab"), OPERATOR("-"), IDENT("case") */
     Tokenizer *tok = tokenizer_create("kebab-case");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab-case", 10), "expected IDENT 'kebab-case'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab", 5), "expected IDENT 'kebab'");
 
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_ident_symbol_sandwich_multiple_hyphens) {
-    /* my-var-name => IDENT("my-var-name") */
-    Tokenizer *tok = tokenizer_create("my-var-name");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "my-var-name", 11), "expected IDENT 'my-var-name'");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "case", 4), "expected IDENT 'case'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_ident_symbol_sandwich_single_chars) {
-    /* a-b-c => IDENT("a-b-c") */
+TEST(test_no_sandwich_multiple_hyphens) {
+    /* a-b-c => IDENT, OP, IDENT, OP, IDENT */
     Tokenizer *tok = tokenizer_create("a-b-c");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a-b-c", 5), "expected IDENT 'a-b-c'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "c", 1), "expected IDENT 'c'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_ident_multiple_sandwich) {
-    /* foo-bar baz-qux => two idents */
-    Tokenizer *tok = tokenizer_create("foo-bar baz-qux");
+TEST(test_no_sandwich_complex) {
+    /* hello_-_world => IDENT("hello_"), OPERATOR("-"), IDENT("_world") */
+    Tokenizer *tok = tokenizer_create("hello_-_world");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo-bar", 7), "expected IDENT 'foo-bar'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "hello_", 6), "expected IDENT 'hello_'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "baz-qux", 7), "expected IDENT 'baz-qux'");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "_world", 6), "expected IDENT '_world'");
 
     tokenizer_destroy(tok);
     PASS();
@@ -451,7 +512,7 @@ TEST(test_ident_multiple_sandwich) {
 
 /* ============================================================
  * OPERATOR token tests
- * Symbol chars surrounded by whitespace (or SOI/EOI) => OPERATOR
+ * Symbol chars => OPERATOR. No whitespace delimiter required.
  * ============================================================ */
 
 TEST(test_operator_simple) {
@@ -496,7 +557,7 @@ TEST(test_operator_between_numbers) {
 }
 
 TEST(test_operator_multi_symbol) {
-    /* a +-XX b => IDENT, OPERATOR("+-XX"), IDENT (multi-symbol operator) */
+    // a +-*/ b => IDENT, OPERATOR("+-*/"), IDENT
     Tokenizer *tok = tokenizer_create("a +-*/ b");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -515,7 +576,6 @@ TEST(test_operator_multi_symbol) {
 }
 
 TEST(test_operator_with_tabs) {
-    /* hello\t+\tworld => IDENT, OPERATOR("+"), IDENT */
     Tokenizer *tok = tokenizer_create("hello\t+\tworld");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -534,7 +594,6 @@ TEST(test_operator_with_tabs) {
 }
 
 TEST(test_operator_at_start) {
-    /* + hello => OPERATOR("+"), IDENT (SOI counts as whitespace) */
     Tokenizer *tok = tokenizer_create("+ hello");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -550,7 +609,6 @@ TEST(test_operator_at_start) {
 }
 
 TEST(test_operator_at_end) {
-    /* hello + => IDENT, OPERATOR("+") (EOI counts as whitespace) */
     Tokenizer *tok = tokenizer_create("hello +");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -569,7 +627,6 @@ TEST(test_operator_at_end) {
 }
 
 TEST(test_operator_alone) {
-    /* + alone => OPERATOR("+") */
     Tokenizer *tok = tokenizer_create("+");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -585,7 +642,6 @@ TEST(test_operator_alone) {
 }
 
 TEST(test_operator_minus_alone) {
-    /* - alone => OPERATOR("-") */
     Tokenizer *tok = tokenizer_create("-");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -598,7 +654,6 @@ TEST(test_operator_minus_alone) {
 }
 
 TEST(test_operator_various_symbols) {
-    /* @ ! # $ etc are all valid operator chars */
     Tokenizer *tok = tokenizer_create("a @ b");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -611,6 +666,202 @@ TEST(test_operator_various_symbols) {
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Operators without whitespace (adjacency allowed) */
+TEST(test_operator_no_whitespace_a_plus_b) {
+    /* a+b => IDENT("a"), OPERATOR("+"), IDENT("b") */
+    Tokenizer *tok = tokenizer_create("a+b");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_operator_no_whitespace_x_eq_eq_y) {
+    /* x==y => IDENT("x"), OPERATOR("=="), IDENT("y") */
+    Tokenizer *tok = tokenizer_create("x==y");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "x", 1), "expected IDENT 'x'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "==", 2), "expected OPERATOR '=='");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "y", 1), "expected IDENT 'y'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_operator_parens) {
+    /* (foo) => OPERATOR("("), IDENT("foo"), OPERATOR(")") */
+    Tokenizer *tok = tokenizer_create("(foo)");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "(", 1), "expected OPERATOR '('");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ")", 1), "expected OPERATOR ')'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
+ * Adjacency tests (now valid - Python/Ruby style)
+ * ============================================================ */
+
+TEST(test_adjacency_number_op_number) {
+    /* 10+10 => NUMBER("10"), OPERATOR("+"), NUMBER("10") */
+    Tokenizer *tok = tokenizer_create("10+10");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_negative_number) {
+    /* -10 => OPERATOR("-"), NUMBER("10") */
+    Tokenizer *tok = tokenizer_create("-10");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_string_op_ident) {
+    /* "a"+b => STRING("a"), OPERATOR("+"), IDENT("b") */
+    Tokenizer *tok = tokenizer_create("\"a\"+b");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_ident_string) {
+    /* foo"bar" => IDENT("foo"), STRING("bar") */
+    Tokenizer *tok = tokenizer_create("foo\"bar\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "bar", 3), "expected STRING 'bar'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_string_string) {
+    /* "a""b" => STRING("a"), STRING("b") */
+    Tokenizer *tok = tokenizer_create("\"a\"\"b\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "expected STRING 'b'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_string_number) {
+    /* "a"42 => STRING("a"), NUMBER("42") */
+    Tokenizer *tok = tokenizer_create("\"a\"42");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_number_string) {
+    /* 123"x" => NUMBER("123"), STRING("x") */
+    Tokenizer *tok = tokenizer_create("123\"x\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "123", 3), "expected NUMBER '123'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "x", 1), "expected STRING 'x'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_adjacency_string_ident) {
+    /* "a"foo => STRING("a"), IDENT("foo") */
+    Tokenizer *tok = tokenizer_create("\"a\"foo");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
 
     tokenizer_destroy(tok);
     PASS();
@@ -721,7 +972,6 @@ TEST(test_mixed_number_string_ident) {
 }
 
 TEST(test_mixed_with_operators) {
-    /* x + 1 "a" y - 2 "b" z */
     Tokenizer *tok = tokenizer_create("x + 1 \"a\" y - 2 \"b\" z");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -752,20 +1002,6 @@ TEST(test_mixed_with_operators) {
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "z", 1), "expected IDENT 'z'");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_mixed_no_spaces_string_ident_error) {
-    /* Adjacent tokens without whitespace are errors */
-    Tokenizer *tok = tokenizer_create("\"a\"foo");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    /* String followed by non-whitespace => error */
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for adjacent string+ident");
 
     tokenizer_destroy(tok);
     PASS();
@@ -871,7 +1107,6 @@ TEST(test_error_unterminated_string_with_newline) {
 
 TEST(test_error_sticky) {
     /* After an error, subsequent calls should also return error */
-    /* Use a scenario that produces an error: number followed by non-whitespace */
     Tokenizer *tok = tokenizer_create("42foo");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -887,199 +1122,116 @@ TEST(test_error_sticky) {
     PASS();
 }
 
-/* Error: symbol between digit and letter in ident */
-TEST(test_error_digit_symbol_letter) {
-    /* a1_b => ERROR (symbol between digit and letter) */
-    Tokenizer *tok = tokenizer_create("a1_b");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for symbol between digit and letter");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_ident_digit_symbol) {
-    /* hello10+world => ERROR (symbol after digit in ident) */
-    Tokenizer *tok = tokenizer_create("hello10+world");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for symbol after digit in ident");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_symbol_before_digit) {
-    /* hello+20world => ERROR (symbol before digit in ident) */
-    Tokenizer *tok = tokenizer_create("hello+20world");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for symbol before digit in ident");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_number_adjacent_no_whitespace) {
-    /* 10+10 => ERROR (number followed by non-whitespace) */
-    Tokenizer *tok = tokenizer_create("10+10");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for number adjacent without whitespace");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_negative_number_removed) {
-    /* -10 => OPERATOR("-"), NUMBER(10) when space-separated; but -10 has no space
-     * SOI counts as whitespace for operator, but the '-' is followed by '1' not whitespace,
-     * so '-' is not a valid operator here. It's a symbol at SOI but next char is digit not ws.
-     * Actually: SOI -> symbol char -> try operator -> consume symbols -> check next is ws/EOF
-     * -10: '-' consumed, next is '1' (digit, not ws/EOF) -> ERROR */
-    Tokenizer *tok = tokenizer_create("-10");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for -10 (not whitespace-delimited)");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_string_adjacent_non_whitespace) {
-    /* "a"+b => ERROR (non-whitespace after string) */
-    Tokenizer *tok = tokenizer_create("\"a\"+b");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for non-whitespace after string");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_error_underscore_start) {
-    /* _hello => ERROR (symbol can't start identifier, not whitespace-delimited operator) */
-    Tokenizer *tok = tokenizer_create("_hello");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for underscore-started ident");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
+/* Number followed by ident-start char is the ONLY adjacency error */
 TEST(test_error_number_followed_by_ident) {
-    /* 10foo => ERROR (number followed by non-whitespace) */
-    Tokenizer *tok = tokenizer_create("10foo");
+    /* 123abc => ERROR */
+    Tokenizer *tok = tokenizer_create("123abc");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '10foo'");
+    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '123abc'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_letter_digit_symbol_letter) {
-    /* ab_12 => ERROR (symbol between letter and digit... wait, this is
-     * letter-letter then symbol then digit-digit. The symbol '_' is between
-     * 'b' (letter) and '1' (digit). Per rules: symbol must be sandwiched
-     * between letters on both sides. Digit after symbol => error. */
-    Tokenizer *tok = tokenizer_create("ab_12");
+TEST(test_error_number_followed_by_underscore) {
+    /* 123_ => ERROR */
+    Tokenizer *tok = tokenizer_create("123_");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for symbol before digit in ident");
+    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '123_'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_ident_adjacent_string) {
-    /* foo"bar" - ident immediately followed by string */
-    Tokenizer *tok = tokenizer_create("foo\"bar\"");
+/* ============================================================
+ * Additional adjacency and edge case tests
+ * ============================================================ */
+
+TEST(test_adjacency_op_number_not_soi) {
+    /* a+10 => IDENT("a"), OPERATOR("+"), NUMBER("10") */
+    Tokenizer *tok = tokenizer_create("a+10");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for ident adjacent to string");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_number_adjacent_string) {
-    /* 123"x" - number immediately followed by string */
-    Tokenizer *tok = tokenizer_create("123\"x\"");
+TEST(test_adjacency_multi_op_no_whitespace) {
+    /* a>=b => IDENT("a"), OPERATOR(">="), IDENT("b") */
+    Tokenizer *tok = tokenizer_create("a>=b");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for number adjacent to string");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ">=", 2), "expected OPERATOR '>='");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_string_adjacent_number) {
-    /* "a"42 - string immediately followed by number */
-    Tokenizer *tok = tokenizer_create("\"a\"42");
+TEST(test_adjacency_number_op_at_end) {
+    /* 10+ => NUMBER("10"), OPERATOR("+") */
+    Tokenizer *tok = tokenizer_create("10+");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for string adjacent to number");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_string_adjacent_string) {
-    /* "a""b" - two strings without whitespace */
-    Tokenizer *tok = tokenizer_create("\"a\"\"b\"");
+TEST(test_adjacency_ident_digit_op_ident) {
+    /* foo2+bar => IDENT("foo2"), OPERATOR("+"), IDENT("bar") */
+    Tokenizer *tok = tokenizer_create("foo2+bar");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for adjacent strings");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo2", 4), "expected IDENT 'foo2'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "bar", 3), "expected IDENT 'bar'");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
-TEST(test_error_ident_adjacent_number) {
-    /* foo42 is a valid identifier (letters then digits) - NOT an error */
-    Tokenizer *tok = tokenizer_create("foo42");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo42", 5), "expected IDENT 'foo42'");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
-TEST(test_adjacent_tokens_with_space_ok) {
-    /* Verify that properly spaced tokens work */
-    Tokenizer *tok = tokenizer_create("\"a\" foo 42");
+TEST(test_adjacency_three_strings) {
+    /* "a""b""c" => STRING("a"), STRING("b"), STRING("c") */
+    Tokenizer *tok = tokenizer_create("\"a\"\"b\"\"c\"");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
@@ -1087,10 +1239,32 @@ TEST(test_adjacent_tokens_with_space_ok) {
     ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "expected STRING 'b'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "c", 1), "expected STRING 'c'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_non_ascii_byte_is_operator) {
+    /* A 0x80 byte is not whitespace, letter, digit, underscore, or quote,
+     * so it should be treated as a symbol char => OPERATOR */
+    const char input[] = {(char)0x80, '\0'};
+    Tokenizer *tok = tokenizer_create(input);
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_OPERATOR, "expected OPERATOR for 0x80 byte");
+    ASSERT_EQ(t.value_len, 1, "expected length 1");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
@@ -1143,18 +1317,6 @@ TEST(test_reset_tokenizer) {
  * Edge cases and boundary tests
  * ============================================================ */
 
-TEST(test_number_followed_by_ident_no_space_error) {
-    Tokenizer *tok = tokenizer_create("42foo");
-    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
-
-    Token t;
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '42foo'");
-
-    tokenizer_destroy(tok);
-    PASS();
-}
-
 TEST(test_token_type_str) {
     ASSERT_STR_EQ(token_type_str(TOK_NUMBER), "NUMBER", "NUMBER string");
     ASSERT_STR_EQ(token_type_str(TOK_STRING), "STRING", "STRING string");
@@ -1162,6 +1324,24 @@ TEST(test_token_type_str) {
     ASSERT_STR_EQ(token_type_str(TOK_OPERATOR), "OPERATOR", "OPERATOR string");
     ASSERT_STR_EQ(token_type_str(TOK_EOF), "EOF", "EOF string");
     ASSERT_STR_EQ(token_type_str(TOK_ERROR), "ERROR", "ERROR string");
+    PASS();
+}
+
+TEST(test_adjacent_tokens_with_space_ok) {
+    Tokenizer *tok = tokenizer_create("\"a\" foo 42");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "expected STRING 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    tokenizer_destroy(tok);
     PASS();
 }
 
@@ -1211,7 +1391,7 @@ int main(void) {
     RUN_TEST(test_string_with_digits);
     RUN_TEST(test_string_multiple);
 
-    printf("\nIDENT tokens:\n");
+    printf("\nIDENT tokens (Python/Ruby style):\n");
     RUN_TEST(test_ident_single_letter);
     RUN_TEST(test_ident_simple);
     RUN_TEST(test_ident_with_digits);
@@ -1219,16 +1399,18 @@ int main(void) {
     RUN_TEST(test_ident_uppercase);
     RUN_TEST(test_ident_mixed_case);
     RUN_TEST(test_ident_multiple);
+    RUN_TEST(test_ident_underscore_only);
+    RUN_TEST(test_ident_underscore_start);
+    RUN_TEST(test_ident_trailing_underscore);
+    RUN_TEST(test_ident_dunder_init);
+    RUN_TEST(test_ident_a_b2);
+    RUN_TEST(test_ident_ab_12);
 
-    printf("\nIdentifier symbol sandwich:\n");
-    RUN_TEST(test_ident_symbol_sandwich_plus);
-    RUN_TEST(test_ident_symbol_sandwich_underscore);
-    RUN_TEST(test_ident_symbol_sandwich_complex);
-    RUN_TEST(test_ident_letter_digit_letter);
-    RUN_TEST(test_ident_symbol_sandwich_hyphen);
-    RUN_TEST(test_ident_symbol_sandwich_multiple_hyphens);
-    RUN_TEST(test_ident_symbol_sandwich_single_chars);
-    RUN_TEST(test_ident_multiple_sandwich);
+    printf("\nFormer symbol sandwich (now multi-token):\n");
+    RUN_TEST(test_no_sandwich_plus);
+    RUN_TEST(test_no_sandwich_hyphen);
+    RUN_TEST(test_no_sandwich_multiple_hyphens);
+    RUN_TEST(test_no_sandwich_complex);
 
     printf("\nOPERATOR tokens:\n");
     RUN_TEST(test_operator_simple);
@@ -1240,6 +1422,25 @@ int main(void) {
     RUN_TEST(test_operator_alone);
     RUN_TEST(test_operator_minus_alone);
     RUN_TEST(test_operator_various_symbols);
+    RUN_TEST(test_operator_no_whitespace_a_plus_b);
+    RUN_TEST(test_operator_no_whitespace_x_eq_eq_y);
+    RUN_TEST(test_operator_parens);
+
+    printf("\nAdjacency (Python/Ruby style, now valid):\n");
+    RUN_TEST(test_adjacency_number_op_number);
+    RUN_TEST(test_adjacency_negative_number);
+    RUN_TEST(test_adjacency_string_op_ident);
+    RUN_TEST(test_adjacency_ident_string);
+    RUN_TEST(test_adjacency_string_string);
+    RUN_TEST(test_adjacency_string_number);
+    RUN_TEST(test_adjacency_number_string);
+    RUN_TEST(test_adjacency_string_ident);
+    RUN_TEST(test_adjacency_op_number_not_soi);
+    RUN_TEST(test_adjacency_multi_op_no_whitespace);
+    RUN_TEST(test_adjacency_number_op_at_end);
+    RUN_TEST(test_adjacency_ident_digit_op_ident);
+    RUN_TEST(test_adjacency_three_strings);
+    RUN_TEST(test_non_ascii_byte_is_operator);
 
     printf("\nWhitespace handling:\n");
     RUN_TEST(test_whitespace_spaces);
@@ -1252,7 +1453,6 @@ int main(void) {
     printf("\nMixed token sequences:\n");
     RUN_TEST(test_mixed_number_string_ident);
     RUN_TEST(test_mixed_with_operators);
-    RUN_TEST(test_mixed_no_spaces_string_ident_error);
 
     printf("\nPosition tracking:\n");
     RUN_TEST(test_position_single_token);
@@ -1264,21 +1464,8 @@ int main(void) {
     RUN_TEST(test_error_unterminated_string);
     RUN_TEST(test_error_unterminated_string_with_newline);
     RUN_TEST(test_error_sticky);
-    RUN_TEST(test_error_digit_symbol_letter);
-    RUN_TEST(test_error_ident_digit_symbol);
-    RUN_TEST(test_error_symbol_before_digit);
-    RUN_TEST(test_error_number_adjacent_no_whitespace);
-    RUN_TEST(test_error_negative_number_removed);
-    RUN_TEST(test_error_string_adjacent_non_whitespace);
-    RUN_TEST(test_error_underscore_start);
     RUN_TEST(test_error_number_followed_by_ident);
-    RUN_TEST(test_error_letter_digit_symbol_letter);
-    RUN_TEST(test_error_ident_adjacent_string);
-    RUN_TEST(test_error_number_adjacent_string);
-    RUN_TEST(test_error_string_adjacent_number);
-    RUN_TEST(test_error_string_adjacent_string);
-    RUN_TEST(test_error_ident_adjacent_number);
-    RUN_TEST(test_adjacent_tokens_with_space_ok);
+    RUN_TEST(test_error_number_followed_by_underscore);
 
     printf("\nEOF behavior:\n");
     RUN_TEST(test_eof_sticky);
@@ -1287,8 +1474,8 @@ int main(void) {
     RUN_TEST(test_reset_tokenizer);
 
     printf("\nEdge cases:\n");
-    RUN_TEST(test_number_followed_by_ident_no_space_error);
     RUN_TEST(test_token_type_str);
+    RUN_TEST(test_adjacent_tokens_with_space_ok);
 
     printf("\nNull input handling:\n");
     RUN_TEST(test_null_tokenizer_next);

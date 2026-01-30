@@ -99,11 +99,17 @@ format-check:
 
 # ---------- Compile database ----------
 
-# Generate compile_commands.json using bear. Required for accurate linting.
-.PHONY: compile-db
-compile-db:
+# All source files that contribute to the compile database.
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_REPL_SERVER_SRC)
+
+# Auto-generate compile_commands.json when missing or when any source file changes.
+compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
 	@command -v bear >/dev/null 2>&1 || { echo "Error: 'bear' is not installed. Install it (e.g. brew install bear) and re-run."; exit 1; }
 	bear -- $(MAKE) clean all test
+
+# Convenience alias.
+.PHONY: compile-db
+compile-db: compile_commands.json
 
 # ---------- Static analysis (clang-tidy) ----------
 
@@ -113,10 +119,9 @@ CLANG_TIDY ?= $(shell command -v /opt/homebrew/opt/llvm/bin/clang-tidy 2>/dev/nu
 # Only lint .c translation units; headers are checked indirectly via includes.
 LINT_FILES = $(shell git ls-files '*.c')
 
-# Lint requires a compile database. Run `make compile-db` first.
+# Lint depends on the compile database, which is rebuilt automatically if needed.
 .PHONY: lint
-lint:
-	@test -f compile_commands.json || { echo "Error: compile_commands.json not found. Run 'make compile-db' first."; exit 1; }
+lint: compile_commands.json
 	$(CLANG_TIDY) $(LINT_FILES) -p . --extra-arg=-isysroot --extra-arg=$(shell xcrun --show-sdk-path)
 
 # ---------- Sanitizer builds (ASan + UBSan, LSan via ASan) ----------

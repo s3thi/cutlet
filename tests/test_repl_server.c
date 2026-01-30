@@ -232,7 +232,8 @@ TEST(test_error_unterminated_string) {
     PASS();
 }
 
-TEST(test_error_adjacent_tokens) {
+TEST(test_adjacent_tokens_valid) {
+    /* 10+10 is now valid: NUMBER, OPERATOR, NUMBER (adjacency allowed) */
     const char *err = NULL;
     ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
     ASSERT_NOT_NULL(srv, "server start");
@@ -245,7 +246,7 @@ TEST(test_error_adjacent_tokens) {
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT(strncmp(buf, "-> 4 ERR 1:", 11) == 0, "error prefix matches");
+    ASSERT(strncmp(buf, "-> 4 OK ", 8) == 0, "ok prefix matches");
 
     close(fd);
     repl_server_stop(srv);
@@ -649,7 +650,7 @@ int main(void) {
     RUN_TEST(test_string_token);
     RUN_TEST(test_number_token);
     RUN_TEST(test_error_unterminated_string);
-    RUN_TEST(test_error_adjacent_tokens);
+    RUN_TEST(test_adjacent_tokens_valid);
     RUN_TEST(test_whitespace_only_expr);
     RUN_TEST(test_whitespace_expr_spaces);
     RUN_TEST(test_crlf_line_ending);
