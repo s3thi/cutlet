@@ -159,7 +159,7 @@ static void handle_sigint(int sig) {
  * Listens on the given HOST:PORT, prints the actual listening address
  * to stdout (important for ephemeral port), then blocks until killed.
  */
-static int run_listen(const char *addr) {
+static int run_listen(bool ast_mode, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -169,7 +169,7 @@ static int run_listen(const char *addr) {
     }
 
     const char *err = NULL;
-    g_server = repl_server_start(host, port, &err);
+    g_server = repl_server_start(host, port, ast_mode, &err);
     if (!g_server) {
         fprintf(stderr, "Error: failed to start server: %s\n", err ? err : "unknown");
         return 1;
@@ -200,7 +200,7 @@ static int run_listen(const char *addr) {
  *
  * Shows a "cutlet> " prompt when stdin is a TTY.
  */
-static int run_connect(const char *addr) {
+static int run_connect(bool ast_mode, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -255,10 +255,19 @@ static int run_connect(const char *addr) {
             line[--len] = '\0';
         }
 
-        /* Build protocol line: "<id> <expr>\n" */
+        /*
+         * Build protocol line.
+         * AST mode: "AST <id> <expr>\n"
+         * Token mode: "<id> <expr>\n"
+         */
         req_id++;
         char sendbuf[MAX_LINE_LEN + 32];
-        int slen = snprintf(sendbuf, sizeof(sendbuf), "%lu %s\n", req_id, line);
+        int slen;
+        if (ast_mode) {
+            slen = snprintf(sendbuf, sizeof(sendbuf), "AST %lu %s\n", req_id, line);
+        } else {
+            slen = snprintf(sendbuf, sizeof(sendbuf), "%lu %s\n", req_id, line);
+        }
         if (slen < 0 || (size_t)slen >= sizeof(sendbuf))
             continue;
 
@@ -309,6 +318,15 @@ static int run_connect(const char *addr) {
 
         puts(body);
         fflush(stdout);
+
+        /*
+         * If the server reports a mode mismatch, exit immediately with
+         * non-zero status so the user knows --ast flags don't match.
+         */
+        if (strstr(body, "ERR mode mismatch:") != NULL) {
+            close(fd);
+            return 1;
+        }
     }
 
     close(fd);
@@ -336,10 +354,10 @@ int main(int argc, char *argv[]) {
 
         /* Check for --listen or --connect flags. */
         if (arg_idx < argc && strcmp(argv[arg_idx], "--listen") == 0) {
-            return run_listen(arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
+            return run_listen(ast_mode, arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
         }
         if (arg_idx < argc && strcmp(argv[arg_idx], "--connect") == 0) {
-            return run_connect(arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
+            return run_connect(ast_mode, arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
         }
         if (arg_idx == argc) {
             return run_repl(ast_mode);

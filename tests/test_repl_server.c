@@ -126,7 +126,7 @@ static ssize_t recv_line(int fd, char *buf, size_t bufsz) {
 
 TEST(test_start_and_stop) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server should start");
     ASSERT(repl_server_port(srv) > 0, "port should be assigned");
     repl_server_stop(srv);
@@ -135,7 +135,7 @@ TEST(test_start_and_stop) {
 
 TEST(test_start_null_err_out) {
     /* err_out can be NULL — should not crash. */
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, NULL);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, NULL);
     ASSERT_NOT_NULL(srv, "server should start with NULL err_out");
     repl_server_stop(srv);
     PASS();
@@ -153,7 +153,7 @@ TEST(test_stop_null_is_safe) {
 
 TEST(test_ident_token) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -173,7 +173,7 @@ TEST(test_ident_token) {
 
 TEST(test_string_token) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -193,7 +193,7 @@ TEST(test_string_token) {
 
 TEST(test_number_token) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -213,7 +213,7 @@ TEST(test_number_token) {
 
 TEST(test_error_unterminated_string) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -235,7 +235,7 @@ TEST(test_error_unterminated_string) {
 TEST(test_adjacent_tokens_valid) {
     /* 10+10 is now valid: NUMBER, OPERATOR, NUMBER (adjacency allowed) */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -255,7 +255,7 @@ TEST(test_adjacent_tokens_valid) {
 
 TEST(test_whitespace_only_expr) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -276,7 +276,7 @@ TEST(test_whitespace_only_expr) {
 
 TEST(test_whitespace_expr_spaces) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -296,7 +296,7 @@ TEST(test_whitespace_expr_spaces) {
 
 TEST(test_crlf_line_ending) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -320,7 +320,7 @@ TEST(test_crlf_line_ending) {
 
 TEST(test_multiple_requests_one_connection) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -356,7 +356,7 @@ TEST(test_multiple_requests_one_connection) {
 TEST(test_connection_stays_open) {
     /* Verify server doesn't close connection after first response. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -414,7 +414,7 @@ static void *client_thread_fn(void *arg) {
 
 TEST(test_two_concurrent_clients) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -444,7 +444,7 @@ TEST(test_two_concurrent_clients) {
 
 TEST(test_client_connects_and_disconnects_immediately) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -472,7 +472,7 @@ TEST(test_client_connects_and_disconnects_immediately) {
 
 TEST(test_partial_line_then_disconnect) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -510,7 +510,7 @@ TEST(test_non_digit_id_is_error) {
      * an error response (not crash, not silently succeed).
      */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -532,7 +532,7 @@ TEST(test_non_digit_id_is_error) {
 TEST(test_missing_id_is_error) {
     /* A line with no content (just newline) should be an error. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -556,7 +556,7 @@ TEST(test_missing_id_is_error) {
 
 TEST(test_oversized_line_returns_error) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -589,7 +589,7 @@ TEST(test_oversized_line_returns_error) {
 
 TEST(test_multiple_tokens) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -614,7 +614,7 @@ TEST(test_multiple_tokens) {
 
 TEST(test_id_only_no_expr) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -627,6 +627,74 @@ TEST(test_id_only_no_expr) {
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
     ASSERT_STR_EQ(buf, "-> 99 OK\n", "id-only returns OK");
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
+ * AST mode tests
+ * ============================================================ */
+
+TEST(test_ast_mode_basic) {
+    /* Server started in AST mode should process AST-prefixed requests. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, &err);
+    ASSERT_NOT_NULL(srv, "server start (ast mode)");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    ASSERT(send_line(fd, "AST 1 foo\n"), "send");
+    char buf[512];
+    ssize_t n = recv_line(fd, buf, sizeof(buf));
+    ASSERT(n > 0, "recv");
+    ASSERT_STR_EQ(buf, "-> 1 AST [IDENT foo]\n", "ast response matches");
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_ast_mode_mismatch_no_prefix) {
+    /* AST server receives non-AST request → mode mismatch error. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, &err);
+    ASSERT_NOT_NULL(srv, "server start (ast mode)");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    ASSERT(send_line(fd, "1 foo\n"), "send without AST prefix");
+    char buf[512];
+    ssize_t n = recv_line(fd, buf, sizeof(buf));
+    ASSERT(n > 0, "recv");
+    ASSERT(strstr(buf, "ERR mode mismatch: expected AST") != NULL, "mode mismatch error");
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_non_ast_mode_mismatch_with_prefix) {
+    /* Non-AST server receives AST-prefixed request → mode mismatch error. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ASSERT_NOT_NULL(srv, "server start (non-ast mode)");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    ASSERT(send_line(fd, "AST 1 foo\n"), "send with AST prefix");
+    char buf[512];
+    ssize_t n = recv_line(fd, buf, sizeof(buf));
+    ASSERT(n > 0, "recv");
+    ASSERT(strstr(buf, "ERR mode mismatch: server not in AST mode") != NULL,
+           "mode mismatch error for non-ast server");
 
     close(fd);
     repl_server_stop(srv);
@@ -674,6 +742,11 @@ int main(void) {
     printf("\nMultiple tokens / edge cases:\n");
     RUN_TEST(test_multiple_tokens);
     RUN_TEST(test_id_only_no_expr);
+
+    printf("\nAST mode:\n");
+    RUN_TEST(test_ast_mode_basic);
+    RUN_TEST(test_ast_mode_mismatch_no_prefix);
+    RUN_TEST(test_non_ast_mode_mismatch_with_prefix);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     if (tests_failed > 0) {

@@ -280,6 +280,104 @@ kill "$SERVER_PID_CP" 2>/dev/null || true
 wait "$SERVER_PID_CP" 2>/dev/null || true
 rm -f "$SERVER_OUT_CP"
 
+# Test: --listen --ast with --connect --ast (AST over TCP)
+SERVER_OUT_AST=$(mktemp)
+"$CUTLET" repl --ast --listen 127.0.0.1:0 > "$SERVER_OUT_AST" 2>&1 &
+SERVER_PID_AST=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if grep -q "^Listening on " "$SERVER_OUT_AST" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+AST_PORT=$(grep "^Listening on " "$SERVER_OUT_AST" | sed 's/.*:\([0-9]*\)$/\1/')
+
+if [ -n "$AST_PORT" ]; then
+    echo "  (AST server started on port $AST_PORT)"
+
+    # Both sides --ast: should get AST output
+    ast_result=$(echo "foo" | "$CUTLET" repl --ast --connect "127.0.0.1:$AST_PORT" 2>/dev/null)
+    if echo "$ast_result" | grep -q "AST \[IDENT foo\]"; then
+        echo "  PASS: --ast --listen + --ast --connect"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --ast --listen + --ast --connect"
+        echo "    Got: $ast_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Mismatch: server --ast, client no --ast → error, non-zero exit
+    mismatch1_exit=0
+    mismatch1=$(echo "foo" | "$CUTLET" repl --connect "127.0.0.1:$AST_PORT" 2>/dev/null) || mismatch1_exit=$?
+    if echo "$mismatch1" | grep -q "mode mismatch"; then
+        echo "  PASS: server --ast, client no --ast gives mismatch error"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: server --ast, client no --ast should give mismatch error"
+        echo "    Got: $mismatch1"
+        FAIL=$((FAIL + 1))
+    fi
+    if [ "$mismatch1_exit" -ne 0 ]; then
+        echo "  PASS: server --ast, client no --ast exits non-zero"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: server --ast, client no --ast should exit non-zero"
+        FAIL=$((FAIL + 1))
+    fi
+
+    kill "$SERVER_PID_AST" 2>/dev/null || true
+    wait "$SERVER_PID_AST" 2>/dev/null || true
+else
+    echo "  FAIL: AST server did not start"
+    FAIL=$((FAIL + 3))
+    kill "$SERVER_PID_AST" 2>/dev/null || true
+    wait "$SERVER_PID_AST" 2>/dev/null || true
+fi
+rm -f "$SERVER_OUT_AST"
+
+# Mismatch: server no --ast, client --connect --ast
+SERVER_OUT_NOAST=$(mktemp)
+"$CUTLET" repl --listen 127.0.0.1:0 > "$SERVER_OUT_NOAST" 2>&1 &
+SERVER_PID_NOAST=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if grep -q "^Listening on " "$SERVER_OUT_NOAST" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+NOAST_PORT=$(grep "^Listening on " "$SERVER_OUT_NOAST" | sed 's/.*:\([0-9]*\)$/\1/')
+
+if [ -n "$NOAST_PORT" ]; then
+    mismatch2_exit=0
+    mismatch2=$(echo "foo" | "$CUTLET" repl --ast --connect "127.0.0.1:$NOAST_PORT" 2>/dev/null) || mismatch2_exit=$?
+    if echo "$mismatch2" | grep -q "mode mismatch"; then
+        echo "  PASS: server no --ast, client --ast gives mismatch error"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: server no --ast, client --ast should give mismatch error"
+        echo "    Got: $mismatch2"
+        FAIL=$((FAIL + 1))
+    fi
+    if [ "$mismatch2_exit" -ne 0 ]; then
+        echo "  PASS: server no --ast, client --ast exits non-zero"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: server no --ast, client --ast should exit non-zero"
+        FAIL=$((FAIL + 1))
+    fi
+
+    kill "$SERVER_PID_NOAST" 2>/dev/null || true
+    wait "$SERVER_PID_NOAST" 2>/dev/null || true
+else
+    echo "  FAIL: non-AST server did not start"
+    FAIL=$((FAIL + 2))
+    kill "$SERVER_PID_NOAST" 2>/dev/null || true
+    wait "$SERVER_PID_NOAST" 2>/dev/null || true
+fi
+rm -f "$SERVER_OUT_NOAST"
+
 # Test: invalid --listen arg
 if "$CUTLET" repl --listen "badaddr" 2>&1 | grep -qi "error\|invalid\|failed"; then
     echo "  PASS: invalid --listen arg"

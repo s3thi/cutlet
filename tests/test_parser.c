@@ -149,6 +149,41 @@ TEST(test_null_input) {
 }
 
 /* ============================================================
+ * Defensive NULL-parameter tests
+ * ============================================================ */
+
+TEST(test_null_out_with_err) {
+    /* Passing NULL for out should return false and populate err. */
+    ParseError err;
+    ASSERT(!parser_parse_single("42", NULL, &err), "NULL out should fail");
+    ASSERT_STR_EQ(err.message, "parser output pointer is NULL", "error message for NULL out");
+    PASS();
+}
+
+TEST(test_null_err_param) {
+    /* Passing NULL for err should return false without crashing. */
+    AstNode *node = NULL;
+    ASSERT(!parser_parse_single("+", &node, NULL), "NULL err should not crash");
+    ASSERT(node == NULL, "*out should be NULL after failure");
+    PASS();
+}
+
+TEST(test_both_null) {
+    /* Both out and err NULL — should return false without crashing. */
+    ASSERT(!parser_parse_single("42", NULL, NULL), "both NULL should not crash");
+    PASS();
+}
+
+TEST(test_out_null_after_failure) {
+    /* *out must be NULL after any parse failure. */
+    AstNode *node = (AstNode *)0xDEAD; /* sentinel */
+    ParseError err;
+    ASSERT(!parser_parse_single("+", &node, &err), "operator should fail");
+    ASSERT(node == NULL, "*out should be NULL after failure");
+    PASS();
+}
+
+/* ============================================================
  * ast_format tests
  * ============================================================ */
 
@@ -217,6 +252,12 @@ int main(void) {
     RUN_TEST(test_tokenizer_error_passthrough);
     RUN_TEST(test_unterminated_string);
     RUN_TEST(test_null_input);
+
+    printf("\nDefensive NULL-parameter tests:\n");
+    RUN_TEST(test_null_out_with_err);
+    RUN_TEST(test_null_err_param);
+    RUN_TEST(test_both_null);
+    RUN_TEST(test_out_null_after_failure);
 
     printf("\nast_format:\n");
     RUN_TEST(test_ast_format_number);

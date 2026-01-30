@@ -39,6 +39,7 @@
 struct ReplServer {
     int listen_fd;
     uint16_t port;
+    bool ast_mode; /* When true, require "AST " prefix on requests. */
     pthread_t accept_thread;
     volatile bool shutdown; /* Signals accept loop and client threads to stop. */
 };
@@ -127,11 +128,15 @@ static bool send_response(int fd, const char *id, const char *body) {
 
 /*
  * Parse and handle one request line. The line includes the trailing
- * \n (and possibly \r\n). Format: "<id> <expr>\n"
+ * \n (and possibly \r\n).
  *
+ * In token mode: format is "<id> <expr>\n"
+ * In AST mode:   format is "AST <id> <expr>\n"
+ *
+ * If the mode doesn't match the prefix, a clear mismatch error is sent.
  * Returns true if the connection should continue, false to close.
  */
-static bool handle_request(int fd, char *line) {
+static bool handle_request(int fd, char *line, bool ast_mode) {
     /* Strip trailing \n and \r. */
     size_t len = strlen(line);
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
@@ -145,18 +150,41 @@ static bool handle_request(int fd, char *line) {
         return true;
     }
 
+    /* Check for "AST " prefix to detect mode and enforce matching. */
+    bool has_ast_prefix = (strncmp(line, "AST ", 4) == 0);
+
+    if (ast_mode && !has_ast_prefix) {
+        /* Server expects AST prefix but client didn't send it. */
+        const char *err_resp = "-> 0 ERR mode mismatch: expected AST\n";
+        send_all(fd, err_resp, strlen(err_resp));
+        return true;
+    }
+
+    if (!ast_mode && has_ast_prefix) {
+        /* Server is in token mode but client sent AST prefix. */
+        const char *err_resp = "-> 0 ERR mode mismatch: server not in AST mode\n";
+        send_all(fd, err_resp, strlen(err_resp));
+        return true;
+    }
+
+    /* If AST mode, strip the "AST " prefix before parsing ID + expr. */
+    char *rest = line;
+    if (ast_mode) {
+        rest = line + 4;
+    }
+
     /* Extract ID: first whitespace-delimited token. */
-    char *space = strchr(line, ' ');
+    char *space = strchr(rest, ' ');
     const char *id;
     const char *expr;
 
     if (space) {
         *space = '\0';
-        id = line;
+        id = rest;
         expr = space + 1;
     } else {
         /* ID only, no expr. */
-        id = line;
+        id = rest;
         expr = "";
     }
 
@@ -170,8 +198,8 @@ static bool handle_request(int fd, char *line) {
         }
     }
 
-    /* Process expr through the REPL core. */
-    char *result = repl_format_line(expr);
+    /* Process expr through the appropriate REPL core function. */
+    char *result = ast_mode ? repl_format_line_ast(expr) : repl_format_line(expr);
     if (!result) {
         /* Memory allocation failure — send error and continue. */
         send_response(fd, id, "ERR internal error");
@@ -222,7 +250,7 @@ static void *client_thread_fn(void *arg) {
             continue;
         }
 
-        if (!handle_request(fd, buf)) {
+        if (!handle_request(fd, buf, srv->ast_mode)) {
             break;
         }
     }
@@ -287,7 +315,8 @@ static void *accept_loop(void *arg) {
  * Public API
  * ============================================================ */
 
-ReplServer *repl_server_start(const char *host, uint16_t port, const char **err_out) {
+ReplServer *repl_server_start(const char *host, uint16_t port, bool ast_mode,
+                              const char **err_out) {
     ReplServer *srv = calloc(1, sizeof(ReplServer));
     if (!srv) {
         if (err_out)
@@ -295,6 +324,7 @@ ReplServer *repl_server_start(const char *host, uint16_t port, const char **err_
         return NULL;
     }
     srv->listen_fd = -1;
+    srv->ast_mode = ast_mode;
 
     /* Create TCP socket. */
     srv->listen_fd = socket(AF_INET, SOCK_STREAM, 0);

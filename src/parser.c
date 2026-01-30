@@ -11,6 +11,22 @@
 #include <string.h>
 
 bool parser_parse_single(const char *input, AstNode **out, ParseError *err) {
+    /*
+     * Guard: if out is NULL we can't return a node, so fail immediately.
+     * Both out and err may be NULL — handle gracefully without crashing.
+     */
+    if (!out) {
+        if (err) {
+            err->line = 0;
+            err->col = 0;
+            snprintf(err->message, sizeof(err->message), "parser output pointer is NULL");
+        }
+        return false;
+    }
+
+    /* Always clear *out so callers see NULL on any failure path. */
+    *out = NULL;
+
     if (!input) {
         if (err) {
             err->line = 1;
@@ -87,7 +103,13 @@ bool parser_parse_single(const char *input, AstNode **out, ParseError *err) {
         node->type = AST_IDENT;
         break;
     default:
+        /* Future-proofing: if a new token type is added, report it clearly. */
         free(node);
+        if (err) {
+            err->line = t.line;
+            err->col = t.col;
+            snprintf(err->message, sizeof(err->message), "unexpected token type");
+        }
         tokenizer_destroy(tok);
         return false;
     }

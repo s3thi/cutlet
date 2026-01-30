@@ -245,7 +245,7 @@ char *repl_format_line_ast(const char *input) {
     }
 
     AstNode *node = NULL;
-    ParseError err;
+    ParseError err = {0};
 
     if (parser_parse_single(input, &node, &err)) {
         char *formatted = ast_format(node);
