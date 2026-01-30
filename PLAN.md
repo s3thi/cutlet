@@ -1,139 +1,113 @@
 # Cutlet Plan (Session Handoff)
 
 ## Project snapshot
-Cutlet is a dynamic programming language (Python/Ruby/Lua/JS‑like; borrows from Raku/Perl/Tcl) written in C23 with no external deps beyond platform libs and POSIX `make`. It is optimized for REPL‑driven programming and excels at text parsing, filesystem navigation, IPC, job control, and quick UI scripting. Targets Linux, macOS, Windows.
+Cutlet is a dynamic programming language (Python/Ruby/Lua/JS‑like; borrows from Raku/Perl/Tcl) written in C23 with no external deps beyond platform libs and POSIX `make`. It targets Linux, macOS, and Windows.
 
 This plan captures decisions and context from the initial design discussion so a new agent can continue seamlessly.
 
 ## Core direction
 - Build **one feature at a time** with **exhaustive tests** before moving on.
 - Favor end‑to‑end slices: each step should run in a REPL and be testable.
-- Early architecture should be **thread‑ready** even if full parallel eval comes later.
+- Architecture should remain **thread‑ready**.
 
-## Very first feature (minimal slice)
-### Minimal tokenizer v0
+## Current behavior (implemented)
+### Tokenizer v0 (current)
 Token kinds:
 - `NUMBER` — integer only, digits only, e.g. `0`, `42`
-  - No negative numbers. `-` is an operator or symbol char.
-  - Numbers must be followed by whitespace or EOF.
+  - No negative numbers. `-` is an operator token.
+  - Only adjacency error: a number immediately followed by an ident-start (`[A-Za-z_]`).
 - `STRING` — double‑quoted, **no escapes yet**, e.g. `"hi"`
-  - Strings must be followed by whitespace or EOF.
-- `IDENT` — **ASCII-only identifiers** with symbol sandwiching
-  - **Start chars**: ASCII letter only (`a-z`, `A-Z`).
-  - **Continue chars**: ASCII letters and digits freely.
-  - **Symbol sandwich**: when a symbol char is encountered during identifier scanning:
-    - The previous char must have been an ASCII letter (not a digit).
-    - The entire run of symbol chars is consumed.
-    - The next char must be an ASCII letter (not digit, not whitespace, not EOF).
-    - If either check fails, it is an error.
-  - Examples: `hello+world`, `my_var_name`, `kebab-case`, `a-b-c`, `hello_-_world`
-  - Errors: `a1_b` (symbol after digit), `ab_12` (symbol before digit), `foo-` (trailing symbol)
-- `OPERATOR` — symbol chars delimited by whitespace (or start/end of input)
-  - **Symbol char**: anything that is not whitespace, not ASCII letter, not digit, not `"`.
-  - Includes: `_`, `-`, `+`, `*`, `/`, `@`, `#`, `$`, `%`, `&`, `!`, etc.
-  - A run of one or more symbol chars preceded by whitespace/SOI and followed by whitespace/EOI.
-  - Examples: `+`, `-`, `+-*/`, `@`, `_`
+  - Unterminated string is an error at the opening quote (newline or EOF ends it).
+- `IDENT` — **ASCII-only identifiers**
+  - **Start chars**: ASCII letter or underscore (`[A-Za-z_]`).
+  - **Continue chars**: ASCII letters, digits, underscore (`[A-Za-z0-9_]`).
+  - No symbol‑sandwich behavior. Symbols break identifiers.
+  - Examples: `foo`, `_foo`, `foo123`, `my_var`, `__init__`
+- `OPERATOR` — one or more **symbol chars** (no whitespace delimiter required)
+  - **Symbol char**: anything that is not whitespace, not ASCII letter, not digit, not `_`, and not `"`.
+  - Includes: `-`, `+`, `*`, `/`, `@`, `#`, `$`, `%`, `&`, `!`, `(`, `)`, etc.
+  - Examples: `+`, `-`, `+-*/`, `@`, `==`, `>=`
 
 Token boundaries:
-- **Tokens must be separated by whitespace or EOF.** Adjacent tokens without whitespace are **errors**.
-  - Examples: `"a"foo` is an error; `42foo` is an error; `10+10` is an error.
-- Start-of-input (SOI) and end-of-input (EOI) count as whitespace for operator delimiting.
+- Tokens **may be adjacent without whitespace** (Python/Ruby style).
+- The **only adjacency error** is `NUMBER` immediately followed by ident‑start:
+  - Error: `42foo`, `123_`
+  - Valid: `10+10`, `"a"b`, `foo"bar"`, `a+b`, `x==y`
 
 Everything else:
-- whitespace is ignored between tokens
-- Non-ASCII bytes are treated as symbol chars (not valid identifier starts)
+- Whitespace is ignored between tokens.
+- Non‑ASCII bytes are treated as symbol chars (not valid identifier starts).
 
-### Tokenizer API expectations (v0)
+Tokenizer API expectations:
 - `tokenizer_next(tok, NULL)` is a **defined failure case** and must return `false`.
 
-### First observable behavior
-A REPL that reads a line, tokenizes it, and prints a one‑line list of tokens or a precise error with position.
+### REPL/CLI (current)
+- REPL core formats results as `OK [TYPE value] ...` or `ERR line:col message`.
+- CLI supports stdin REPL plus TCP `--listen` and `--connect`.
 
-## REPL architecture decision (important)
-We want **multiple clients** to connect to a **single running REPL** (Clojure/Common Lisp style).
+## REPL architecture (kept)
+- TCP sockets, thread‑per‑client, single shared runtime image.
+- REPL core separated from transport.
 
-**Decision:** Use **TCP sockets** (not UNIX) and **thread‑per‑client** from the start.
-- Clients run in parallel.
-- Runtime state is **shared globally** (single image), not isolated per client.
-- **No enqueueing** of lines; each client thread reads and evaluates directly.
-
-**Why still split REPL core vs transport?**
-Even if it's one binary, keep a separation of concerns:
-- REPL core = parse/eval/print on strings and result/err
-- Transport = stdin/stdout or TCP socket
-Benefits: easier tests, reusable engine, simpler debugging, multiple frontends.
-Implementation can still be a single executable with flags:
-- `cutlet repl` (stdin/stdout)
-- `cutlet repl --listen 127.0.0.1:5555`
-
-## Concurrency and locking plan (thread‑ready)
-### Lock ordering (to avoid deadlocks)
-Always acquire in this order:
-1) Global runtime lock
-2) Namespace / module lock
-3) Object lock
-4) IO lock
-
-Never acquire in reverse order.
-
-### Phase 1 (safe, simple)
-- **Threaded TCP server** is in place.
-- **Evaluation is serialized** with a **global write lock** to ensure correctness.
-- All shared structures protected with real RW locks, even if used coarsely.
-
-### Phase 2 (parallel eval later)
-- Parse without locks.
-- Acquire **read** locks for read‑only eval.
-- Upgrade to **write** only for mutations.
-- Introduce per‑object / per‑collection locks to reduce contention.
-
-### Initial lock map
-- **Global environment / bindings**: RW lock
-  - Reads = shared
-  - Defines/sets = exclusive
-- **Symbol / intern table**: RW lock
-  - Lookup = shared
-  - Intern new symbol = exclusive
-- **Type registry / method tables**: RW lock
-  - Lookup = shared
-  - Define new type/method = exclusive
-- **Module cache / loader state**: RW lock
-- **GC / allocator**: start with **single global mutex** or thread‑safe allocator
-- **IO / job control / child registry**: separate IO lock
-
-### Rules of thumb
-- Never hold write locks while doing blocking IO.
-- Keep lock scope minimal; release before calling external processes.
-- All public runtime entry points must acquire locks (even if callers "should" have already).
+## Concurrency plan (later)
+- Keep lock ordering discipline (global → namespace → object → IO).
+- Phase 1: serialize evaluation with a global write lock.
 
 ## Networking protocol (minimal)
-Line‑based protocol per client (no enqueueing):
-- Client sends a line.
-- Server responds with a line (or multiline with a clear terminator).
-- Include a request id so responses can be matched safely when clients are async.
+Line‑based protocol with request IDs (already implemented).
 
-Example:
-```
-<id> <expr>\n
--> <id> OK <result>\n
--> <id> ERR <message>\n
-```
+## Implementation staging (progress)
+1) Tokenizer REPL on stdin/stdout. ✅
+2) Threaded TCP server using the same REPL core. ✅
+3) Global RW locks + serialized eval. ⏳
+4) Socket protocol + concurrency tests. ⏳
 
-## Implementation staging (suggested)
-1) **Tokenizer REPL** on stdin/stdout.
-2) **Threaded TCP server** that plugs into the same REPL core (see `TCP.md` for the detailed test-first plan).
-3) **Global RW locks** + serialized eval (global write lock).
-4) Socket protocol + concurrency tests (tokenizer tests already exist).
+## Next slice (do this after error‑message pinning)
+### Minimal parser v0 (single‑token expressions)
+Goal: Introduce a **parser + AST** without changing existing tokenizer output.
 
-## Open follow-ups for next session
-- TCP REPL test plan and protocol checklist are in `TCP.md`.
-- Token output format chosen:
-  - Success: `OK [IDENT foo] [NUMBER 42] [STRING hi] [OPERATOR +]`
-  - Error: `ERR 1:5 message`
-  - Blank/whitespace-only lines should return `OK` with an empty list.
-- Define error messages (positioning, line/col vs index).
-- Decide on Windows socket abstraction strategy early.
-- Decide on request/response framing and error handling.
+**Behavior**
+- Parse exactly **one token expression**: `NUMBER`, `STRING`, `IDENT`, or `OPERATOR`.
+- Require **EOF** after the single expression; extra tokens are a parse error.
+- Tokenizer errors propagate as parse errors (same line/col and message).
+
+**AST representation (v0)**
+- `AST_NUMBER`, `AST_STRING`, `AST_IDENT`, `AST_OPERATOR` with value string.
+- New API entrypoint in `src/parser.h`:
+  - `bool parser_parse_single(const char *input, AstNode **out, ParseError *err)`
+  - `void ast_free(AstNode *node)`
+- `ParseError` should include `line`, `col`, and `message` (mirrors tokenizer error messages).
+
+**AST printer**
+- New function: `char *ast_format(const AstNode *node)`
+- Suggested format (simple & stable):
+  - `AST [NUMBER 42]`
+  - `AST [STRING hi]`
+  - `AST [IDENT foo]`
+  - `AST [OPERATOR +]`
+
+**CLI / REPL integration**
+- Add `cutlet repl --ast` mode that uses parser + AST printer.
+- Default `cutlet repl` stays token‑based output.
+
+**Tests (must be written first)**
+- `tests/test_parser.c`:
+  - Single token success for NUMBER/STRING/IDENT/OPERATOR.
+  - Extra token error (e.g., `\"foo bar\"`).
+  - Tokenizer error passthrough (`\"unterminated`).
+- `tests/test_repl.c` (or new `tests/test_repl_ast.c`):
+  - `--ast` output matches exact format.
+
+**Required process**
+- Add tests first.
+- Run `make test` and `make check` to prove failures.
+- Pause for confirmation before implementation.
+- Run `make test` and `make check` after every code change.
+
+## Open follow-ups (tracking)
+- Pin down tokenizer error wording/positions (see `TOK_ERROR.md`).
+- Decide on Windows socket abstraction strategy.
+- Define locking and serialization approach for eval.
 
 ---
 End of handoff.
