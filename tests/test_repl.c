@@ -299,10 +299,9 @@ TEST(test_minus_operator_and_number) {
  * ============================================================ */
 
 TEST(test_error_unterminated_string) {
-    char *result = repl_format_line("\"hello");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "error should start with ERR");
-    free(result);
+    /* Exact error format: ERR line:col message */
+    ASSERT(format_matches("\"hello", "ERR 1:1 unterminated string"),
+           "unterminated string exact error format");
     PASS();
 }
 
@@ -339,10 +338,9 @@ TEST(test_negative_number) {
 }
 
 TEST(test_error_number_adjacent_ident) {
-    char *result = repl_format_line("42foo");
-    ASSERT_NOT_NULL(result, "result should not be null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "number adjacent ident should be error");
-    free(result);
+    /* Exact error format: ERR line:col message */
+    ASSERT(format_matches("42foo", "ERR 1:1 number followed by identifier character"),
+           "number adjacent ident exact error format");
     PASS();
 }
 

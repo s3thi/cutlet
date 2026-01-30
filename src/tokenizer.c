@@ -43,6 +43,11 @@ struct Tokenizer {
     /* Sticky state flags */
     bool at_eof;
     bool at_error;
+
+    /* Preserved error position for sticky error (Option A) */
+    size_t error_pos;
+    size_t error_line;
+    size_t error_col;
 };
 
 /* ============================================================
@@ -184,6 +189,9 @@ static size_t skip_whitespace(Tokenizer *tok) {
 static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_pos,
                       size_t error_line, size_t error_col) {
     tok->at_error = true;
+    tok->error_pos = error_pos;
+    tok->error_line = error_line;
+    tok->error_col = error_col;
 
     out->type = TOK_ERROR;
     out->value = msg;
@@ -399,9 +407,9 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
         out->type = TOK_ERROR;
         out->value = tok->error_msg;
         out->value_len = strlen(tok->error_msg);
-        out->pos = tok->pos;
-        out->line = tok->line;
-        out->col = tok->col;
+        out->pos = tok->error_pos;
+        out->line = tok->error_line;
+        out->col = tok->error_col;
         return true;
     }
 

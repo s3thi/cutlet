@@ -1088,35 +1088,54 @@ TEST(test_error_unterminated_string) {
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for unterminated string");
     ASSERT_EQ(t.pos, 0, "expected error at pos 0");
+    ASSERT_EQ(t.line, 1, "expected error at line 1");
+    ASSERT_EQ(t.col, 1, "expected error at col 1");
+    ASSERT_STR_EQ(t.value, "unterminated string", "expected exact error message");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_error_unterminated_string_with_newline) {
+    /* Newline inside a string triggers unterminated string error at the opening quote */
     Tokenizer *tok = tokenizer_create("\"hello\nworld");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for unterminated string at newline");
+    ASSERT_EQ(t.pos, 0, "expected error at pos 0");
+    ASSERT_EQ(t.line, 1, "expected error at line 1");
+    ASSERT_EQ(t.col, 1, "expected error at col 1");
+    ASSERT_STR_EQ(t.value, "unterminated string", "expected exact error message");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_error_sticky) {
-    /* After an error, subsequent calls should also return error */
+    /* After an error, subsequent calls should return the same error with
+     * the same position and message (Option A: preserve original error location) */
     Tokenizer *tok = tokenizer_create("42foo");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR");
+    ASSERT_EQ(t.pos, 0, "expected error at pos 0");
+    ASSERT_EQ(t.line, 1, "expected error at line 1");
+    ASSERT_EQ(t.col, 1, "expected error at col 1");
+    ASSERT_STR_EQ(t.value, "number followed by identifier character",
+                  "expected exact error message");
 
-    /* Calling again should still return error */
+    /* Calling again should return the same error with same position */
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR on second call");
+    ASSERT_EQ(t.pos, 0, "sticky error should preserve original pos");
+    ASSERT_EQ(t.line, 1, "sticky error should preserve original line");
+    ASSERT_EQ(t.col, 1, "sticky error should preserve original col");
+    ASSERT_STR_EQ(t.value, "number followed by identifier character",
+                  "sticky error should preserve original message");
 
     tokenizer_destroy(tok);
     PASS();
@@ -1124,26 +1143,36 @@ TEST(test_error_sticky) {
 
 /* Number followed by ident-start char is the ONLY adjacency error */
 TEST(test_error_number_followed_by_ident) {
-    /* 123abc => ERROR */
+    /* 123abc => ERROR at pos 0, line 1, col 1 */
     Tokenizer *tok = tokenizer_create("123abc");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '123abc'");
+    ASSERT_EQ(t.pos, 0, "expected error at pos 0");
+    ASSERT_EQ(t.line, 1, "expected error at line 1");
+    ASSERT_EQ(t.col, 1, "expected error at col 1");
+    ASSERT_STR_EQ(t.value, "number followed by identifier character",
+                  "expected exact error message");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_error_number_followed_by_underscore) {
-    /* 123_ => ERROR */
+    /* 123_ => ERROR at pos 0, line 1, col 1 */
     Tokenizer *tok = tokenizer_create("123_");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_ERROR, "expected ERROR for '123_'");
+    ASSERT_EQ(t.pos, 0, "expected error at pos 0");
+    ASSERT_EQ(t.line, 1, "expected error at line 1");
+    ASSERT_EQ(t.col, 1, "expected error at col 1");
+    ASSERT_STR_EQ(t.value, "number followed by identifier character",
+                  "expected exact error message");
 
     tokenizer_destroy(tok);
     PASS();
