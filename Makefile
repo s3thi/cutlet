@@ -103,8 +103,8 @@ $(TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.
 	$(CC) $(CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(LDFLAGS)
 
 # Build eval test binary
-$(TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(LDFLAGS) -lm
+$(TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
 
 # Build REPL test binary
 $(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
@@ -191,8 +191,8 @@ $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $
 $(SANITIZE_TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
 
-$(SANITIZE_TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS) -lm
+$(SANITIZE_TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm

@@ -3,7 +3,7 @@
  *
  * Evaluates an AST node tree and returns a Value result.
  * Numbers are stored as doubles; division always produces floats.
- * Unknown identifiers and division by zero produce errors.
+ * Unknown identifiers and assignment to undeclared variables produce errors.
  */
 
 #ifndef CUTLET_EVAL_H

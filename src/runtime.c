@@ -9,13 +9,15 @@
  * is a write lock.
  *
  * Thread safety: init uses pthread_once to guarantee the rwlock is
- * initialized exactly once, even under concurrent calls.  destroy is
- * a no-op — the lock lives for the process lifetime.
+ * initialized exactly once, even under concurrent calls.  destroy
+ * clears the variable environment; the lock lives for the process lifetime.
  */
 
 #include "runtime.h"
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Global evaluation lock.  Write-locked for every eval; read-locks
  * reserved for future read-only introspection. */
@@ -26,6 +28,18 @@ static pthread_once_t runtime_once = PTHREAD_ONCE_INIT;
 
 /* Set to true by runtime_init_impl if pthread_rwlock_init succeeds. */
 static bool init_ok = false;
+
+/* Simple variable environment (linked list).  Access is serialized by the
+ * global eval lock; do not call these helpers without holding the lock. */
+typedef struct RuntimeVar {
+    char *name;
+    Value value;
+    struct RuntimeVar *next;
+} RuntimeVar;
+
+static RuntimeVar *runtime_vars = NULL;
+
+static void runtime_vars_clear(void);
 
 /* Test-only hook pointers (only compiled in when CUTLET_TESTING is defined). */
 #ifdef CUTLET_TESTING
@@ -44,9 +58,21 @@ bool runtime_init(void) {
     return init_ok;
 }
 
-/* No-op: the eval lock lives for the process lifetime.  Calling this
- * is harmless and keeps existing call sites working. */
-void runtime_destroy(void) {}
+/* Clears the variable environment. The eval lock lives for the process
+ * lifetime, so this remains safe to call any time. */
+void runtime_destroy(void) { runtime_vars_clear(); }
+
+static void runtime_vars_clear(void) {
+    RuntimeVar *cur = runtime_vars;
+    while (cur) {
+        RuntimeVar *next = cur->next;
+        free(cur->name);
+        value_free(&cur->value);
+        free(cur);
+        cur = next;
+    }
+    runtime_vars = NULL;
+}
 
 void runtime_eval_lock(void) {
     /* Lazy init: safe to call even if runtime_init() was never called
@@ -70,4 +96,82 @@ void runtime_eval_unlock(void) {
         runtime_test_on_lock_exit();
 #endif
     pthread_rwlock_unlock(&eval_lock);
+}
+
+static RuntimeVar *runtime_var_find(const char *name) {
+    for (RuntimeVar *cur = runtime_vars; cur; cur = cur->next) {
+        if (strcmp(cur->name, name) == 0)
+            return cur;
+    }
+    return NULL;
+}
+
+static bool value_clone(Value *out, const Value *src) {
+    if (!out || !src)
+        return false;
+    *out = *src;
+    if (src->type == VAL_STRING || src->type == VAL_ERROR) {
+        const char *s = src->string ? src->string : "";
+        out->string = strdup(s);
+        if (!out->string)
+            return false;
+    } else {
+        out->string = NULL;
+    }
+    return true;
+}
+
+RuntimeVarStatus runtime_var_get(const char *name, Value *out) {
+    runtime_init();
+    RuntimeVar *var = runtime_var_find(name);
+    if (!var)
+        return RUNTIME_VAR_NOT_FOUND;
+    if (!value_clone(out, &var->value))
+        return RUNTIME_VAR_OOM;
+    return RUNTIME_VAR_OK;
+}
+
+RuntimeVarStatus runtime_var_define(const char *name, const Value *value) {
+    runtime_init();
+    RuntimeVar *var = runtime_var_find(name);
+    Value cloned;
+    if (!value_clone(&cloned, value))
+        return RUNTIME_VAR_OOM;
+
+    if (var) {
+        value_free(&var->value);
+        var->value = cloned;
+        return RUNTIME_VAR_OK;
+    }
+
+    RuntimeVar *entry = malloc(sizeof(RuntimeVar));
+    if (!entry) {
+        value_free(&cloned);
+        return RUNTIME_VAR_OOM;
+    }
+    entry->name = strdup(name);
+    if (!entry->name) {
+        value_free(&cloned);
+        free(entry);
+        return RUNTIME_VAR_OOM;
+    }
+    entry->value = cloned;
+    entry->next = runtime_vars;
+    runtime_vars = entry;
+    return RUNTIME_VAR_OK;
+}
+
+RuntimeVarStatus runtime_var_assign(const char *name, const Value *value) {
+    runtime_init();
+    RuntimeVar *var = runtime_var_find(name);
+    if (!var)
+        return RUNTIME_VAR_NOT_FOUND;
+
+    Value cloned;
+    if (!value_clone(&cloned, value))
+        return RUNTIME_VAR_OOM;
+
+    value_free(&var->value);
+    var->value = cloned;
+    return RUNTIME_VAR_OK;
 }

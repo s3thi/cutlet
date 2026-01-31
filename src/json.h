@@ -27,7 +27,7 @@
  */
 typedef struct {
     unsigned long id;
-    char *expr;        /* owned, caller must free */
+    char *expr; /* owned, caller must free */
     bool want_tokens;
     bool want_ast;
 } JsonRequest;
@@ -38,10 +38,10 @@ typedef struct {
 typedef struct {
     unsigned long id;
     bool ok;
-    char *value;   /* owned, set when ok=true */
-    char *error;   /* owned, set when ok=false */
-    char *tokens;  /* owned, optional debug */
-    char *ast;     /* owned, optional debug */
+    char *value;  /* owned, set when ok=true */
+    char *error;  /* owned, set when ok=false */
+    char *tokens; /* owned, optional debug */
+    char *ast;    /* owned, optional debug */
 } JsonResponse;
 
 /*

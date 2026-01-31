@@ -22,6 +22,7 @@
 #ifndef CUTLET_RUNTIME_H
 #define CUTLET_RUNTIME_H
 
+#include "eval.h"
 #include <stdbool.h>
 
 /*
@@ -32,7 +33,8 @@
 bool runtime_init(void);
 
 /*
- * No-op.  The global eval lock lives for the process lifetime.
+ * Clears the variable environment. The global eval lock lives for the
+ * process lifetime, so this is otherwise a no-op.
  * Retained for API compatibility; safe to call at any time.
  */
 void runtime_destroy(void);
@@ -47,6 +49,39 @@ void runtime_eval_lock(void);
  * Release the global evaluation write lock.
  */
 void runtime_eval_unlock(void);
+
+/*
+ * Variable environment status codes.
+ */
+typedef enum {
+    RUNTIME_VAR_OK = 0,
+    RUNTIME_VAR_NOT_FOUND,
+    RUNTIME_VAR_OOM,
+} RuntimeVarStatus;
+
+/*
+ * Read a variable value into out (owned fields are allocated).
+ * Returns RUNTIME_VAR_NOT_FOUND if the name is not bound.
+ *
+ * Callers must hold the global eval lock for thread safety.
+ */
+RuntimeVarStatus runtime_var_get(const char *name, Value *out);
+
+/*
+ * Define or overwrite a variable binding.
+ * Returns RUNTIME_VAR_OK or RUNTIME_VAR_OOM.
+ *
+ * Callers must hold the global eval lock for thread safety.
+ */
+RuntimeVarStatus runtime_var_define(const char *name, const Value *value);
+
+/*
+ * Assign to an existing variable binding.
+ * Returns RUNTIME_VAR_NOT_FOUND if the name is not bound.
+ *
+ * Callers must hold the global eval lock for thread safety.
+ */
+RuntimeVarStatus runtime_var_assign(const char *name, const Value *value);
 
 /*
  * Test-only hooks.  When CUTLET_TESTING is defined, the runtime calls

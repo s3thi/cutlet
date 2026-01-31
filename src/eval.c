@@ -7,6 +7,7 @@
  */
 
 #include "eval.h"
+#include "runtime.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -55,8 +56,14 @@ Value eval(const AstNode *node) {
     }
 
     case AST_IDENT: {
-        /* No variable bindings yet — all identifiers are errors */
-        return make_error("unknown variable '%s'", node->value);
+        /* Look up variable in the shared runtime environment. */
+        Value out = {0};
+        RuntimeVarStatus status = runtime_var_get(node->value, &out);
+        if (status == RUNTIME_VAR_OK)
+            return out;
+        if (status == RUNTIME_VAR_NOT_FOUND)
+            return make_error("unknown variable '%s'", node->value);
+        return make_error("memory allocation failed");
     }
 
     case AST_BINOP: {
@@ -122,6 +129,43 @@ Value eval(const AstNode *node) {
         return make_number(result);
     }
 
+    case AST_DECL: {
+        /* Declare (or overwrite) a variable and return its value. */
+        Value rhs = eval(node->left);
+        if (rhs.type == VAL_ERROR)
+            return rhs;
+        RuntimeVarStatus status = runtime_var_define(node->value, &rhs);
+        if (status != RUNTIME_VAR_OK) {
+            value_free(&rhs);
+            return make_error("memory allocation failed");
+        }
+        return rhs;
+    }
+
+    case AST_ASSIGN: {
+        /* Assign to an existing variable; error if undefined. */
+        Value existing = {0};
+        RuntimeVarStatus exists = runtime_var_get(node->value, &existing);
+        if (exists == RUNTIME_VAR_NOT_FOUND)
+            return make_error("undefined variable '%s'", node->value);
+        if (exists != RUNTIME_VAR_OK)
+            return make_error("memory allocation failed");
+        value_free(&existing);
+
+        Value rhs = eval(node->left);
+        if (rhs.type == VAL_ERROR)
+            return rhs;
+
+        RuntimeVarStatus status = runtime_var_assign(node->value, &rhs);
+        if (status != RUNTIME_VAR_OK) {
+            value_free(&rhs);
+            if (status == RUNTIME_VAR_NOT_FOUND)
+                return make_error("undefined variable '%s'", node->value);
+            return make_error("memory allocation failed");
+        }
+        return rhs;
+    }
+
     default:
         return make_error("unknown AST node type");
     }
@@ -146,9 +190,10 @@ char *value_format(const Value *v) {
          * with minimal decimal places. Use %g which removes trailing zeros.
          */
         char buf[64];
-        if (v->number == (long long)v->number && fabs(v->number) < 1e15) {
+        double truncated = trunc(v->number);
+        if (v->number == truncated && fabs(v->number) < 1e15) {
             /* Integer value — print without decimal */
-            snprintf(buf, sizeof(buf), "%lld", (long long)v->number);
+            snprintf(buf, sizeof(buf), "%lld", (long long)truncated);
         } else {
             /* Float value — use %g for minimal representation */
             snprintf(buf, sizeof(buf), "%g", v->number);

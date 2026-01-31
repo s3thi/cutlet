@@ -32,9 +32,7 @@ static size_t json_escaped_len(const char *src) {
     size_t len = 0;
     for (const char *p = src; *p; p++) {
         unsigned char c = (unsigned char)*p;
-        if (c == '"' || c == '\\')
-            len += 2;
-        else if (c == '\n' || c == '\r' || c == '\t')
+        if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t')
             len += 2;
         else if (c < 0x20)
             len += 6; /* \uXXXX */
@@ -161,8 +159,8 @@ char *json_encode_response(const JsonResponse *resp) {
  * Skip whitespace in json starting at *pos.
  */
 static void skip_ws(const char *json, size_t len, size_t *pos) {
-    while (*pos < len && (json[*pos] == ' ' || json[*pos] == '\t' || json[*pos] == '\n' ||
-                          json[*pos] == '\r')) {
+    while (*pos < len &&
+           (json[*pos] == ' ' || json[*pos] == '\t' || json[*pos] == '\n' || json[*pos] == '\r')) {
         (*pos)++;
     }
 }
@@ -243,6 +241,10 @@ static char *parse_json_string(const char *json, size_t len, size_t *pos) {
         } else {
             out[o++] = json[i++];
         }
+    }
+    if (o > ulen) {
+        free(out);
+        return NULL;
     }
     out[o] = '\0';
     *pos = i + 1; /* skip closing quote */

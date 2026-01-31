@@ -2,8 +2,9 @@
  * parser.h - Cutlet parser interface
  *
  * Parses expressions using a Pratt (precedence climbing) parser.
- * Supports binary operators (+, -, *, /, **), unary minus, and
- * parenthesized sub-expressions. Leaf nodes are NUMBER, STRING, or IDENT.
+ * Supports binary operators (+, -, *, /, **), unary minus, assignment,
+ * declarations ("my"), and parenthesized sub-expressions. Leaf nodes are
+ * NUMBER, STRING, or IDENT.
  */
 
 #ifndef CUTLET_PARSER_H
@@ -18,6 +19,8 @@ typedef enum {
     AST_IDENT,  /* identifier */
     AST_BINOP,  /* binary operator: +, -, *, /, ** */
     AST_UNARY,  /* unary minus */
+    AST_DECL,   /* declaration: my name = expr */
+    AST_ASSIGN, /* assignment: name = expr */
 } AstNodeType;
 
 typedef struct AstNode {
@@ -25,6 +28,7 @@ typedef struct AstNode {
     char *value;           /* literal value or operator string (owned) */
     struct AstNode *left;  /* left operand (or sole operand for unary) */
     struct AstNode *right; /* right operand (NULL for unary/leaf) */
+    bool grouped;          /* true if the node originated from parentheses */
 } AstNode;
 
 typedef struct {
@@ -56,6 +60,7 @@ const char *ast_node_type_str(AstNodeType type);
  * Leaf: "AST [TYPE value]"
  * Binop: "AST [BINOP op [left] [right]]"
  * Unary: "AST [UNARY op [operand]]"
+ * Decl/Assign: "AST [DECL name [expr]]" or "AST [ASSIGN name [expr]]"
  * Returns a newly allocated string. Caller must free.
  */
 char *ast_format(const AstNode *node);

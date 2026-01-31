@@ -58,7 +58,7 @@ Line‑based protocol with request IDs (already implemented).
 4) Global RW locks + serialized eval. ✅ (tests and hooks added; lock hierarchy comments in runtime)
 5) Socket protocol + concurrency tests. ⏳ (deferred; see guardrail)
 6) Expression evaluation (precedence/parentheses). ✅
-7) Variables + assignment. ⏳
+7) Variables + assignment. ✅
 
 ## Guardrail while deferring protocol tests
 - Do **not** modify TCP server/transport code while implementing language features.
@@ -126,20 +126,14 @@ Goal: turn the parser into a real expression parser with evaluation.
 4) Implement parser + evaluator.
 5) Run `make test` and `make check` after every code change.
 
-## Next slice: Variables + assignment (Phase 2b)
+## Completed: Variables + assignment (Phase 2b)
 Goal: add persistent state across REPL lines and sockets.
 
-### Scope
+### Scope (delivered)
 - Assignment syntax (`name = expr`) and identifier lookup.
+- Declaration syntax (`my name = expr`) with right-associative chains.
 - Environment lives in the shared runtime image; respects global write lock.
-
-### Tests (write first)
-- `x = 2` then `x + 3` → `5`.
-- Unknown variable error pinned.
-- Concurrent clients see shared state (or decide and document isolation).
-
-### Required process
-Same as above (tests first, prove failures, confirm, implement, rerun tests).
+- AST output includes `DECL`/`ASSIGN` nodes with pinned error messages.
 
 ---
 End of handoff.

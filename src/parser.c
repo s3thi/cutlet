@@ -3,13 +3,17 @@
  *
  * Implements a Pratt (precedence climbing) parser for expressions.
  * Precedence (low to high):
+ *   0. assignment / declaration (=, "my") (right-associative)
  *   1. +, - (binary, left-associative)
  *   2. *, / (left-associative)
  *   3. unary - (prefix)
  *   4. ** (right-associative)
  *
  * Grammar:
- *   expr     → pratt(0)
+ *   expr     → assignment
+ *   assignment → "my" IDENT "=" assignment
+ *              | IDENT "=" assignment
+ *              | pratt(0)
  *   atom     → NUMBER | STRING | IDENT | '(' expr ')' | '-' expr
  *   infix    → '+' | '-' | '*' | '/' | '**'
  */
@@ -55,6 +59,14 @@ static void parser_error(Parser *p, size_t line, size_t col, const char *fmt, ..
     va_end(ap); // NOLINT(clang-analyzer-valist.Uninitialized)
 }
 
+/*
+ * Check whether the current token matches a keyword literal.
+ */
+static bool token_is_keyword(const Token *t, const char *kw) {
+    size_t kw_len = strlen(kw);
+    return t->type == TOK_IDENT && t->value_len == kw_len && strncmp(t->value, kw, kw_len) == 0;
+}
+
 /* ============================================================
  * AST node constructors
  * ============================================================ */
@@ -76,6 +88,7 @@ static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len)
     node->value[value_len] = '\0';
     node->left = NULL;
     node->right = NULL;
+    node->grouped = false;
     return node;
 }
 
@@ -96,6 +109,7 @@ static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode
     node->value[op_len] = '\0';
     node->left = left;
     node->right = right;
+    node->grouped = false;
     return node;
 }
 
@@ -116,6 +130,28 @@ static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
     node->value[op_len] = '\0';
     node->left = operand;
     node->right = NULL;
+    node->grouped = false;
+    return node;
+}
+
+/*
+ * Create a declaration or assignment AST node.
+ */
+static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, AstNode *expr) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = type;
+    node->value = malloc(name_len + 1);
+    if (!node->value) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->value, name, name_len);
+    node->value[name_len] = '\0';
+    node->left = expr;
+    node->right = NULL;
+    node->grouped = false;
     return node;
 }
 
@@ -148,7 +184,8 @@ static bool is_right_assoc(const char *op, size_t len) {
  * Pratt parser core
  * ============================================================ */
 
-/* Forward declaration */
+/* Forward declarations */
+static AstNode *parse_assignment(Parser *p);
 static AstNode *parse_expr(Parser *p, int min_prec);
 
 /*
@@ -227,7 +264,7 @@ static AstNode *parse_atom(Parser *p) {
         /* Open parenthesis */
         if (t.value_len == 1 && t.value[0] == '(') {
             advance(p);
-            AstNode *expr = parse_expr(p, 0);
+            AstNode *expr = parse_assignment(p);
             if (!expr)
                 return NULL;
 
@@ -239,6 +276,7 @@ static AstNode *parse_atom(Parser *p) {
                 return NULL;
             }
             advance(p);
+            expr->grouped = true;
             return expr;
         }
 
@@ -250,6 +288,86 @@ static AstNode *parse_atom(Parser *p) {
     /* Shouldn't reach here */
     parser_error(p, t.line, t.col, "unexpected token");
     return NULL;
+}
+
+/*
+ * Parse an assignment or declaration expression.
+ * assignment → "my" IDENT "=" assignment
+ *            | IDENT "=" assignment
+ *            | pratt(0)
+ */
+static AstNode *parse_assignment(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    if (token_is_keyword(&p->current, "my")) {
+        Token kw = p->current;
+        advance(p);
+
+        if (p->current.type != TOK_IDENT) {
+            parser_error(p, p->current.line, p->current.col, "expected identifier after 'my'");
+            return NULL;
+        }
+
+        Token name_tok = p->current;
+        AstNode *decl = make_named(AST_DECL, name_tok.value, name_tok.value_len, NULL);
+        if (!decl) {
+            parser_error(p, kw.line, kw.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+
+        if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+            p->current.value[0] != '=') {
+            parser_error(p, p->current.line, p->current.col, "expected '=' after variable name");
+            ast_free(decl);
+            return NULL;
+        }
+
+        advance(p);
+        AstNode *rhs = parse_assignment(p);
+        if (!rhs) {
+            ast_free(decl);
+            return NULL;
+        }
+        decl->left = rhs;
+        return decl;
+    }
+
+    AstNode *left = parse_expr(p, 0);
+    if (!left)
+        return NULL;
+
+    if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+        p->current.value[0] == '=') {
+        size_t op_line = p->current.line;
+        size_t op_col = p->current.col;
+
+        if (left->type != AST_IDENT || left->grouped) {
+            parser_error(p, op_line, op_col, "invalid assignment target");
+            ast_free(left);
+            return NULL;
+        }
+
+        advance(p);
+        AstNode *rhs = parse_assignment(p);
+        if (!rhs) {
+            ast_free(left);
+            return NULL;
+        }
+
+        AstNode *assign = make_named(AST_ASSIGN, left->value, strlen(left->value), rhs);
+        if (!assign) {
+            ast_free(left);
+            ast_free(rhs);
+            parser_error(p, op_line, op_col, "memory allocation failed");
+            return NULL;
+        }
+        ast_free(left);
+        return assign;
+    }
+
+    return left;
 }
 
 /*
@@ -345,7 +463,7 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     advance(&p);
 
     /* Parse the full expression */
-    AstNode *result = parse_expr(&p, 0);
+    AstNode *result = parse_assignment(&p);
 
     if (p.has_error) {
         ast_free(result);
@@ -396,6 +514,10 @@ const char *ast_node_type_str(AstNodeType type) {
         return "BINOP";
     case AST_UNARY:
         return "UNARY";
+    case AST_DECL:
+        return "DECL";
+    case AST_ASSIGN:
+        return "ASSIGN";
     default:
         return "UNKNOWN";
     }
@@ -458,6 +580,22 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf, len, "[%s %s %s]", type_str, node->value, operand_str);
         free(operand_str);
+        return buf;
+    }
+
+    if (node->type == AST_DECL || node->type == AST_ASSIGN) {
+        /* Decl/Assign: [DECL name expr] or [ASSIGN name expr] */
+        char *expr_str = ast_format_node(node->left);
+        if (!expr_str)
+            return NULL;
+        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + strlen(expr_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(expr_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s]", type_str, node->value, expr_str);
+        free(expr_str);
         return buf;
     }
 
