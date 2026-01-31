@@ -6,8 +6,8 @@
  *   cutlet repl --listen HOST:PORT         start TCP REPL server
  *   cutlet repl --connect HOST:PORT        connect to running server
  *
- * The stdin REPL reads lines from stdin, tokenizes each line, and prints
- * a formatted result to stdout.
+ * The stdin REPL reads lines from stdin, parses and evaluates each
+ * expression, and prints a formatted result to stdout.
  *
  * The TCP server accepts multiple clients, each in its own thread.
  * The client auto-generates request IDs and strips protocol framing

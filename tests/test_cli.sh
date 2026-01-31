@@ -60,36 +60,31 @@ test_error_prefix() {
 echo "Running CLI integration tests..."
 echo
 
-echo "Basic functionality:"
+echo "Basic evaluation (token mode):"
 test_output "empty input" "" "OK"
 test_output "single number" "42" "OK [NUMBER 42]"
 test_output "single string" '"hello"' "OK [STRING hello]"
-test_output "single ident" "foo" "OK [IDENT foo]"
-test_output "mixed tokens" 'foo 42 "bar"' "OK [IDENT foo] [NUMBER 42] [STRING bar]"
-
-echo
-echo "Edge cases:"
-test_output "operator alone" "+" "OK [OPERATOR +]"
-test_output "minus operator" "-" "OK [OPERATOR -]"
-test_output "kebab-case" "kebab-case" "OK [IDENT kebab] [OPERATOR -] [IDENT case]"
-test_output "no symbol sandwich" "hello+world" "OK [IDENT hello] [OPERATOR +] [IDENT world]"
-test_output "empty string" '""' "OK [STRING ]"
+test_output "addition" "1 + 2" "OK [NUMBER 3]"
+test_output "multiplication" "2 * 3" "OK [NUMBER 6]"
+test_output "float division" "7 / 2" "OK [NUMBER 3.5]"
+test_output "precedence" "1 + 2 * 3" "OK [NUMBER 7]"
+test_output "parentheses" "(1 + 2) * 3" "OK [NUMBER 9]"
+test_output "exponentiation" "2 ** 10" "OK [NUMBER 1024]"
+test_output "unary minus" "-3" "OK [NUMBER -3]"
 test_output "whitespace only" "   " "OK"
-test_output "operator between idents" "a + b" "OK [IDENT a] [OPERATOR +] [IDENT b]"
-test_output "operator between numbers" "1 + 2" "OK [NUMBER 1] [OPERATOR +] [NUMBER 2]"
 
 echo
-echo "Error cases:"
-test_error_prefix "unterminated string" '"hello' "ERR 1:1 "
-test_output "adjacent string+ident" '"a"b' "OK [STRING a] [IDENT b]"
-test_output "negative number" "-10" "OK [OPERATOR -] [NUMBER 10]"
-test_error_prefix "number adjacent ident" "42foo" "ERR 1:1 "
+echo "Error cases (token mode):"
+test_error_prefix "unterminated string" '"hello' "ERR "
+test_error_prefix "number adjacent ident" "42foo" "ERR "
+test_error_prefix "unknown ident" "foo" "ERR "
+test_error_prefix "division by zero" "1 / 0" "ERR "
 
 echo
 echo "Multiple lines:"
-multi_result=$(printf 'foo\n42\n"hi"' | "$CUTLET" repl)
-multi_expected="OK [IDENT foo]
-OK [NUMBER 42]
+multi_result=$(printf '42\n1 + 2\n"hi"' | "$CUTLET" repl)
+multi_expected="OK [NUMBER 42]
+OK [NUMBER 3]
 OK [STRING hi]"
 if [ "$multi_result" = "$multi_expected" ]; then
     echo "  PASS: multiple lines"
@@ -110,9 +105,11 @@ test_output "ast string" '"hello"' "AST [STRING hello]" "--ast"
 test_output "ast ident" "foo" "AST [IDENT foo]" "--ast"
 test_output "ast empty" "" "AST" "--ast"
 test_output "ast whitespace" "   " "AST" "--ast"
-test_error_prefix "ast operator error" "+" "ERR 1:1 " "--ast"
-test_error_prefix "ast extra token error" "foo bar" "ERR 1:" "--ast"
-test_error_prefix "ast tokenizer error" "42foo" "ERR 1:1 " "--ast"
+test_output "ast binop" "1 + 2" "AST [BINOP + [NUMBER 1] [NUMBER 2]]" "--ast"
+test_output "ast precedence" "1 + 2 * 3" "AST [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]" "--ast"
+test_output "ast unary" "-3" "AST [UNARY - [NUMBER 3]]" "--ast"
+test_error_prefix "ast parse error" "(" "ERR " "--ast"
+test_error_prefix "ast tokenizer error" "42foo" "ERR " "--ast"
 
 echo
 echo "CLI arguments:"
@@ -165,8 +162,8 @@ if [ -n "$SERVER_PORT" ]; then
     echo "  (server started on port $SERVER_PORT)"
 
     # Test: connect and send a single expression
-    connect_result=$(echo "foo" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$connect_result" | grep -q "OK \[IDENT foo\]"; then
+    connect_result=$(echo "1 + 2" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$connect_result" | grep -q "OK \[NUMBER 3\]"; then
         echo "  PASS: connect single expression"
         PASS=$((PASS + 1))
     else
@@ -176,9 +173,9 @@ if [ -n "$SERVER_PORT" ]; then
     fi
 
     # Test: connect and send multiple expressions
-    multi_connect=$(printf 'foo\n42\n"hi"' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$multi_connect" | grep -q "OK \[IDENT foo\]" && \
-       echo "$multi_connect" | grep -q "OK \[NUMBER 42\]" && \
+    multi_connect=$(printf '42\n1 + 2\n"hi"' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$multi_connect" | grep -q "OK \[NUMBER 42\]" && \
+       echo "$multi_connect" | grep -q "OK \[NUMBER 3\]" && \
        echo "$multi_connect" | grep -q "OK \[STRING hi\]"; then
         echo "  PASS: connect multiple expressions"
         PASS=$((PASS + 1))
@@ -190,7 +187,7 @@ if [ -n "$SERVER_PORT" ]; then
 
     # Test: connect with tokenization error
     err_connect=$(echo '"unterminated' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$err_connect" | grep -q "ERR 1:"; then
+    if echo "$err_connect" | grep -q "ERR "; then
         echo "  PASS: connect error expression"
         PASS=$((PASS + 1))
     else
@@ -209,7 +206,7 @@ else
 fi
 rm -f "$SERVER_OUT"
 
-# Test: --listen with no arg defaults to 127.0.0.1:7878
+# Test: --listen with no arg defaults to 127.0.0.1:7117
 SERVER_OUT_DEF=$(mktemp)
 "$CUTLET" repl --listen > "$SERVER_OUT_DEF" 2>&1 &
 SERVER_PID_DEF=$!
@@ -222,8 +219,8 @@ done
 
 if grep -q "^Listening on 127.0.0.1:7117$" "$SERVER_OUT_DEF" 2>/dev/null; then
     # Verify we can connect with default --connect (no arg)
-    def_result=$(echo "foo" | "$CUTLET" repl --connect 2>/dev/null)
-    if echo "$def_result" | grep -q "OK \[IDENT foo\]"; then
+    def_result=$(echo "42" | "$CUTLET" repl --connect 2>/dev/null)
+    if echo "$def_result" | grep -q "OK \[NUMBER 42\]"; then
         echo "  PASS: --listen default, --connect default"
         PASS=$((PASS + 1))
     else
@@ -257,8 +254,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 if grep -q "^Listening on 127.0.0.1:9111$" "$SERVER_OUT_CP" 2>/dev/null; then
-    cp_result=$(echo "bar" | "$CUTLET" repl --connect :9111 2>/dev/null)
-    if echo "$cp_result" | grep -q "OK \[IDENT bar\]"; then
+    cp_result=$(echo "42" | "$CUTLET" repl --connect :9111 2>/dev/null)
+    if echo "$cp_result" | grep -q "OK \[NUMBER 42\]"; then
         echo "  PASS: --listen :PORT, --connect :PORT"
         PASS=$((PASS + 1))
     else
@@ -297,8 +294,8 @@ if [ -n "$AST_PORT" ]; then
     echo "  (AST server started on port $AST_PORT)"
 
     # Both sides --ast: should get AST output
-    ast_result=$(echo "foo" | "$CUTLET" repl --ast --connect "127.0.0.1:$AST_PORT" 2>/dev/null)
-    if echo "$ast_result" | grep -q "AST \[IDENT foo\]"; then
+    ast_result=$(echo "1 + 2" | "$CUTLET" repl --ast --connect "127.0.0.1:$AST_PORT" 2>/dev/null)
+    if echo "$ast_result" | grep -q "AST \[BINOP"; then
         echo "  PASS: --ast --listen + --ast --connect"
         PASS=$((PASS + 1))
     else
@@ -309,7 +306,7 @@ if [ -n "$AST_PORT" ]; then
 
     # Mismatch: server --ast, client no --ast → error, non-zero exit
     mismatch1_exit=0
-    mismatch1=$(echo "foo" | "$CUTLET" repl --connect "127.0.0.1:$AST_PORT" 2>/dev/null) || mismatch1_exit=$?
+    mismatch1=$(echo "42" | "$CUTLET" repl --connect "127.0.0.1:$AST_PORT" 2>/dev/null) || mismatch1_exit=$?
     if echo "$mismatch1" | grep -q "mode mismatch"; then
         echo "  PASS: server --ast, client no --ast gives mismatch error"
         PASS=$((PASS + 1))
@@ -351,7 +348,7 @@ NOAST_PORT=$(grep "^Listening on " "$SERVER_OUT_NOAST" | sed 's/.*:\([0-9]*\)$/\
 
 if [ -n "$NOAST_PORT" ]; then
     mismatch2_exit=0
-    mismatch2=$(echo "foo" | "$CUTLET" repl --ast --connect "127.0.0.1:$NOAST_PORT" 2>/dev/null) || mismatch2_exit=$?
+    mismatch2=$(echo "42" | "$CUTLET" repl --ast --connect "127.0.0.1:$NOAST_PORT" 2>/dev/null) || mismatch2_exit=$?
     if echo "$mismatch2" | grep -q "mode mismatch"; then
         echo "  PASS: server no --ast, client --ast gives mismatch error"
         PASS=$((PASS + 1))

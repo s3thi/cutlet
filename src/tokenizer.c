@@ -358,18 +358,37 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
 }
 
 /*
+ * Check if a symbol character should always be emitted as its own
+ * single-character operator token, rather than being grouped with
+ * adjacent symbol chars. Parentheses are structural delimiters and
+ * must always stand alone.
+ */
+static bool is_solo_symbol(char c) {
+    return c == '(' || c == ')' || c == '+' || c == '-' || c == '/' || c == ',';
+}
+
+/*
  * Read an operator token.
  * Called when current char is a symbol char.
- * Consumes a run of symbol chars. No whitespace delimiter required.
+ * Consumes a run of symbol chars, except that '(' and ')' are always
+ * emitted as single-character tokens (they are structural delimiters,
+ * not combinable operators).
  */
 static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                           size_t start_col) {
     size_t value_start = tok->pos;
 
-    /* Consume run of symbol chars */
-    while (tok->pos < tok->input_len && is_symbol_char(tok->input[tok->pos])) {
+    if (is_solo_symbol(tok->input[tok->pos])) {
+        /* Solo symbol: emit exactly one character */
         tok->pos++;
         tok->col++;
+    } else {
+        /* Consume run of symbol chars, stopping at solo symbols */
+        while (tok->pos < tok->input_len && is_symbol_char(tok->input[tok->pos]) &&
+               !is_solo_symbol(tok->input[tok->pos])) {
+            tok->pos++;
+            tok->col++;
+        }
     }
 
     size_t value_len = tok->pos - value_start;

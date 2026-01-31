@@ -1,20 +1,314 @@
 /*
- * parser.c - Cutlet parser implementation
+ * parser.c - Cutlet Pratt parser implementation
  *
- * Parses a single-token expression from input using the tokenizer.
+ * Implements a Pratt (precedence climbing) parser for expressions.
+ * Precedence (low to high):
+ *   1. +, - (binary, left-associative)
+ *   2. *, / (left-associative)
+ *   3. unary - (prefix)
+ *   4. ** (right-associative)
+ *
+ * Grammar:
+ *   expr     → pratt(0)
+ *   atom     → NUMBER | STRING | IDENT | '(' expr ')' | '-' expr
+ *   infix    → '+' | '-' | '*' | '/' | '**'
  */
 
 #include "parser.h"
 #include "tokenizer.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-bool parser_parse_single(const char *input, AstNode **out, ParseError *err) {
-    /*
-     * Guard: if out is NULL we can't return a node, so fail immediately.
-     * Both out and err may be NULL — handle gracefully without crashing.
-     */
+/* ============================================================
+ * Parser state: wraps the tokenizer with one-token lookahead
+ * ============================================================ */
+
+typedef struct {
+    Tokenizer *tok;
+    Token current; /* current lookahead token */
+    bool has_error;
+    ParseError *err; /* caller-provided error output (may be NULL) */
+} Parser;
+
+/*
+ * Advance the parser to the next token.
+ */
+static void advance(Parser *p) { tokenizer_next(p->tok, &p->current); }
+
+/*
+ * Set a parse error. Only the first error is recorded (first error wins).
+ * Subsequent calls are no-ops so that the original error context is preserved.
+ */
+static void parser_error(Parser *p, size_t line, size_t col, const char *fmt, ...) {
+    if (p->has_error)
+        return;
+    p->has_error = true;
+    if (!p->err)
+        return;
+    p->err->line = line;
+    p->err->col = col;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(p->err->message, sizeof(p->err->message), fmt, ap);
+    va_end(ap); // NOLINT(clang-analyzer-valist.Uninitialized)
+}
+
+/* ============================================================
+ * AST node constructors
+ * ============================================================ */
+
+/*
+ * Create a leaf AST node (NUMBER, STRING, IDENT).
+ */
+static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = type;
+    node->value = malloc(value_len + 1);
+    if (!node->value) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->value, value, value_len);
+    node->value[value_len] = '\0';
+    node->left = NULL;
+    node->right = NULL;
+    return node;
+}
+
+/*
+ * Create a binary operator AST node.
+ */
+static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode *right) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = AST_BINOP;
+    node->value = malloc(op_len + 1);
+    if (!node->value) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->value, op, op_len);
+    node->value[op_len] = '\0';
+    node->left = left;
+    node->right = right;
+    return node;
+}
+
+/*
+ * Create a unary operator AST node.
+ */
+static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = AST_UNARY;
+    node->value = malloc(op_len + 1);
+    if (!node->value) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->value, op, op_len);
+    node->value[op_len] = '\0';
+    node->left = operand;
+    node->right = NULL;
+    return node;
+}
+
+/* ============================================================
+ * Operator precedence and associativity
+ * ============================================================ */
+
+/* Precedence levels for infix operators */
+static int infix_precedence(const char *op, size_t len) {
+    if (len == 1) {
+        if (op[0] == '+' || op[0] == '-')
+            return 1;
+        if (op[0] == '*' || op[0] == '/')
+            return 2;
+    }
+    if (len == 2 && op[0] == '*' && op[1] == '*')
+        return 4; /* ** is above unary (3) */
+    return 0;     /* not a known infix operator */
+}
+
+/*
+ * Check if an operator is right-associative.
+ * Only ** is right-associative.
+ */
+static bool is_right_assoc(const char *op, size_t len) {
+    return len == 2 && op[0] == '*' && op[1] == '*';
+}
+
+/* ============================================================
+ * Pratt parser core
+ * ============================================================ */
+
+/* Forward declaration */
+static AstNode *parse_expr(Parser *p, int min_prec);
+
+/*
+ * Parse an atom (prefix position).
+ * atom → NUMBER | STRING | IDENT | '(' expr ')' | '-' expr
+ */
+static AstNode *parse_atom(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    Token t = p->current;
+
+    /* Handle tokenizer errors */
+    if (t.type == TOK_ERROR) {
+        parser_error(p, t.line, t.col, "%.*s", (int)t.value_len, t.value);
+        return NULL;
+    }
+
+    /* Handle EOF */
+    if (t.type == TOK_EOF) {
+        parser_error(p, t.line, t.col, "expected expression, got EOF");
+        return NULL;
+    }
+
+    /* Number literal */
+    if (t.type == TOK_NUMBER) {
+        AstNode *node = make_leaf(AST_NUMBER, t.value, t.value_len);
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+        return node;
+    }
+
+    /* String literal */
+    if (t.type == TOK_STRING) {
+        AstNode *node = make_leaf(AST_STRING, t.value, t.value_len);
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+        return node;
+    }
+
+    /* Identifier */
+    if (t.type == TOK_IDENT) {
+        AstNode *node = make_leaf(AST_IDENT, t.value, t.value_len);
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+        return node;
+    }
+
+    /* Operator: check for prefix operators */
+    if (t.type == TOK_OPERATOR) {
+        /* Unary minus */
+        if (t.value_len == 1 && t.value[0] == '-') {
+            advance(p);
+            /* Unary minus has precedence 3 (between * and **) */
+            AstNode *operand = parse_expr(p, 3);
+            if (!operand)
+                return NULL;
+            AstNode *node = make_unary("-", 1, operand);
+            if (!node) {
+                ast_free(operand);
+                parser_error(p, t.line, t.col, "memory allocation failed");
+                return NULL;
+            }
+            return node;
+        }
+
+        /* Open parenthesis */
+        if (t.value_len == 1 && t.value[0] == '(') {
+            advance(p);
+            AstNode *expr = parse_expr(p, 0);
+            if (!expr)
+                return NULL;
+
+            /* Expect closing paren */
+            if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                p->current.value[0] != ')') {
+                parser_error(p, p->current.line, p->current.col, "expected ')'");
+                ast_free(expr);
+                return NULL;
+            }
+            advance(p);
+            return expr;
+        }
+
+        /* Unknown prefix operator */
+        parser_error(p, t.line, t.col, "unexpected operator '%.*s'", (int)t.value_len, t.value);
+        return NULL;
+    }
+
+    /* Shouldn't reach here */
+    parser_error(p, t.line, t.col, "unexpected token");
+    return NULL;
+}
+
+/*
+ * Parse an expression with Pratt precedence climbing.
+ * min_prec: minimum precedence level to continue parsing infix ops.
+ */
+static AstNode *parse_expr(Parser *p, int min_prec) {
+    AstNode *left = parse_atom(p);
+    if (!left)
+        return NULL;
+
+    /* Loop: consume infix operators with sufficient precedence */
+    while (!p->has_error && p->current.type == TOK_OPERATOR) {
+        const char *op_value = p->current.value;
+        size_t op_len = p->current.value_len;
+        size_t op_line = p->current.line;
+        size_t op_col = p->current.col;
+        int prec = infix_precedence(op_value, op_len);
+
+        /* Not a known infix operator, or precedence too low → stop */
+        if (prec == 0 || prec < min_prec)
+            break;
+
+        /* Save operator string before advance overwrites the token buffer */
+        char op_buf[8];
+        if (op_len >= sizeof(op_buf))
+            break; /* operator too long — not one we recognize */
+        memcpy(op_buf, op_value, op_len);
+        op_buf[op_len] = '\0';
+
+        /* For left-associative, require strictly greater precedence on right.
+         * For right-associative, allow equal precedence on right. */
+        int next_min_prec = is_right_assoc(op_buf, op_len) ? prec : prec + 1;
+
+        advance(p);
+        AstNode *right = parse_expr(p, next_min_prec);
+        if (!right) {
+            ast_free(left);
+            return NULL;
+        }
+
+        AstNode *binop = make_binop(op_buf, op_len, left, right);
+        if (!binop) {
+            ast_free(left);
+            ast_free(right);
+            parser_error(p, op_line, op_col, "memory allocation failed");
+            return NULL;
+        }
+        left = binop;
+    }
+
+    return left;
+}
+
+/* ============================================================
+ * Public API
+ * ============================================================ */
+
+bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     if (!out) {
         if (err) {
             err->line = 0;
@@ -24,7 +318,6 @@ bool parser_parse_single(const char *input, AstNode **out, ParseError *err) {
         return false;
     }
 
-    /* Always clear *out so callers see NULL on any failure path. */
     *out = NULL;
 
     if (!input) {
@@ -46,122 +339,47 @@ bool parser_parse_single(const char *input, AstNode **out, ParseError *err) {
         return false;
     }
 
-    Token t;
-    tokenizer_next(tok, &t);
+    Parser p = {.tok = tok, .has_error = false, .err = err};
 
-    if (t.type == TOK_ERROR) {
-        if (err) {
-            err->line = t.line;
-            err->col = t.col;
-            snprintf(err->message, sizeof(err->message), "%.*s", (int)t.value_len, t.value);
-        }
+    /* Prime the lookahead */
+    advance(&p);
+
+    /* Parse the full expression */
+    AstNode *result = parse_expr(&p, 0);
+
+    if (p.has_error) {
+        ast_free(result);
         tokenizer_destroy(tok);
         return false;
     }
 
-    if (t.type == TOK_EOF) {
-        if (err) {
-            err->line = 1;
-            err->col = 1;
-            snprintf(err->message, sizeof(err->message), "expected expression, got EOF");
-        }
+    /* Check for trailing tokens */
+    if (p.current.type == TOK_ERROR) {
+        parser_error(&p, p.current.line, p.current.col, "%.*s", (int)p.current.value_len,
+                     p.current.value);
+        ast_free(result);
         tokenizer_destroy(tok);
         return false;
     }
 
-    if (t.type == TOK_OPERATOR) {
-        if (err) {
-            err->line = t.line;
-            err->col = t.col;
-            snprintf(err->message, sizeof(err->message), "unexpected operator '%.*s'",
-                     (int)t.value_len, t.value);
-        }
-        tokenizer_destroy(tok);
-        return false;
-    }
-
-    /* Valid token: NUMBER, STRING, or IDENT */
-    AstNode *node = malloc(sizeof(AstNode));
-    if (!node) {
-        if (err) {
-            err->line = 1;
-            err->col = 1;
-            snprintf(err->message, sizeof(err->message), "memory allocation failed");
-        }
-        tokenizer_destroy(tok);
-        return false;
-    }
-
-    switch (t.type) {
-    case TOK_NUMBER:
-        node->type = AST_NUMBER;
-        break;
-    case TOK_STRING:
-        node->type = AST_STRING;
-        break;
-    case TOK_IDENT:
-        node->type = AST_IDENT;
-        break;
-    default:
-        /* Future-proofing: if a new token type is added, report it clearly. */
-        free(node);
-        if (err) {
-            err->line = t.line;
-            err->col = t.col;
-            snprintf(err->message, sizeof(err->message), "unexpected token type");
-        }
-        tokenizer_destroy(tok);
-        return false;
-    }
-
-    node->value = malloc(t.value_len + 1);
-    if (!node->value) {
-        free(node);
-        if (err) {
-            err->line = 1;
-            err->col = 1;
-            snprintf(err->message, sizeof(err->message), "memory allocation failed");
-        }
-        tokenizer_destroy(tok);
-        return false;
-    }
-    memcpy(node->value, t.value, t.value_len);
-    node->value[t.value_len] = '\0';
-
-    /* Check for extra tokens */
-    Token t2;
-    tokenizer_next(tok, &t2);
-
-    if (t2.type == TOK_ERROR) {
-        if (err) {
-            err->line = t2.line;
-            err->col = t2.col;
-            snprintf(err->message, sizeof(err->message), "%.*s", (int)t2.value_len, t2.value);
-        }
-        ast_free(node);
-        tokenizer_destroy(tok);
-        return false;
-    }
-
-    if (t2.type != TOK_EOF) {
-        if (err) {
-            err->line = t2.line;
-            err->col = t2.col;
-            snprintf(err->message, sizeof(err->message), "unexpected extra token");
-        }
-        ast_free(node);
+    if (p.current.type != TOK_EOF) {
+        parser_error(&p, p.current.line, p.current.col, "unexpected extra token '%.*s'",
+                     (int)p.current.value_len, p.current.value);
+        ast_free(result);
         tokenizer_destroy(tok);
         return false;
     }
 
     tokenizer_destroy(tok);
-    *out = node;
+    *out = result;
     return true;
 }
 
 void ast_free(AstNode *node) {
     if (!node)
         return;
+    ast_free(node->left);
+    ast_free(node->right);
     free(node->value);
     free(node);
 }
@@ -174,22 +392,94 @@ const char *ast_node_type_str(AstNodeType type) {
         return "STRING";
     case AST_IDENT:
         return "IDENT";
+    case AST_BINOP:
+        return "BINOP";
+    case AST_UNARY:
+        return "UNARY";
     default:
         return "UNKNOWN";
     }
+}
+
+/*
+ * Internal helper: format a node subtree (without "AST " prefix).
+ * Returns a newly allocated string like "[BINOP + [NUMBER 1] [NUMBER 2]]".
+ */
+static char *ast_format_node(const AstNode *node) {
+    if (!node)
+        return NULL;
+
+    const char *type_str = ast_node_type_str(node->type);
+
+    if (node->type == AST_NUMBER || node->type == AST_STRING || node->type == AST_IDENT) {
+        /* Leaf node: [TYPE value] */
+        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf)
+            return NULL;
+        snprintf(buf, len, "[%s %s]", type_str, node->value);
+        return buf;
+    }
+
+    if (node->type == AST_BINOP) {
+        /* Binary: [BINOP op left right] */
+        char *left_str = ast_format_node(node->left);
+        char *right_str = ast_format_node(node->right);
+        if (!left_str || !right_str) {
+            free(left_str);
+            free(right_str);
+            return NULL;
+        }
+        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + strlen(left_str) + 1 +
+                     strlen(right_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(left_str);
+            free(right_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s %s]", type_str, node->value, left_str, right_str);
+        free(left_str);
+        free(right_str);
+        return buf;
+    }
+
+    if (node->type == AST_UNARY) {
+        /* Unary: [UNARY op operand] */
+        char *operand_str = ast_format_node(node->left);
+        if (!operand_str)
+            return NULL;
+        size_t len =
+            1 + strlen(type_str) + 1 + strlen(node->value) + 1 + strlen(operand_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(operand_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s]", type_str, node->value, operand_str);
+        free(operand_str);
+        return buf;
+    }
+
+    return NULL;
 }
 
 char *ast_format(const AstNode *node) {
     if (!node)
         return NULL;
 
-    const char *type_str = ast_node_type_str(node->type);
-    /* "AST [TYPE value]\0" = 5 + type + 1 + value + 1 + 1 */
-    size_t len = 5 + strlen(type_str) + 1 + strlen(node->value) + 1 + 1;
-    char *buf = malloc(len);
-    if (!buf)
+    char *node_str = ast_format_node(node);
+    if (!node_str)
         return NULL;
 
-    snprintf(buf, len, "AST [%s %s]", type_str, node->value);
+    /* Prepend "AST " */
+    size_t len = 4 + strlen(node_str) + 1;
+    char *buf = malloc(len);
+    if (!buf) {
+        free(node_str);
+        return NULL;
+    }
+    snprintf(buf, len, "AST %s", node_str);
+    free(node_str);
     return buf;
 }

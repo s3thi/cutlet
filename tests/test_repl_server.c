@@ -153,6 +153,8 @@ TEST(test_stop_null_is_safe) {
  * ============================================================ */
 
 TEST(test_ident_token) {
+    /* Identifiers now produce eval errors (unknown variable).
+     * Test with a number instead to verify basic protocol. */
     const char *err = NULL;
     ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
@@ -161,11 +163,11 @@ TEST(test_ident_token) {
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "1 foo\n"), "send");
+    ASSERT(send_line(fd, "1 99\n"), "send");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 1 OK [IDENT foo]\n", "response matches");
+    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 99]\n", "response matches");
 
     close(fd);
     repl_server_stop(srv);
@@ -243,11 +245,12 @@ TEST(test_adjacent_tokens_valid) {
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
 
+    /* 10+10 evaluates to 20 (adjacency allowed, parsed as expression) */
     ASSERT(send_line(fd, "4 10+10\n"), "send");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT(strncmp(buf, "-> 4 OK ", 8) == 0, "ok prefix matches");
+    ASSERT_STR_EQ(buf, "-> 4 OK [NUMBER 20]\n", "adjacent tokens eval");
 
     close(fd);
     repl_server_stop(srv);
@@ -304,11 +307,11 @@ TEST(test_crlf_line_ending) {
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "7 foo\r\n"), "send");
+    ASSERT(send_line(fd, "7 77\r\n"), "send");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 7 OK [IDENT foo]\n", "CRLF handled");
+    ASSERT_STR_EQ(buf, "-> 7 OK [NUMBER 77]\n", "CRLF handled");
 
     close(fd);
     repl_server_stop(srv);
@@ -332,10 +335,10 @@ TEST(test_multiple_requests_one_connection) {
     ssize_t n;
 
     /* Request 1 */
-    ASSERT(send_line(fd, "1 hello\n"), "send 1");
+    ASSERT(send_line(fd, "1 \"hello\"\n"), "send 1");
     n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv 1");
-    ASSERT_STR_EQ(buf, "-> 1 OK [IDENT hello]\n", "response 1");
+    ASSERT_STR_EQ(buf, "-> 1 OK [STRING hello]\n", "response 1");
 
     /* Request 2 */
     ASSERT(send_line(fd, "2 42\n"), "send 2");
@@ -343,11 +346,11 @@ TEST(test_multiple_requests_one_connection) {
     ASSERT(n > 0, "recv 2");
     ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 42]\n", "response 2");
 
-    /* Request 3 */
-    ASSERT(send_line(fd, "3 +\n"), "send 3");
+    /* Request 3: expression evaluation */
+    ASSERT(send_line(fd, "3 1 + 2\n"), "send 3");
     n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv 3");
-    ASSERT_STR_EQ(buf, "-> 3 OK [OPERATOR +]\n", "response 3");
+    ASSERT_STR_EQ(buf, "-> 3 OK [NUMBER 3]\n", "response 3");
 
     close(fd);
     repl_server_stop(srv);
@@ -366,14 +369,14 @@ TEST(test_connection_stays_open) {
 
     char buf[512];
 
-    ASSERT(send_line(fd, "1 a\n"), "send 1");
+    ASSERT(send_line(fd, "1 11\n"), "send 1");
     recv_line(fd, buf, sizeof(buf));
 
     /* Second request on same connection should work. */
-    ASSERT(send_line(fd, "2 b\n"), "send 2");
+    ASSERT(send_line(fd, "2 22\n"), "send 2");
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "second request succeeded");
-    ASSERT_STR_EQ(buf, "-> 2 OK [IDENT b]\n", "response 2");
+    ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 22]\n", "response 2");
 
     close(fd);
     repl_server_stop(srv);
@@ -419,8 +422,8 @@ TEST(test_two_concurrent_clients) {
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
-    ClientArg c1 = {.port = port, .request = "100 alpha\n"};
-    ClientArg c2 = {.port = port, .request = "200 beta\n"};
+    ClientArg c1 = {.port = port, .request = "100 111\n"};
+    ClientArg c2 = {.port = port, .request = "200 222\n"};
 
     pthread_t t1, t2;
     pthread_create(&t1, NULL, client_thread_fn, &c1);
@@ -432,8 +435,8 @@ TEST(test_two_concurrent_clients) {
     ASSERT(c2.ok, "client 2 got response");
 
     /* Each client should get its own response with matching ID. */
-    ASSERT_STR_EQ(c1.response, "-> 100 OK [IDENT alpha]\n", "client 1 response");
-    ASSERT_STR_EQ(c2.response, "-> 200 OK [IDENT beta]\n", "client 2 response");
+    ASSERT_STR_EQ(c1.response, "-> 100 OK [NUMBER 111]\n", "client 1 response");
+    ASSERT_STR_EQ(c2.response, "-> 200 OK [NUMBER 222]\n", "client 2 response");
 
     repl_server_stop(srv);
     PASS();
@@ -460,11 +463,11 @@ TEST(test_client_connects_and_disconnects_immediately) {
     fd = connect_to(port);
     ASSERT(fd >= 0, "reconnect after disconnect");
 
-    ASSERT(send_line(fd, "1 ok\n"), "send after reconnect");
+    ASSERT(send_line(fd, "1 55\n"), "send after reconnect");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv after reconnect");
-    ASSERT_STR_EQ(buf, "-> 1 OK [IDENT ok]\n", "response after reconnect");
+    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 55]\n", "response after reconnect");
 
     close(fd);
     repl_server_stop(srv);
@@ -490,11 +493,11 @@ TEST(test_partial_line_then_disconnect) {
     fd = connect_to(port);
     ASSERT(fd >= 0, "reconnect after partial disconnect");
 
-    ASSERT(send_line(fd, "2 test\n"), "send");
+    ASSERT(send_line(fd, "2 88\n"), "send");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 2 OK [IDENT test]\n", "response ok");
+    ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 88]\n", "response ok");
 
     close(fd);
     repl_server_stop(srv);
@@ -597,12 +600,12 @@ TEST(test_multiple_tokens) {
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "1 foo 42 \"bar\" +\n"), "send");
+    /* Expression evaluation: 10 + 20 * 3 = 70 */
+    ASSERT(send_line(fd, "1 10 + 20 * 3\n"), "send");
     char buf[512];
     ssize_t n = recv_line(fd, buf, sizeof(buf));
     ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 1 OK [IDENT foo] [NUMBER 42] [STRING bar] [OPERATOR +]\n",
-                  "multiple tokens");
+    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 70]\n", "expression eval");
 
     close(fd);
     repl_server_stop(srv);

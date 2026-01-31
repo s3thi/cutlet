@@ -1,14 +1,8 @@
 /*
  * test_repl.c - Tests for the Cutlet REPL core
  *
- * Test coverage for repl_format_line():
- * - Empty and whitespace-only input
- * - Single tokens (NUMBER, STRING, IDENT, OPERATOR)
- * - Multiple tokens
- * - Error formatting with position
- * - NULL input handling
- * - Special characters in strings
- * - Symbol sandwich identifiers
+ * Token mode (repl_format_line): parse expression → eval → format result.
+ * AST mode (repl_format_line_ast): parse expression → format AST tree.
  *
  * Uses the same simple test harness as test_tokenizer.c.
  */
@@ -32,7 +26,7 @@ static int tests_failed = 0;
 #define RUN_TEST(name)                                                                             \
     do {                                                                                           \
         tests_run++;                                                                               \
-        printf("  %-50s ", #name);                                                                 \
+        printf("  %-55s ", #name);                                                                 \
         fflush(stdout);                                                                            \
         name();                                                                                    \
     } while (0)
@@ -48,7 +42,6 @@ static int tests_failed = 0;
         }                                                                                          \
     } while (0)
 
-#define ASSERT_EQ(a, b, msg) ASSERT((a) == (b), msg)
 #define ASSERT_STR_EQ(a, b, msg) ASSERT(strcmp((a), (b)) == 0, msg)
 #define ASSERT_NOT_NULL(ptr, msg) ASSERT((ptr) != NULL, msg)
 
@@ -71,8 +64,21 @@ static int format_matches(const char *input, const char *expected) {
     return match;
 }
 
+/* Helper for AST mode */
+static int ast_format_matches(const char *input, const char *expected) {
+    char *result = repl_format_line_ast(input);
+    if (result == NULL)
+        return 0;
+    int match = strcmp(result, expected) == 0;
+    if (!match) {
+        printf("\n    Expected: %s\n    Got:      %s\n", expected, result);
+    }
+    free(result);
+    return match;
+}
+
 /* ============================================================
- * Empty and whitespace input tests
+ * Empty and whitespace input tests (token mode)
  * ============================================================ */
 
 TEST(test_empty_input) {
@@ -106,7 +112,7 @@ TEST(test_whitespace_mixed) {
 }
 
 /* ============================================================
- * Single NUMBER token tests
+ * Single number evaluation (token mode)
  * ============================================================ */
 
 TEST(test_single_number_zero) {
@@ -135,7 +141,7 @@ TEST(test_number_with_trailing_whitespace) {
 }
 
 /* ============================================================
- * Single STRING token tests
+ * String evaluation (token mode)
  * ============================================================ */
 
 TEST(test_single_string_empty) {
@@ -158,199 +164,136 @@ TEST(test_single_string_with_digits) {
     PASS();
 }
 
-TEST(test_string_with_leading_whitespace) {
-    ASSERT(format_matches("  \"hi\"", "OK [STRING hi]"), "string with leading space");
-    PASS();
-}
-
 /* ============================================================
- * Single IDENT token tests
+ * Expression evaluation (token mode)
  * ============================================================ */
 
-TEST(test_single_ident_letter) {
-    ASSERT(format_matches("x", "OK [IDENT x]"), "single letter ident");
+TEST(test_eval_addition) {
+    ASSERT(format_matches("1 + 2", "OK [NUMBER 3]"), "1+2=3");
     PASS();
 }
 
-TEST(test_single_ident_simple) {
-    ASSERT(format_matches("foo", "OK [IDENT foo]"), "simple ident");
+TEST(test_eval_subtraction) {
+    ASSERT(format_matches("10 - 3", "OK [NUMBER 7]"), "10-3=7");
     PASS();
 }
 
-TEST(test_single_ident_with_digits) {
-    ASSERT(format_matches("foo123", "OK [IDENT foo123]"), "ident with digits");
+TEST(test_eval_multiplication) {
+    ASSERT(format_matches("2 * 3", "OK [NUMBER 6]"), "2*3=6");
     PASS();
 }
 
-TEST(test_single_ident_kebab_case) {
-    /* kebab-case is now IDENT, OPERATOR, IDENT (no symbol sandwich) */
-    ASSERT(format_matches("kebab-case", "OK [IDENT kebab] [OPERATOR -] [IDENT case]"),
-           "kebab-case");
+TEST(test_eval_division_exact) {
+    ASSERT(format_matches("6 / 3", "OK [NUMBER 2]"), "6/3=2");
     PASS();
 }
 
-TEST(test_single_ident_multiple_hyphens) {
-    /* a-b-c-d is now multiple tokens (no symbol sandwich) */
-    ASSERT(format_matches(
-               "a-b-c-d",
-               "OK [IDENT a] [OPERATOR -] [IDENT b] [OPERATOR -] [IDENT c] [OPERATOR -] [IDENT d]"),
-           "multiple hyphens");
+TEST(test_eval_division_float) {
+    ASSERT(format_matches("7 / 2", "OK [NUMBER 3.5]"), "7/2=3.5");
     PASS();
 }
 
-TEST(test_single_ident_uppercase) {
-    ASSERT(format_matches("FOO", "OK [IDENT FOO]"), "uppercase ident");
+TEST(test_eval_exponent) {
+    ASSERT(format_matches("2 ** 10", "OK [NUMBER 1024]"), "2**10");
     PASS();
 }
 
-TEST(test_single_ident_mixed_case) {
-    ASSERT(format_matches("FooBar", "OK [IDENT FooBar]"), "mixed case ident");
+TEST(test_eval_precedence) {
+    ASSERT(format_matches("1 + 2 * 3", "OK [NUMBER 7]"), "1+2*3=7");
     PASS();
 }
 
-TEST(test_single_ident_symbol_sandwich) {
-    /* hello+world is now IDENT, OPERATOR, IDENT (no symbol sandwich) */
-    ASSERT(format_matches("hello+world", "OK [IDENT hello] [OPERATOR +] [IDENT world]"),
-           "no symbol sandwich");
+TEST(test_eval_parens) {
+    ASSERT(format_matches("(1 + 2) * 3", "OK [NUMBER 9]"), "(1+2)*3=9");
     PASS();
 }
 
-TEST(test_single_ident_underscore_sandwich) {
-    ASSERT(format_matches("my_var_name", "OK [IDENT my_var_name]"), "underscore sandwich ident");
+TEST(test_eval_unary_minus) {
+    ASSERT(format_matches("-3", "OK [NUMBER -3]"), "unary -3");
     PASS();
 }
 
-/* ============================================================
- * Single OPERATOR token tests
- * ============================================================ */
-
-TEST(test_single_operator_plus) {
-    ASSERT(format_matches("+", "OK [OPERATOR +]"), "plus operator");
-    PASS();
-}
-
-TEST(test_single_operator_minus) {
-    ASSERT(format_matches("-", "OK [OPERATOR -]"), "minus operator");
-    PASS();
-}
-
-TEST(test_single_operator_at) {
-    ASSERT(format_matches("@", "OK [OPERATOR @]"), "at operator");
+TEST(test_eval_float_division) {
+    ASSERT(format_matches("42 / 5", "OK [NUMBER 8.4]"), "42/5=8.4");
     PASS();
 }
 
 /* ============================================================
- * Multiple token tests
- * ============================================================ */
-
-TEST(test_two_numbers) {
-    ASSERT(format_matches("1 2", "OK [NUMBER 1] [NUMBER 2]"), "two numbers");
-    PASS();
-}
-
-TEST(test_two_strings) {
-    ASSERT(format_matches("\"a\" \"b\"", "OK [STRING a] [STRING b]"), "two strings");
-    PASS();
-}
-
-TEST(test_two_idents) {
-    ASSERT(format_matches("foo bar", "OK [IDENT foo] [IDENT bar]"), "two idents");
-    PASS();
-}
-
-TEST(test_number_string_ident) {
-    ASSERT(format_matches("42 \"hello\" foo", "OK [NUMBER 42] [STRING hello] [IDENT foo]"),
-           "number string ident");
-    PASS();
-}
-
-TEST(test_ident_number_string) {
-    ASSERT(format_matches("foo 42 \"bar\"", "OK [IDENT foo] [NUMBER 42] [STRING bar]"),
-           "ident number string");
-    PASS();
-}
-
-TEST(test_many_tokens) {
-    ASSERT(format_matches("a 1 \"x\" b 2 \"y\"",
-                          "OK [IDENT a] [NUMBER 1] [STRING x] [IDENT b] [NUMBER 2] [STRING y]"),
-           "many tokens");
-    PASS();
-}
-
-TEST(test_tokens_with_extra_whitespace) {
-    ASSERT(format_matches("  foo   42   \"bar\"  ", "OK [IDENT foo] [NUMBER 42] [STRING bar]"),
-           "tokens with extra whitespace");
-    PASS();
-}
-
-TEST(test_operator_in_sequence) {
-    ASSERT(format_matches("foo + bar", "OK [IDENT foo] [OPERATOR +] [IDENT bar]"),
-           "operator in sequence");
-    PASS();
-}
-
-TEST(test_minus_operator_and_number) {
-    /* "- 42" is OPERATOR then NUMBER (space-separated) */
-    ASSERT(format_matches("- 42", "OK [OPERATOR -] [NUMBER 42]"), "minus operator then number");
-    PASS();
-}
-
-/* ============================================================
- * Error formatting tests
+ * Error cases (token mode)
  * ============================================================ */
 
 TEST(test_error_unterminated_string) {
-    /* Exact error format: ERR line:col message */
-    ASSERT(format_matches("\"hello", "ERR 1:1 unterminated string"),
-           "unterminated string exact error format");
-    PASS();
-}
-
-TEST(test_adjacent_tokens_string_ident) {
-    /* "a"foo is now valid: STRING, IDENT */
-    ASSERT(format_matches("\"a\"foo", "OK [STRING a] [IDENT foo]"),
-           "adjacent string+ident is valid");
-    PASS();
-}
-
-TEST(test_adjacent_tokens_number_string) {
-    /* 42"hi" is now valid: NUMBER, STRING */
-    ASSERT(format_matches("42\"hi\"", "OK [NUMBER 42] [STRING hi]"),
-           "adjacent number+string is valid");
-    PASS();
-}
-
-TEST(test_trailing_symbol) {
-    /* foo- is now valid: IDENT, OPERATOR */
-    ASSERT(format_matches("foo-", "OK [IDENT foo] [OPERATOR -]"), "trailing symbol is valid");
-    PASS();
-}
-
-TEST(test_underscore_start) {
-    /* _foo is now a valid identifier */
-    ASSERT(format_matches("_foo", "OK [IDENT _foo]"), "underscore start is valid ident");
-    PASS();
-}
-
-TEST(test_negative_number) {
-    /* -10 is now valid: OPERATOR, NUMBER */
-    ASSERT(format_matches("-10", "OK [OPERATOR -] [NUMBER 10]"), "negative number is op+num");
+    ASSERT(format_matches("\"hello", "ERR 1:1 unterminated string"), "unterminated string error");
     PASS();
 }
 
 TEST(test_error_number_adjacent_ident) {
-    /* Exact error format: ERR line:col message */
     ASSERT(format_matches("42foo", "ERR 1:1 number followed by identifier character"),
-           "number adjacent ident exact error format");
+           "number adjacent ident error");
+    PASS();
+}
+
+TEST(test_error_unknown_ident) {
+    ASSERT(format_matches("foo", "ERR unknown variable 'foo'"), "unknown ident error");
+    PASS();
+}
+
+TEST(test_error_div_by_zero) {
+    ASSERT(format_matches("1 / 0", "ERR division by zero"), "div by zero error");
     PASS();
 }
 
 /* ============================================================
- * Edge cases
+ * AST mode tests
  * ============================================================ */
 
-TEST(test_string_with_numbers_inside) {
-    ASSERT(format_matches("\"123\"", "OK [STRING 123]"), "string containing numbers");
+TEST(test_ast_empty) {
+    ASSERT(ast_format_matches("", "AST"), "ast empty");
+    PASS();
+}
+
+TEST(test_ast_whitespace) {
+    ASSERT(ast_format_matches("   ", "AST"), "ast whitespace");
+    PASS();
+}
+
+TEST(test_ast_number) {
+    ASSERT(ast_format_matches("42", "AST [NUMBER 42]"), "ast number");
+    PASS();
+}
+
+TEST(test_ast_string) {
+    ASSERT(ast_format_matches("\"hello\"", "AST [STRING hello]"), "ast string");
+    PASS();
+}
+
+TEST(test_ast_ident) {
+    ASSERT(ast_format_matches("foo", "AST [IDENT foo]"), "ast ident");
+    PASS();
+}
+
+TEST(test_ast_binop) {
+    ASSERT(ast_format_matches("1 + 2", "AST [BINOP + [NUMBER 1] [NUMBER 2]]"), "ast binop");
+    PASS();
+}
+
+TEST(test_ast_precedence) {
+    ASSERT(
+        ast_format_matches("1 + 2 * 3", "AST [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]"),
+        "ast precedence");
+    PASS();
+}
+
+TEST(test_ast_unary) {
+    ASSERT(ast_format_matches("-3", "AST [UNARY - [NUMBER 3]]"), "ast unary");
+    PASS();
+}
+
+TEST(test_ast_error) {
+    char *result = repl_format_line_ast("(");
+    ASSERT_NOT_NULL(result, "result not null");
+    ASSERT(strncmp(result, "ERR ", 4) == 0, "should be error");
+    free(result);
     PASS();
 }
 
@@ -359,12 +302,12 @@ TEST(test_string_with_numbers_inside) {
  * ============================================================ */
 
 TEST(test_result_is_heap_allocated) {
-    char *result1 = repl_format_line("foo");
-    char *result2 = repl_format_line("bar");
+    char *result1 = repl_format_line("42");
+    char *result2 = repl_format_line("7");
     ASSERT_NOT_NULL(result1, "first result not null");
     ASSERT_NOT_NULL(result2, "second result not null");
-    ASSERT_STR_EQ(result1, "OK [IDENT foo]", "first result correct");
-    ASSERT_STR_EQ(result2, "OK [IDENT bar]", "second result correct");
+    ASSERT_STR_EQ(result1, "OK [NUMBER 42]", "first result correct");
+    ASSERT_STR_EQ(result2, "OK [NUMBER 7]", "second result correct");
     free(result1);
     free(result2);
     PASS();
@@ -386,58 +329,47 @@ int main(void) {
     RUN_TEST(test_whitespace_only_newline);
     RUN_TEST(test_whitespace_mixed);
 
-    printf("\nSingle NUMBER tokens:\n");
+    printf("\nSingle NUMBER evaluation:\n");
     RUN_TEST(test_single_number_zero);
     RUN_TEST(test_single_number_positive);
     RUN_TEST(test_single_number_large);
     RUN_TEST(test_number_with_leading_whitespace);
     RUN_TEST(test_number_with_trailing_whitespace);
 
-    printf("\nSingle STRING tokens:\n");
+    printf("\nSTRING evaluation:\n");
     RUN_TEST(test_single_string_empty);
     RUN_TEST(test_single_string_simple);
     RUN_TEST(test_single_string_with_spaces);
     RUN_TEST(test_single_string_with_digits);
-    RUN_TEST(test_string_with_leading_whitespace);
 
-    printf("\nSingle IDENT tokens:\n");
-    RUN_TEST(test_single_ident_letter);
-    RUN_TEST(test_single_ident_simple);
-    RUN_TEST(test_single_ident_with_digits);
-    RUN_TEST(test_single_ident_kebab_case);
-    RUN_TEST(test_single_ident_multiple_hyphens);
-    RUN_TEST(test_single_ident_uppercase);
-    RUN_TEST(test_single_ident_mixed_case);
-    RUN_TEST(test_single_ident_symbol_sandwich);
-    RUN_TEST(test_single_ident_underscore_sandwich);
+    printf("\nExpression evaluation:\n");
+    RUN_TEST(test_eval_addition);
+    RUN_TEST(test_eval_subtraction);
+    RUN_TEST(test_eval_multiplication);
+    RUN_TEST(test_eval_division_exact);
+    RUN_TEST(test_eval_division_float);
+    RUN_TEST(test_eval_exponent);
+    RUN_TEST(test_eval_precedence);
+    RUN_TEST(test_eval_parens);
+    RUN_TEST(test_eval_unary_minus);
+    RUN_TEST(test_eval_float_division);
 
-    printf("\nSingle OPERATOR tokens:\n");
-    RUN_TEST(test_single_operator_plus);
-    RUN_TEST(test_single_operator_minus);
-    RUN_TEST(test_single_operator_at);
-
-    printf("\nMultiple tokens:\n");
-    RUN_TEST(test_two_numbers);
-    RUN_TEST(test_two_strings);
-    RUN_TEST(test_two_idents);
-    RUN_TEST(test_number_string_ident);
-    RUN_TEST(test_ident_number_string);
-    RUN_TEST(test_many_tokens);
-    RUN_TEST(test_tokens_with_extra_whitespace);
-    RUN_TEST(test_operator_in_sequence);
-    RUN_TEST(test_minus_operator_and_number);
-
-    printf("\nError formatting:\n");
+    printf("\nError cases:\n");
     RUN_TEST(test_error_unterminated_string);
-    RUN_TEST(test_adjacent_tokens_string_ident);
-    RUN_TEST(test_adjacent_tokens_number_string);
-    RUN_TEST(test_trailing_symbol);
-    RUN_TEST(test_underscore_start);
-    RUN_TEST(test_negative_number);
     RUN_TEST(test_error_number_adjacent_ident);
+    RUN_TEST(test_error_unknown_ident);
+    RUN_TEST(test_error_div_by_zero);
 
-    printf("\nEdge cases:\n");
-    RUN_TEST(test_string_with_numbers_inside);
+    printf("\nAST mode:\n");
+    RUN_TEST(test_ast_empty);
+    RUN_TEST(test_ast_whitespace);
+    RUN_TEST(test_ast_number);
+    RUN_TEST(test_ast_string);
+    RUN_TEST(test_ast_ident);
+    RUN_TEST(test_ast_binop);
+    RUN_TEST(test_ast_precedence);
+    RUN_TEST(test_ast_unary);
+    RUN_TEST(test_ast_error);
 
     printf("\nReturn value tests:\n");
     RUN_TEST(test_result_is_heap_allocated);

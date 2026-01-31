@@ -49,6 +49,10 @@ bool runtime_init(void) {
 void runtime_destroy(void) {}
 
 void runtime_eval_lock(void) {
+    /* Lazy init: safe to call even if runtime_init() was never called
+     * explicitly.  pthread_once guarantees this is a no-op after the
+     * first successful init. */
+    runtime_init();
     pthread_rwlock_wrlock(&eval_lock);
 #ifdef CUTLET_TESTING
     /* Hook fires after lock is held so tests can detect overlap. */
@@ -58,6 +62,8 @@ void runtime_eval_lock(void) {
 }
 
 void runtime_eval_unlock(void) {
+    /* No lazy init needed here — unlock is only valid after a
+     * successful lock, which already called runtime_init(). */
 #ifdef CUTLET_TESTING
     /* Hook fires before lock is released so tests can detect overlap. */
     if (runtime_test_on_lock_exit)

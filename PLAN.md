@@ -11,17 +11,29 @@ This plan captures decisions and context from the initial design discussion so a
 - Architecture should remain **thread‑ready**.
 
 ## Current behavior (implemented)
-### Tokenizer v0
+### Tokenizer v0.1
 - NUMBER (digits only), STRING (double‑quoted, no escapes), IDENT (ASCII only), OPERATOR (symbol runs).
+- Solo symbols (`(`, `)`, `+`, `-`, `/`, `,`) always emitted as single-char tokens; other symbols group.
 - Tokens may be adjacent without whitespace; only adjacency error is NUMBER followed by ident‑start.
 - Whitespace ignored; non‑ASCII bytes are treated as symbols.
 
-### Parser v0
-- Single‑token expressions only; operators are parse errors; extra tokens after first are errors.
-- AST kinds: NUMBER/STRING/IDENT/OPERATOR with stable `AST [TYPE value]` format.
+### Parser v1 (Pratt expression parser)
+- Full expression parsing with precedence climbing (Pratt parser).
+- Binary operators: `+`, `-` (prec 1, left), `*`, `/` (prec 2, left), `**` (prec 4, right).
+- Unary minus (prec 3, prefix).
+- Parenthesized grouping.
+- AST kinds: NUMBER/STRING/IDENT/BINOP/UNARY.
+- Format: nested S-expr `AST [BINOP + [NUMBER 1] [NUMBER 2]]`.
+
+### Evaluator v1
+- Evaluates AST trees to values (VAL_NUMBER, VAL_STRING, VAL_ERROR).
+- All arithmetic in double precision; division always float.
+- Integers format without decimal (`8`), floats with minimal decimals (`8.4`).
+- Unknown identifiers and division by zero produce errors.
 
 ### REPL/CLI
-- `repl` token mode and `repl --ast` AST mode.
+- `repl` token mode: parse → eval → `OK [TYPE value]` or `ERR message`.
+- `repl --ast` AST mode: parse → format AST tree.
 - TCP server is thread‑per‑client with a shared runtime image.
 
 ### Error‑message pinning (tests)
@@ -43,41 +55,91 @@ Line‑based protocol with request IDs (already implemented).
 1) Tokenizer REPL on stdin/stdout. ✅
 2) Threaded TCP server using the same REPL core. ✅
 3) Minimal parser + AST + `--ast` REPL mode. ✅
-4) Global RW locks + serialized eval. ✅
-5) Socket protocol + concurrency tests. ⏳
+4) Global RW locks + serialized eval. ✅ (tests and hooks added; lock hierarchy comments in runtime)
+5) Socket protocol + concurrency tests. ⏳ (deferred; see guardrail)
+6) Expression evaluation (precedence/parentheses). ✅
+7) Variables + assignment. ⏳
 
-## Next slice: Global RW lock + serialized eval (Phase 1)
-Goal: serialize evaluation in the shared runtime so concurrent REPL clients do not evaluate in parallel.
+## Guardrail while deferring protocol tests
+- Do **not** modify TCP server/transport code while implementing language features.
+- Keep wire format, REPL formatting, and AST printing behavior unchanged.
+- Revisit protocol tests after expressions + variables land, or earlier if server code needs changes.
 
-### Design
-- Introduce a minimal runtime module with a global `pthread_rwlock_t` (write‑lock only for now).
-- All evaluation entrypoints take the **write** lock for the full duration of processing:
-  - `repl_format_line()`
-  - `repl_format_line_ast()`
-  - TCP server request handling should flow through these functions (no bypass).
-- Keep API thread‑ready: lock API should be reusable for future read locks.
-- Add clear comments on lock ordering and future expansion.
-- Future‑proofing: treat the global lock as the **top** of a lock hierarchy so we can later add
-  namespace/object locks and read‑locks without reworking call sites.
+## Open follow-ups (tracking)
+- Tighten server‑side error pinning to exact strings/positions (optional).
 
-### Tests (write first)
-- New test that **proves serialization** across threads:
-  - Add test‑only hooks in runtime (e.g., `runtime_test_on_lock_enter/exit`) guarded by a compile‑time test macro.
-  - Spawn 2+ threads calling `repl_format_line()`/`repl_format_line_ast()`; hooks assert no overlap (e.g., atomic in‑critical counter).
-  - Ensure test fails without locking and passes with locking.
-- Add a REPL server test if feasible to validate multi‑client requests remain correct under concurrency.
+## Deferred slice: Socket protocol + concurrency tests (Phase 2)
+Goal: lock in the wire protocol behavior and prove correct behavior under multi‑client concurrency.
+
+### Scope
+- Tests must define the **line‑based request/response format with request IDs** as currently implemented.
+- The server must correctly handle multiple requests per connection, partial reads, and error responses with IDs.
+- Concurrency: multiple clients can issue requests in parallel while evaluation remains serialized by the global lock.
+
+### Tests (write first, exhaustive)
+- Protocol framing (IDs, ordering).
+- Partial read buffering (newline‑terminated requests only).
+- Error wire format pinned to IDs.
+- Multi‑client concurrency with no cross‑contamination; reuse lock hooks to assert no overlapping eval.
+
+### Implementation notes
+- Keep transport logic centralized; route through `repl_format_line()` / `repl_format_line_ast()`.
+- Add test‑only server hooks if needed (guarded by test macro).
 
 ### Required process
 1) Add tests first.
 2) Run `make test` and `make check` to prove failures.
 3) Pause for confirmation before implementing.
-4) Implement runtime lock + integration.
+4) Implement protocol fixes / server buffering / test hooks.
 5) Run `make test` and `make check` after every code change.
 
-## Open follow-ups (tracking)
-- Tighten server‑side error pinning to exact strings/positions (optional).
-- Decide on Windows socket abstraction strategy.
-- Define Windows‑friendly RW‑lock abstraction (pthread vs platform shim).
+## Next slice: Expression evaluation (Phase 2a)
+Goal: turn the parser into a real expression parser with evaluation.
+
+### Scope
+- Arithmetic operators: `+ - * /` with standard precedence and left‑associativity.
+- Exponentiation: `**` with higher precedence than `* /` and **right‑associativity**.
+- Unary minus for numeric literals/expressions (binds tighter than `* /` but looser than `**` if `-2 ** 2` is parsed as `-(2 ** 2)`).
+- Parentheses for grouping.
+- Literals: NUMBER and STRING.
+- Identifiers allowed as expressions but **error on unknown variable** (until variables land).
+- Preserve existing AST printing output for the old single‑token paths where possible.
+
+### Tests (write first, exhaustive)
+- Parser precedence: `1 + 2 * 3` parses as `1 + (2 * 3)`.
+- Parentheses: `(1 + 2) * 3`.
+- Exponent precedence/associativity: `2 ** 3 ** 2` parses as `2 ** (3 ** 2)`.
+- Unary minus: `-3 * 2` and `-(1 + 2)` parse/evaluate correctly.
+- Unary minus vs exponent: `-2 ** 2` should parse as `-(2 ** 2)` (unless explicitly decided otherwise and tests updated).
+- Evaluation results for numeric expressions.
+- Error pinning for syntax errors and unknown identifier.
+
+### Implementation notes
+- Add expression grammar (Pratt or precedence climbing).
+- Introduce a value type in runtime/eval (number/string).
+- Keep evaluation entrypoints behind the global write lock already in place.
+
+### Required process
+1) Add tests first.
+2) Run `make test` and `make check` to prove failures.
+3) Pause for confirmation before implementing.
+4) Implement parser + evaluator.
+5) Run `make test` and `make check` after every code change.
+
+## Next slice: Variables + assignment (Phase 2b)
+Goal: add persistent state across REPL lines and sockets.
+
+### Scope
+- Assignment syntax (`name = expr`) and identifier lookup.
+- Environment lives in the shared runtime image; respects global write lock.
+
+### Tests (write first)
+- `x = 2` then `x + 3` → `5`.
+- Unknown variable error pinned.
+- Concurrent clients see shared state (or decide and document isolation).
+
+### Required process
+Same as above (tests first, prove failures, confirm, implement, rerun tests).
 
 ---
 End of handoff.

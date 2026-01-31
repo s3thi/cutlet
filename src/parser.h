@@ -1,9 +1,9 @@
 /*
  * parser.h - Cutlet parser interface
  *
- * Parses a single-token expression (NUMBER, STRING, or IDENT) from input.
- * Operators are parse errors. Extra tokens after the first are parse errors.
- * Tokenizer errors propagate as parse errors.
+ * Parses expressions using a Pratt (precedence climbing) parser.
+ * Supports binary operators (+, -, *, /, **), unary minus, and
+ * parenthesized sub-expressions. Leaf nodes are NUMBER, STRING, or IDENT.
  */
 
 #ifndef CUTLET_PARSER_H
@@ -12,11 +12,19 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef enum { AST_NUMBER, AST_STRING, AST_IDENT } AstNodeType;
+typedef enum {
+    AST_NUMBER, /* numeric literal */
+    AST_STRING, /* string literal */
+    AST_IDENT,  /* identifier */
+    AST_BINOP,  /* binary operator: +, -, *, /, ** */
+    AST_UNARY,  /* unary minus */
+} AstNodeType;
 
-typedef struct {
+typedef struct AstNode {
     AstNodeType type;
-    char *value; /* owned, malloc'd copy */
+    char *value;           /* literal value or operator string (owned) */
+    struct AstNode *left;  /* left operand (or sole operand for unary) */
+    struct AstNode *right; /* right operand (NULL for unary/leaf) */
 } AstNode;
 
 typedef struct {
@@ -26,15 +34,15 @@ typedef struct {
 } ParseError;
 
 /*
- * Parse a single-token expression from input.
- * On success, sets *out to a newly allocated AstNode and returns true.
+ * Parse an expression from input.
+ * On success, sets *out to a newly allocated AST tree and returns true.
  * On failure, populates err and returns false.
  * The caller must free *out with ast_free().
  */
-bool parser_parse_single(const char *input, AstNode **out, ParseError *err);
+bool parser_parse(const char *input, AstNode **out, ParseError *err);
 
 /*
- * Free an AstNode. Safe to call with NULL.
+ * Free an AstNode tree recursively. Safe to call with NULL.
  */
 void ast_free(AstNode *node);
 
@@ -44,7 +52,10 @@ void ast_free(AstNode *node);
 const char *ast_node_type_str(AstNodeType type);
 
 /*
- * Format an AstNode as "AST [TYPE value]".
+ * Format an AstNode tree as nested S-expression.
+ * Leaf: "AST [TYPE value]"
+ * Binop: "AST [BINOP op [left] [right]]"
+ * Unary: "AST [UNARY op [operand]]"
  * Returns a newly allocated string. Caller must free.
  */
 char *ast_format(const AstNode *node);

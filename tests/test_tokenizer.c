@@ -557,7 +557,8 @@ TEST(test_operator_between_numbers) {
 }
 
 TEST(test_operator_multi_symbol) {
-    // a +-*/ b => IDENT, OPERATOR("+-*/"), IDENT
+    /* Solo symbols (+, -, /, (, ), ,) are emitted as single-char tokens.
+       Non-solo symbols group with adjacent non-solo symbols. */
     Tokenizer *tok = tokenizer_create("a +-*/ b");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -566,7 +567,16 @@ TEST(test_operator_multi_symbol) {
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+-*/", 4), "expected OPERATOR '+-*/'");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "expected OPERATOR '+'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "*", 1), "expected OPERATOR '*'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "/", 1), "expected OPERATOR '/'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");

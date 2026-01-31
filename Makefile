@@ -13,7 +13,7 @@ TEST_DIR = tests
 BUILD_DIR = build
 
 # Library source files (everything except main.c)
-LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/runtime.c
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/eval.c $(SRC_DIR)/runtime.c
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
 
 # Main binary
@@ -36,6 +36,9 @@ TEST_REPL_SERVER_BIN = $(BUILD_DIR)/test_repl_server
 TEST_RUNTIME_SRC = $(TEST_DIR)/test_runtime.c
 TEST_RUNTIME_BIN = $(BUILD_DIR)/test_runtime
 
+TEST_EVAL_SRC = $(TEST_DIR)/test_eval.c
+TEST_EVAL_BIN = $(BUILD_DIR)/test_eval
+
 # Default target: build the cutlet binary
 .PHONY: all
 all: $(BIN)
@@ -50,11 +53,11 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 
 # Build the main cutlet binary
 $(BIN): $(MAIN_SRC) $(LIB_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread
+	$(CC) $(CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-cli
+test: test-tokenizer test-repl test-parser test-eval test-repl-server test-runtime test-cli
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -76,6 +79,11 @@ test-parser: $(TEST_PARSER_BIN)
 test-repl-server: $(TEST_REPL_SERVER_BIN)
 	./$(TEST_REPL_SERVER_BIN)
 
+# Run eval tests
+.PHONY: test-eval
+test-eval: $(TEST_EVAL_BIN)
+	./$(TEST_EVAL_BIN)
+
 # Run runtime tests
 .PHONY: test-runtime
 test-runtime: $(TEST_RUNTIME_BIN)
@@ -94,17 +102,21 @@ $(TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(BUILD_DI
 $(TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(LDFLAGS)
 
+# Build eval test binary
+$(TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(LDFLAGS) -lm
+
 # Build REPL test binary
 $(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread
+	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
 
 # Build REPL server test binary
 $(TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread
+	$(CC) $(CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
 
 # Build runtime test binary (with CUTLET_TESTING for test hooks)
 $(TEST_RUNTIME_BIN): $(TEST_RUNTIME_SRC) $(LIB_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -DCUTLET_TESTING -o $@ $(TEST_RUNTIME_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread
+	$(CC) $(CFLAGS) -DCUTLET_TESTING -o $@ $(TEST_RUNTIME_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
 
 # ---------- Formatting (clang-format) ----------
 
@@ -124,7 +136,7 @@ format-check:
 # ---------- Compile database ----------
 
 # All source files that contribute to the compile database.
-ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC)
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_EVAL_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC)
 
 # Auto-generate compile_commands.json when missing or when any source file changes.
 compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
@@ -163,6 +175,7 @@ SANITIZE_TEST_TOKENIZER_BIN = $(SANITIZE_BUILD_DIR)/test_tokenizer
 SANITIZE_TEST_REPL_BIN = $(SANITIZE_BUILD_DIR)/test_repl
 SANITIZE_TEST_PARSER_BIN = $(SANITIZE_BUILD_DIR)/test_parser
 SANITIZE_TEST_REPL_SERVER_BIN = $(SANITIZE_BUILD_DIR)/test_repl_server
+SANITIZE_TEST_EVAL_BIN = $(SANITIZE_BUILD_DIR)/test_eval
 SANITIZE_TEST_RUNTIME_BIN = $(SANITIZE_BUILD_DIR)/test_runtime
 
 $(SANITIZE_BUILD_DIR):
@@ -170,7 +183,7 @@ $(SANITIZE_BUILD_DIR):
 
 # Build sanitizer-instrumented binaries.
 $(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
@@ -178,21 +191,25 @@ $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $
 $(SANITIZE_TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)
 
+$(SANITIZE_TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS) -lm
+
 $(SANITIZE_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_RUNTIME_BIN): $(TEST_RUNTIME_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -DCUTLET_TESTING -o $@ $(TEST_RUNTIME_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread
+	$(CC) $(SANITIZE_CFLAGS) -DCUTLET_TESTING -o $@ $(TEST_RUNTIME_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
 
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize
-test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_BIN)
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_EVAL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_BIN)
 	./$(SANITIZE_TEST_TOKENIZER_BIN)
 	./$(SANITIZE_TEST_REPL_BIN)
 	./$(SANITIZE_TEST_PARSER_BIN)
+	./$(SANITIZE_TEST_EVAL_BIN)
 	./$(SANITIZE_TEST_REPL_SERVER_BIN)
 	./$(SANITIZE_TEST_RUNTIME_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
