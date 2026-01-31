@@ -32,9 +32,8 @@
 bool runtime_init(void);
 
 /*
- * Destroy the global runtime.
- * Must be called once after all evaluation is done.
- * Safe to call even if runtime_init() was never called.
+ * No-op.  The global eval lock lives for the process lifetime.
+ * Retained for API compatibility; safe to call at any time.
  */
 void runtime_destroy(void);
 

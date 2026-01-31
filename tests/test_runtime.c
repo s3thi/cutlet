@@ -96,12 +96,49 @@ TEST(test_runtime_double_init) {
     PASS();
 }
 
+#define NUM_THREADS 4
+#define ITERS_PER_THREAD 200
+
+/* ============================================================
+ * Test: concurrent runtime_init from multiple threads
+ * ============================================================ */
+
+static atomic_int init_failures = 0;
+
+static void *thread_runtime_init(void *arg) {
+    (void)arg;
+    for (int i = 0; i < 100; i++) {
+        if (!runtime_init()) {
+            atomic_fetch_add(&init_failures, 1);
+        }
+    }
+    return NULL;
+}
+
+TEST(test_concurrent_runtime_init) {
+    atomic_store(&init_failures, 0);
+
+    pthread_t threads[NUM_THREADS];
+    for (int i = 0; i < NUM_THREADS; i++) {
+        int rc = pthread_create(&threads[i], NULL, thread_runtime_init, NULL);
+        ASSERT(rc == 0, "pthread_create");
+    }
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    ASSERT(atomic_load(&init_failures) == 0, "All concurrent runtime_init calls should succeed");
+
+    /* Verify the lock actually works after concurrent init */
+    runtime_eval_lock();
+    runtime_eval_unlock();
+
+    PASS();
+}
+
 /* ============================================================
  * Test: serialized eval via repl_format_line
  * ============================================================ */
-
-#define NUM_THREADS 4
-#define ITERS_PER_THREAD 200
 
 static void *thread_format_line(void *arg) {
     (void)arg;
@@ -292,6 +329,7 @@ int main(void) {
 
     RUN_TEST(test_runtime_init_destroy);
     RUN_TEST(test_runtime_double_init);
+    RUN_TEST(test_concurrent_runtime_init);
     RUN_TEST(test_serialized_eval_format_line);
     RUN_TEST(test_serialized_eval_format_line_ast);
     RUN_TEST(test_serialized_eval_mixed);

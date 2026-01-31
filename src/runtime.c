@@ -7,6 +7,10 @@
  * Implementation uses pthread_rwlock_t so we can later allow read-only
  * access without changing the lock primitive.  For now every acquisition
  * is a write lock.
+ *
+ * Thread safety: init uses pthread_once to guarantee the rwlock is
+ * initialized exactly once, even under concurrent calls.  destroy is
+ * a no-op — the lock lives for the process lifetime.
  */
 
 #include "runtime.h"
@@ -17,9 +21,11 @@
  * reserved for future read-only introspection. */
 static pthread_rwlock_t eval_lock;
 
-/* Track whether the runtime has been initialized so destroy is safe
- * even without a prior init. */
-static bool initialized = false;
+/* pthread_once control for one-time initialization. */
+static pthread_once_t runtime_once = PTHREAD_ONCE_INIT;
+
+/* Set to true by runtime_init_impl if pthread_rwlock_init succeeds. */
+static bool init_ok = false;
 
 /* Test-only hook pointers (only compiled in when CUTLET_TESTING is defined). */
 #ifdef CUTLET_TESTING
@@ -27,21 +33,20 @@ void (*runtime_test_on_lock_enter)(void) = NULL;
 void (*runtime_test_on_lock_exit)(void) = NULL;
 #endif
 
-bool runtime_init(void) {
-    if (initialized)
-        return true;
-    if (pthread_rwlock_init(&eval_lock, NULL) != 0)
-        return false;
-    initialized = true;
-    return true;
+/* Called exactly once by pthread_once. */
+static void runtime_init_impl(void) {
+    if (pthread_rwlock_init(&eval_lock, NULL) == 0)
+        init_ok = true;
 }
 
-void runtime_destroy(void) {
-    if (!initialized)
-        return;
-    pthread_rwlock_destroy(&eval_lock);
-    initialized = false;
+bool runtime_init(void) {
+    pthread_once(&runtime_once, runtime_init_impl);
+    return init_ok;
 }
+
+/* No-op: the eval lock lives for the process lifetime.  Calling this
+ * is harmless and keeps existing call sites working. */
+void runtime_destroy(void) {}
 
 void runtime_eval_lock(void) {
     pthread_rwlock_wrlock(&eval_lock);
