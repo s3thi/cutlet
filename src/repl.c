@@ -12,6 +12,7 @@
 
 #include "repl.h"
 #include "parser.h"
+#include "runtime.h"
 #include "tokenizer.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,27 +135,32 @@ static const char *format_type_name(TokenType type) {
 }
 
 char *repl_format_line(const char *input) {
+    /* Serialize evaluation across threads. */
+    runtime_eval_lock();
+
     /* Handle NULL input as empty string */
     if (input == NULL) {
         input = "";
     }
 
+    char *result = NULL;
+
     Tokenizer *tok = tokenizer_create(input);
     if (!tok) {
-        return NULL; /* Allocation failure */
+        goto out; /* Allocation failure */
     }
 
     StringBuf buf;
     if (!strbuf_init(&buf)) {
         tokenizer_destroy(tok);
-        return NULL;
+        goto out;
     }
 
     /* Start with "OK" - we'll replace if there's an error */
     if (!strbuf_append(&buf, "OK")) {
         strbuf_free(&buf);
         tokenizer_destroy(tok);
-        return NULL;
+        goto out;
     }
 
     Token t;
@@ -171,7 +177,7 @@ char *repl_format_line(const char *input) {
             strbuf_free(&buf);
             if (!strbuf_init(&buf)) {
                 tokenizer_destroy(tok);
-                return NULL;
+                goto out;
             }
 
             /* Build error message with position */
@@ -180,12 +186,12 @@ char *repl_format_line(const char *input) {
             if (!strbuf_append(&buf, pos_buf)) {
                 strbuf_free(&buf);
                 tokenizer_destroy(tok);
-                return NULL;
+                goto out;
             }
             if (!strbuf_append_n(&buf, t.value, t.value_len)) {
                 strbuf_free(&buf);
                 tokenizer_destroy(tok);
-                return NULL;
+                goto out;
             }
             break;
         }
@@ -194,42 +200,33 @@ char *repl_format_line(const char *input) {
         first_token = false;
         (void)first_token; /* Suppress unused warning */
 
-        if (!strbuf_append(&buf, " [")) {
+        if (!strbuf_append(&buf, " [") || !strbuf_append(&buf, format_type_name(t.type)) ||
+            !strbuf_append(&buf, " ") || !strbuf_append_n(&buf, t.value, t.value_len) ||
+            !strbuf_append(&buf, "]")) {
             strbuf_free(&buf);
             tokenizer_destroy(tok);
-            return NULL;
-        }
-        if (!strbuf_append(&buf, format_type_name(t.type))) {
-            strbuf_free(&buf);
-            tokenizer_destroy(tok);
-            return NULL;
-        }
-        if (!strbuf_append(&buf, " ")) {
-            strbuf_free(&buf);
-            tokenizer_destroy(tok);
-            return NULL;
-        }
-        if (!strbuf_append_n(&buf, t.value, t.value_len)) {
-            strbuf_free(&buf);
-            tokenizer_destroy(tok);
-            return NULL;
-        }
-        if (!strbuf_append(&buf, "]")) {
-            strbuf_free(&buf);
-            tokenizer_destroy(tok);
-            return NULL;
+            goto out;
         }
     }
 
     tokenizer_destroy(tok);
-    return strbuf_take(&buf);
+    result = strbuf_take(&buf);
+
+out:
+    runtime_eval_unlock();
+    return result;
 }
 
 char *repl_format_line_ast(const char *input) {
+    /* Serialize evaluation across threads. */
+    runtime_eval_lock();
+
     /* Handle NULL as empty */
     if (input == NULL) {
         input = "";
     }
+
+    char *result = NULL;
 
     /* Check for whitespace-only / empty input: return "AST" */
     const char *p = input;
@@ -237,24 +234,27 @@ char *repl_format_line_ast(const char *input) {
         p++;
     }
     if (*p == '\0') {
-        char *result = malloc(4);
-        if (!result)
-            return NULL;
-        memcpy(result, "AST", 4);
-        return result;
+        result = malloc(4);
+        if (result)
+            memcpy(result, "AST", 4);
+        goto out;
     }
 
     AstNode *node = NULL;
     ParseError err = {0};
 
     if (parser_parse_single(input, &node, &err)) {
-        char *formatted = ast_format(node);
+        result = ast_format(node);
         ast_free(node);
-        return formatted;
+        goto out;
     }
 
     /* Format error: ERR line:col message */
     char buf[320];
     snprintf(buf, sizeof(buf), "ERR %zu:%zu %s", err.line, err.col, err.message);
-    return strdup(buf);
+    result = strdup(buf);
+
+out:
+    runtime_eval_unlock();
+    return result;
 }

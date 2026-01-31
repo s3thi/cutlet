@@ -14,6 +14,7 @@
  */
 
 #include "../src/repl.h"
+#include "../src/runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -374,6 +375,7 @@ TEST(test_result_is_heap_allocated) {
  * ============================================================ */
 
 int main(void) {
+    runtime_init();
     printf("Running REPL core tests...\n\n");
 
     printf("Empty and whitespace input:\n");

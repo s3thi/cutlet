@@ -11,39 +11,22 @@ This plan captures decisions and context from the initial design discussion so a
 - Architecture should remain **thread‑ready**.
 
 ## Current behavior (implemented)
-### Tokenizer v0 (current)
-Token kinds:
-- `NUMBER` — integer only, digits only, e.g. `0`, `42`
-  - No negative numbers. `-` is an operator token.
-  - Only adjacency error: a number immediately followed by an ident-start (`[A-Za-z_]`).
-- `STRING` — double‑quoted, **no escapes yet**, e.g. `"hi"`
-  - Unterminated string is an error at the opening quote (newline or EOF ends it).
-- `IDENT` — **ASCII-only identifiers**
-  - **Start chars**: ASCII letter or underscore (`[A-Za-z_]`).
-  - **Continue chars**: ASCII letters, digits, underscore (`[A-Za-z0-9_]`).
-  - No symbol‑sandwich behavior. Symbols break identifiers.
-  - Examples: `foo`, `_foo`, `foo123`, `my_var`, `__init__`
-- `OPERATOR` — one or more **symbol chars** (no whitespace delimiter required)
-  - **Symbol char**: anything that is not whitespace, not ASCII letter, not digit, not `_`, and not `"`.
-  - Includes: `-`, `+`, `*`, `/`, `@`, `#`, `$`, `%`, `&`, `!`, `(`, `)`, etc.
-  - Examples: `+`, `-`, `+-*/`, `@`, `==`, `>=`
+### Tokenizer v0
+- NUMBER (digits only), STRING (double‑quoted, no escapes), IDENT (ASCII only), OPERATOR (symbol runs).
+- Tokens may be adjacent without whitespace; only adjacency error is NUMBER followed by ident‑start.
+- Whitespace ignored; non‑ASCII bytes are treated as symbols.
 
-Token boundaries:
-- Tokens **may be adjacent without whitespace** (Python/Ruby style).
-- The **only adjacency error** is `NUMBER` immediately followed by ident‑start:
-  - Error: `42foo`, `123_`
-  - Valid: `10+10`, `"a"b`, `foo"bar"`, `a+b`, `x==y`
+### Parser v0
+- Single‑token expressions only; operators are parse errors; extra tokens after first are errors.
+- AST kinds: NUMBER/STRING/IDENT/OPERATOR with stable `AST [TYPE value]` format.
 
-Everything else:
-- Whitespace is ignored between tokens.
-- Non‑ASCII bytes are treated as symbol chars (not valid identifier starts).
+### REPL/CLI
+- `repl` token mode and `repl --ast` AST mode.
+- TCP server is thread‑per‑client with a shared runtime image.
 
-Tokenizer API expectations:
-- `tokenizer_next(tok, NULL)` is a **defined failure case** and must return `false`.
-
-### REPL/CLI (current)
-- REPL core formats results as `OK [TYPE value] ...` or `ERR line:col message`.
-- CLI supports stdin REPL plus TCP `--listen` and `--connect`.
+### Error‑message pinning (tests)
+- Tokenizer, parser, and REPL errors are pinned with exact strings/positions in tests.
+- Server‑side errors are partially pinned (prefix checks) and can be tightened later.
 
 ## REPL architecture (kept)
 - TCP sockets, thread‑per‑client, single shared runtime image.
@@ -59,55 +42,42 @@ Line‑based protocol with request IDs (already implemented).
 ## Implementation staging (progress)
 1) Tokenizer REPL on stdin/stdout. ✅
 2) Threaded TCP server using the same REPL core. ✅
-3) Global RW locks + serialized eval. ⏳
-4) Socket protocol + concurrency tests. ⏳
+3) Minimal parser + AST + `--ast` REPL mode. ✅
+4) Global RW locks + serialized eval. ✅
+5) Socket protocol + concurrency tests. ⏳
 
-## Next slice (do this after error‑message pinning)
-### Minimal parser v0 (single‑token expressions)
-Goal: Introduce a **parser + AST** without changing existing tokenizer output.
+## Next slice: Global RW lock + serialized eval (Phase 1)
+Goal: serialize evaluation in the shared runtime so concurrent REPL clients do not evaluate in parallel.
 
-**Behavior**
-- Parse exactly **one token expression**: `NUMBER`, `STRING`, `IDENT`, or `OPERATOR`.
-- Require **EOF** after the single expression; extra tokens are a parse error.
-- Tokenizer errors propagate as parse errors (same line/col and message).
+### Design
+- Introduce a minimal runtime module with a global `pthread_rwlock_t` (write‑lock only for now).
+- All evaluation entrypoints take the **write** lock for the full duration of processing:
+  - `repl_format_line()`
+  - `repl_format_line_ast()`
+  - TCP server request handling should flow through these functions (no bypass).
+- Keep API thread‑ready: lock API should be reusable for future read locks.
+- Add clear comments on lock ordering and future expansion.
+- Future‑proofing: treat the global lock as the **top** of a lock hierarchy so we can later add
+  namespace/object locks and read‑locks without reworking call sites.
 
-**AST representation (v0)**
-- `AST_NUMBER`, `AST_STRING`, `AST_IDENT`, `AST_OPERATOR` with value string.
-- New API entrypoint in `src/parser.h`:
-  - `bool parser_parse_single(const char *input, AstNode **out, ParseError *err)`
-  - `void ast_free(AstNode *node)`
-- `ParseError` should include `line`, `col`, and `message` (mirrors tokenizer error messages).
+### Tests (write first)
+- New test that **proves serialization** across threads:
+  - Add test‑only hooks in runtime (e.g., `runtime_test_on_lock_enter/exit`) guarded by a compile‑time test macro.
+  - Spawn 2+ threads calling `repl_format_line()`/`repl_format_line_ast()`; hooks assert no overlap (e.g., atomic in‑critical counter).
+  - Ensure test fails without locking and passes with locking.
+- Add a REPL server test if feasible to validate multi‑client requests remain correct under concurrency.
 
-**AST printer**
-- New function: `char *ast_format(const AstNode *node)`
-- Suggested format (simple & stable):
-  - `AST [NUMBER 42]`
-  - `AST [STRING hi]`
-  - `AST [IDENT foo]`
-  - `AST [OPERATOR +]`
-
-**CLI / REPL integration**
-- Add `cutlet repl --ast` mode that uses parser + AST printer.
-- Default `cutlet repl` stays token‑based output.
-
-**Tests (must be written first)**
-- `tests/test_parser.c`:
-  - Single token success for NUMBER/STRING/IDENT/OPERATOR.
-  - Extra token error (e.g., `\"foo bar\"`).
-  - Tokenizer error passthrough (`\"unterminated`).
-- `tests/test_repl.c` (or new `tests/test_repl_ast.c`):
-  - `--ast` output matches exact format.
-
-**Required process**
-- Add tests first.
-- Run `make test` and `make check` to prove failures.
-- Pause for confirmation before implementation.
-- Run `make test` and `make check` after every code change.
+### Required process
+1) Add tests first.
+2) Run `make test` and `make check` to prove failures.
+3) Pause for confirmation before implementing.
+4) Implement runtime lock + integration.
+5) Run `make test` and `make check` after every code change.
 
 ## Open follow-ups (tracking)
-- Pin down tokenizer error wording/positions (see `TOK_ERROR.md`).
+- Tighten server‑side error pinning to exact strings/positions (optional).
 - Decide on Windows socket abstraction strategy.
-- Define locking and serialization approach for eval.
+- Define Windows‑friendly RW‑lock abstraction (pthread vs platform shim).
 
 ---
 End of handoff.

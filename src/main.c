@@ -16,6 +16,7 @@
 
 #include "repl.h"
 #include "repl_server.h"
+#include "runtime.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -334,9 +335,16 @@ static int run_connect(bool ast_mode, const char *addr) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Initialize the global runtime (eval lock, etc.). */
+    if (!runtime_init()) {
+        fprintf(stderr, "Error: failed to initialize runtime\n");
+        return 1;
+    }
+
     /* Need at least one argument (the command) */
     if (argc < 2) {
         print_usage(argv[0]);
+        runtime_destroy();
         return 1;
     }
 

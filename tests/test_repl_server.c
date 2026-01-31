@@ -17,6 +17,7 @@
  */
 
 #include "../src/repl_server.h"
+#include "../src/runtime.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -706,6 +707,7 @@ TEST(test_non_ast_mode_mismatch_with_prefix) {
  * ============================================================ */
 
 int main(void) {
+    runtime_init();
     printf("=== TCP REPL Server Tests ===\n\n");
 
     printf("Server lifecycle:\n");
