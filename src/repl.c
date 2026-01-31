@@ -1,21 +1,18 @@
 /*
  * repl.c - Cutlet REPL core implementation
  *
- * Token mode (repl_format_line): parse expression → eval → format result.
- *   - Success: "OK [TYPE value]" (e.g., "OK [NUMBER 42]", "OK [STRING hello]")
- *   - Error: "ERR message"
- *   - Empty: "OK"
+ * Primary API: repl_eval_line() — parses, evaluates, and optionally
+ * produces debug token/AST output.
  *
- * AST mode (repl_format_line_ast): parse expression → format AST tree.
- *   - Success: "AST [TYPE ...]" (nested S-expression)
- *   - Error: "ERR line:col message"
- *   - Empty: "AST"
+ * Legacy wrappers repl_format_line() and repl_format_line_ast() are
+ * kept for backward compatibility (used by existing tests).
  */
 
 #include "repl.h"
 #include "eval.h"
 #include "parser.h"
 #include "runtime.h"
+#include "tokenizer.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,76 +32,192 @@ static bool is_blank(const char *input) {
     return true;
 }
 
-char *repl_format_line(const char *input) {
+/*
+ * Build a token debug string from the input.
+ * Format: "TOKENS [TYPE value] [TYPE value] ..."
+ * On tokenizer error: appends "ERR line:col message".
+ * Returns a heap-allocated string.
+ */
+static char *build_tokens_string(const char *input) {
+    Tokenizer *tok = tokenizer_create(input);
+    if (!tok)
+        return NULL;
+
+    /* Start with "TOKENS" prefix. */
+    size_t cap = 256;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    if (!buf) {
+        tokenizer_destroy(tok);
+        return NULL;
+    }
+    len = (size_t)sprintf(buf, "TOKENS");
+
+    Token t;
+    while (tokenizer_next(tok, &t)) {
+        if (t.type == TOK_EOF)
+            break;
+
+        /* Ensure enough room. */
+        size_t needed = len + 32 + t.value_len;
+        if (needed > cap) {
+            cap = needed * 2;
+            char *tmp = realloc(buf, cap);
+            if (!tmp) {
+                free(buf);
+                tokenizer_destroy(tok);
+                return NULL;
+            }
+            buf = tmp;
+        }
+
+        if (t.type == TOK_ERROR) {
+            /* Append error info. len not read after break, but kept for clarity. */
+            (void)sprintf(buf + len, " ERR %zu:%zu %.*s", t.line, t.col, (int)t.value_len, t.value);
+            break;
+        }
+
+        len += (size_t)sprintf(buf + len, " [%s %.*s]", token_type_str(t.type), (int)t.value_len,
+                               t.value);
+    }
+
+    tokenizer_destroy(tok);
+    return buf;
+}
+
+ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast) {
     /* Serialize evaluation across threads. */
     runtime_eval_lock();
 
-    char *result = NULL;
+    ReplResult r = {0};
 
-    /* Handle NULL/empty/whitespace input */
+    /* Handle NULL/empty/whitespace input. */
     if (is_blank(input)) {
-        result = strdup("OK");
+        r.ok = true;
+        /* value stays NULL for blank input. */
+        /* Still produce tokens/ast if requested (they'll be just the prefix). */
+        if (want_tokens)
+            r.tokens = strdup("TOKENS");
+        if (want_ast)
+            r.ast = strdup("AST");
         goto out;
     }
 
-    /* Parse the expression */
+    /* Build token debug string before parsing (best-effort). */
+    if (want_tokens) {
+        r.tokens = build_tokens_string(input);
+    }
+
+    /* Parse the expression. */
     AstNode *node = NULL;
     ParseError perr;
     if (!parser_parse(input, &node, &perr)) {
-        /* Format parse error: "ERR line:col message" */
+        /* Parse error. */
+        r.ok = false;
         char buf[320];
-        snprintf(buf, sizeof(buf), "ERR %zu:%zu %s", perr.line, perr.col, perr.message);
-        result = strdup(buf);
+        snprintf(buf, sizeof(buf), "%zu:%zu %s", perr.line, perr.col, perr.message);
+        r.error = strdup(buf);
+        /* AST not available on parse error. */
         goto out;
     }
 
-    /* Evaluate the expression */
+    /* Build AST debug string if requested. */
+    if (want_ast) {
+        r.ast = ast_format(node);
+    }
+
+    /* Evaluate the expression. */
     Value v = eval(node);
     ast_free(node);
 
     if (v.type == VAL_ERROR) {
-        /* Format eval error: "ERR message" */
+        r.ok = false;
+        /* value_format for errors returns "ERR <message>"; strip "ERR " prefix. */
         char *msg = value_format(&v);
-        value_free(&v);
-        result = msg; /* value_format for errors returns "ERR ..." */
-        goto out;
-    }
-
-    /* Format success: "OK [TYPE value]" */
-    char *val_str = value_format(&v);
-    if (!val_str) {
+        if (msg && strncmp(msg, "ERR ", 4) == 0) {
+            r.error = strdup(msg + 4);
+            free(msg);
+        } else {
+            r.error = msg;
+        }
         value_free(&v);
         goto out;
     }
 
-    const char *type_str;
-    if (v.type == VAL_NUMBER)
-        type_str = "NUMBER";
-    else
-        type_str = "STRING";
-
-    /* "OK [TYPE value]\0" */
-    size_t len = 4 + strlen(type_str) + 1 + strlen(val_str) + 1 + 1;
-    result = malloc(len);
-    if (result) {
-        snprintf(result, len, "OK [%s %s]", type_str, val_str);
-    }
-
-    free(val_str);
+    /* Success: format plain value. */
+    r.ok = true;
+    r.value = value_format(&v);
     value_free(&v);
 
 out:
     runtime_eval_unlock();
+    return r;
+}
+
+void repl_result_free(ReplResult *r) {
+    if (!r)
+        return;
+    free(r->value);
+    free(r->error);
+    free(r->tokens);
+    free(r->ast);
+    r->value = NULL;
+    r->error = NULL;
+    r->tokens = NULL;
+    r->ast = NULL;
+}
+
+/* ============================================================
+ * Legacy API wrappers
+ * ============================================================ */
+
+char *repl_format_line(const char *input) {
+    ReplResult r = repl_eval_line(input, false, false);
+
+    char *result = NULL;
+
+    if (!r.ok && r.error) {
+        /* Format: "ERR <error>" */
+        size_t len = 4 + strlen(r.error) + 1;
+        result = malloc(len);
+        if (result) {
+            snprintf(result, len, "ERR %s", r.error);
+        }
+    } else if (!r.ok) {
+        result = strdup("ERR unknown error");
+    } else if (r.value == NULL) {
+        /* Blank input. */
+        result = strdup("OK");
+    } else {
+        /* Determine type from value string. */
+        /* Check if value looks like a number (starts with digit or minus). */
+        const char *type_str;
+        const char *v = r.value;
+        bool is_num = false;
+        if (*v == '-')
+            v++;
+        if (*v >= '0' && *v <= '9')
+            is_num = true;
+
+        type_str = is_num ? "NUMBER" : "STRING";
+        size_t len = 4 + strlen(type_str) + 1 + strlen(r.value) + 1 + 1;
+        result = malloc(len);
+        if (result) {
+            snprintf(result, len, "OK [%s %s]", type_str, r.value);
+        }
+    }
+
+    repl_result_free(&r);
     return result;
 }
 
 char *repl_format_line_ast(const char *input) {
-    /* Serialize evaluation across threads. */
+    /* AST mode: parse only, no evaluation. This preserves the legacy
+     * behavior where identifiers produce AST output rather than eval errors. */
     runtime_eval_lock();
 
     char *result = NULL;
 
-    /* Handle empty/whitespace input: return "AST" */
     if (is_blank(input)) {
         result = strdup("AST");
         goto out;
@@ -119,7 +232,6 @@ char *repl_format_line_ast(const char *input) {
         goto out;
     }
 
-    /* Format error: ERR line:col message */
     char buf[320];
     snprintf(buf, sizeof(buf), "ERR %zu:%zu %s", err.line, err.col, err.message);
     result = strdup(buf);

@@ -2,18 +2,23 @@
  * main.c - Cutlet CLI entry point
  *
  * Usage:
- *   cutlet repl                            stdin/stdout REPL
- *   cutlet repl --listen HOST:PORT         start TCP REPL server
- *   cutlet repl --connect HOST:PORT        connect to running server
+ *   cutlet repl [--tokens] [--ast]                    start TCP REPL server (default)
+ *   cutlet repl --listen [HOST:PORT] [--tokens] [--ast]  start TCP REPL server
+ *   cutlet repl --connect [HOST:PORT] [--tokens] [--ast] connect to running server
  *
- * The stdin REPL reads lines from stdin, parses and evaluates each
- * expression, and prints a formatted result to stdout.
+ * The default mode starts a TCP server. There is no local-only eval mode.
  *
- * The TCP server accepts multiple clients, each in its own thread.
- * The client auto-generates request IDs and strips protocol framing
- * so the user just types expressions and sees results.
+ * Debug flags:
+ *   --tokens  Enable token debug output
+ *   --ast     Enable AST debug output
+ *
+ * Both flags can be combined. Server emits debug output only if started
+ * with the corresponding flag. Client prints debug output only if started
+ * with the flag. If the server sends debug fields the client didn't request,
+ * the client warns once on stderr and ignores them.
  */
 
+#include "json.h"
 #include "repl.h"
 #include "repl_server.h"
 #include "runtime.h"
@@ -27,7 +32,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-/* Maximum line length for input */
+/* Maximum line length for input. */
 #define MAX_LINE_LEN 4096
 
 /* Default host and port for --listen / --connect. */
@@ -38,57 +43,22 @@
  * Print usage information.
  */
 static void print_usage(const char *prog) {
-    fprintf(stderr, "Usage: %s repl [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
+    fprintf(stderr,
+            "Usage: %s repl [--tokens] [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
             prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Commands:\n");
-    fprintf(stderr, "  repl                      Start the REPL (read-eval-print loop)\n");
-    fprintf(stderr, "  repl --listen [HOST:PORT]  Start a TCP REPL server (default: %s:%d)\n",
+    fprintf(
+        stderr,
+        "  repl                        Start the TCP REPL server (default, same as --listen)\n");
+    fprintf(stderr, "  repl --listen [HOST:PORT]   Start a TCP REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
     fprintf(stderr,
-            "  repl --connect [HOST:PORT] Connect to a running REPL server (default: %s:%d)\n",
+            "  repl --connect [HOST:PORT]  Connect to a running REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
-}
-
-/*
- * Run the stdin/stdout REPL loop.
- * Reads lines from stdin, formats each, prints result to stdout.
- * Returns 0 on success (EOF), 1 on error.
- */
-static int run_repl(bool ast_mode) {
-    char line[MAX_LINE_LEN];
-
-    while (fgets(line, sizeof(line), stdin) != NULL) {
-        /* Remove trailing newline if present */
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
-            len--;
-        }
-        /* Also handle CRLF */
-        if (len > 0 && line[len - 1] == '\r') {
-            line[len - 1] = '\0';
-        }
-
-        /* Format and print result */
-        char *result = ast_mode ? repl_format_line_ast(line) : repl_format_line(line);
-        if (result == NULL) {
-            fprintf(stderr, "Error: memory allocation failed\n");
-            return 1;
-        }
-
-        puts(result);
-        fflush(stdout);
-        free(result);
-    }
-
-    /* Check for read error vs EOF */
-    if (ferror(stdin)) {
-        fprintf(stderr, "Error: failed to read from stdin\n");
-        return 1;
-    }
-
-    return 0;
+    fprintf(stderr, "\nDebug flags:\n");
+    fprintf(stderr, "  --tokens    Show tokenizer output for each expression\n");
+    fprintf(stderr, "  --ast       Show AST output for each expression\n");
 }
 
 /*
@@ -98,13 +68,9 @@ static int run_repl(bool ast_mode) {
  *   NULL or ""       -> DEFAULT_HOST:DEFAULT_PORT
  *   ":PORT"          -> DEFAULT_HOST:PORT
  *   "HOST:PORT"      -> HOST:PORT
- *
- * On success, writes the host into host_buf (must be at least host_buf_len)
- * and the port into *port_out.
  */
 static bool parse_host_port(const char *arg, char *host_buf, size_t host_buf_len,
                             uint16_t *port_out) {
-    /* No arg or empty string: use all defaults. */
     if (!arg || *arg == '\0') {
         if (strlen(DEFAULT_HOST) >= host_buf_len)
             return false;
@@ -117,7 +83,6 @@ static bool parse_host_port(const char *arg, char *host_buf, size_t host_buf_len
     if (!colon)
         return false;
 
-    /* ":PORT" form — default host. */
     if (colon == arg) {
         if (strlen(DEFAULT_HOST) >= host_buf_len)
             return false;
@@ -157,10 +122,8 @@ static void handle_sigint(int sig) {
 
 /*
  * Run the TCP REPL server.
- * Listens on the given HOST:PORT, prints the actual listening address
- * to stdout (important for ephemeral port), then blocks until killed.
  */
-static int run_listen(bool ast_mode, const char *addr) {
+static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -170,22 +133,18 @@ static int run_listen(bool ast_mode, const char *addr) {
     }
 
     const char *err = NULL;
-    g_server = repl_server_start(host, port, ast_mode, &err);
+    g_server = repl_server_start(host, port, enable_tokens, enable_ast, &err);
     if (!g_server) {
         fprintf(stderr, "Error: failed to start server: %s\n", err ? err : "unknown");
         return 1;
     }
 
-    /* Print the actual address so callers (and tests) can discover
-     * the port when using ephemeral port 0. Flush immediately. */
     printf("Listening on %s:%u\n", host, repl_server_port(g_server));
     fflush(stdout);
 
-    /* Install signal handler for clean shutdown. */
     signal(SIGINT, handle_sigint);
     signal(SIGTERM, handle_sigint);
 
-    /* Block until signaled. */
     while (g_server) {
         pause();
     }
@@ -196,12 +155,11 @@ static int run_listen(bool ast_mode, const char *addr) {
 /*
  * Run the REPL client.
  * Connects to a running TCP REPL server, reads expressions from stdin,
- * sends them with auto-generated IDs, and prints the results (with
- * protocol framing stripped).
+ * sends JSON-framed requests, and prints results.
  *
  * Shows a "cutlet> " prompt when stdin is a TTY.
  */
-static int run_connect(bool ast_mode, const char *addr) {
+static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -210,7 +168,6 @@ static int run_connect(bool ast_mode, const char *addr) {
         return 1;
     }
 
-    /* Create and connect socket. */
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         fprintf(stderr, "Error: failed to create socket\n");
@@ -233,13 +190,15 @@ static int run_connect(bool ast_mode, const char *addr) {
         return 1;
     }
 
-    /* Set a recv timeout so we don't hang forever. */
+    /* Set a recv timeout. */
     struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     int is_tty = isatty(fileno(stdin));
     char line[MAX_LINE_LEN];
     unsigned long req_id = 0;
+    bool warned_extra_tokens = false;
+    bool warned_extra_ast = false;
 
     while (1) {
         if (is_tty) {
@@ -256,78 +215,77 @@ static int run_connect(bool ast_mode, const char *addr) {
             line[--len] = '\0';
         }
 
-        /*
-         * Build protocol line.
-         * AST mode: "AST <id> <expr>\n"
-         * Token mode: "<id> <expr>\n"
-         */
+        /* Build and send JSON request. */
         req_id++;
-        char sendbuf[MAX_LINE_LEN + 32];
-        int slen;
-        if (ast_mode) {
-            slen = snprintf(sendbuf, sizeof(sendbuf), "AST %lu %s\n", req_id, line);
-        } else {
-            slen = snprintf(sendbuf, sizeof(sendbuf), "%lu %s\n", req_id, line);
-        }
-        if (slen < 0 || (size_t)slen >= sizeof(sendbuf))
+        JsonRequest req = {
+            .id = req_id,
+            .expr = line,
+            .want_tokens = want_tokens,
+            .want_ast = want_ast,
+        };
+        char *req_json = json_encode_request(&req);
+        if (!req_json) {
+            fprintf(stderr, "Error: failed to encode request\n");
             continue;
+        }
 
-        /* Send request. */
-        ssize_t sent = send(fd, sendbuf, (size_t)slen, 0);
-        if (sent <= 0) {
+        if (!json_frame_write(fd, req_json, strlen(req_json))) {
+            free(req_json);
+            fprintf(stderr, "Error: connection lost\n");
+            close(fd);
+            return 1;
+        }
+        free(req_json);
+
+        /* Read JSON response. */
+        size_t resp_len = 0;
+        char *resp_json = json_frame_read(fd, &resp_len);
+        if (!resp_json) {
             fprintf(stderr, "Error: connection lost\n");
             close(fd);
             return 1;
         }
 
-        /* Read response line. */
-        char recvbuf[MAX_LINE_LEN + 128];
-        size_t rpos = 0;
-        while (rpos < sizeof(recvbuf) - 1) {
-            ssize_t n = recv(fd, recvbuf + rpos, 1, 0);
-            if (n <= 0) {
-                fprintf(stderr, "Error: connection lost\n");
-                close(fd);
-                return 1;
-            }
-            rpos++;
-            if (recvbuf[rpos - 1] == '\n')
-                break;
-        }
-        recvbuf[rpos] = '\0';
-
-        /*
-         * Strip protocol framing. Response is "-> <id> <body>\n".
-         * We want to print just <body>.
-         * Skip "-> ", then skip the ID and the space after it.
-         */
-        char *body = recvbuf;
-        if (strncmp(body, "-> ", 3) == 0) {
-            body += 3;
-            /* Skip the ID (digits). */
-            while (*body && *body != ' ' && *body != '\n')
-                body++;
-            /* Skip the space after ID. */
-            if (*body == ' ')
-                body++;
-        }
-
-        /* Remove trailing newline for clean output. */
-        size_t blen = strlen(body);
-        if (blen > 0 && body[blen - 1] == '\n')
-            body[blen - 1] = '\0';
-
-        puts(body);
-        fflush(stdout);
-
-        /*
-         * If the server reports a mode mismatch, exit immediately with
-         * non-zero status so the user knows --ast flags don't match.
-         */
-        if (strstr(body, "ERR mode mismatch:") != NULL) {
+        JsonResponse resp;
+        if (!json_parse_response(resp_json, resp_len, &resp)) {
+            fprintf(stderr, "Error: invalid response from server\n");
+            free(resp_json);
             close(fd);
             return 1;
         }
+        free(resp_json);
+
+        /* Warn once if server sends debug fields client didn't request. */
+        if (!want_tokens && resp.tokens && !warned_extra_tokens) {
+            fprintf(stderr, "Warning: server sent token debug output (not requested)\n");
+            warned_extra_tokens = true;
+        }
+        if (!want_ast && resp.ast && !warned_extra_ast) {
+            fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
+            warned_extra_ast = true;
+        }
+
+        /* Print output in order: tokens, ast, value/error. */
+        if (want_tokens && resp.tokens) {
+            puts(resp.tokens);
+        }
+        if (want_ast && resp.ast) {
+            puts(resp.ast);
+        }
+
+        if (resp.ok) {
+            if (resp.value) {
+                puts(resp.value);
+            }
+            /* value==NULL means blank input; print nothing. */
+        } else {
+            if (resp.error) {
+                printf("ERR %s\n", resp.error);
+            }
+        }
+        fflush(stdout);
+
+        json_response_free(&resp);
     }
 
     close(fd);
@@ -335,45 +293,63 @@ static int run_connect(bool ast_mode, const char *addr) {
 }
 
 int main(int argc, char *argv[]) {
-    /* Initialize the global runtime (eval lock, etc.). */
     if (!runtime_init()) {
         fprintf(stderr, "Error: failed to initialize runtime\n");
         return 1;
     }
 
-    /* Need at least one argument (the command) */
     if (argc < 2) {
         print_usage(argv[0]);
         runtime_destroy();
         return 1;
     }
 
-    /* Parse command */
     const char *cmd = argv[1];
 
     if (strcmp(cmd, "repl") == 0) {
-        /* Check for --ast flag */
-        bool ast_mode = false;
-        int arg_idx = 2;
-        if (arg_idx < argc && strcmp(argv[arg_idx], "--ast") == 0) {
-            ast_mode = true;
-            arg_idx++;
+        /* Parse flags: --tokens, --ast, --listen, --connect (order-independent). */
+        bool flag_tokens = false;
+        bool flag_ast = false;
+        bool flag_listen = false;
+        bool flag_connect = false;
+        const char *listen_addr = NULL;
+        const char *connect_addr = NULL;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--tokens") == 0) {
+                flag_tokens = true;
+            } else if (strcmp(argv[i], "--ast") == 0) {
+                flag_ast = true;
+            } else if (strcmp(argv[i], "--listen") == 0) {
+                flag_listen = true;
+                /* Next arg is optional address if it doesn't start with --. */
+                if (i + 1 < argc && strncmp(argv[i + 1], "--", 2) != 0) {
+                    listen_addr = argv[++i];
+                }
+            } else if (strcmp(argv[i], "--connect") == 0) {
+                flag_connect = true;
+                if (i + 1 < argc && strncmp(argv[i + 1], "--", 2) != 0) {
+                    /* But allow ":PORT" form which starts with : not --. */
+                    connect_addr = argv[++i];
+                }
+            } else {
+                fprintf(stderr, "Unknown repl option: %s\n", argv[i]);
+                print_usage(argv[0]);
+                return 1;
+            }
         }
 
-        /* Check for --listen or --connect flags. */
-        if (arg_idx < argc && strcmp(argv[arg_idx], "--listen") == 0) {
-            return run_listen(ast_mode, arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
+        if (flag_listen && flag_connect) {
+            fprintf(stderr, "Error: --listen and --connect are mutually exclusive\n");
+            return 1;
         }
-        if (arg_idx < argc && strcmp(argv[arg_idx], "--connect") == 0) {
-            return run_connect(ast_mode, arg_idx + 1 < argc ? argv[arg_idx + 1] : NULL);
+
+        if (flag_connect) {
+            return run_connect(flag_tokens, flag_ast, connect_addr);
         }
-        if (arg_idx == argc) {
-            return run_repl(ast_mode);
-        }
-        /* Unknown repl flag */
-        fprintf(stderr, "Unknown repl option: %s\n", argv[arg_idx]);
-        print_usage(argv[0]);
-        return 1;
+
+        /* Default: start server (--listen is optional). */
+        return run_listen(flag_tokens, flag_ast, listen_addr);
     } else if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
         print_usage(argv[0]);
         return 0;

@@ -1,30 +1,33 @@
 /*
  * repl_server.h - TCP REPL server interface
  *
- * Provides a threaded TCP server that accepts line-based requests,
- * processes them through repl_format_line(), and returns formatted
- * responses.
+ * Provides a threaded TCP server that accepts JSON-framed requests,
+ * processes them through repl_eval_line(), and returns JSON responses.
  *
- * Protocol (v0):
- *   Token mode:
- *     Client sends: <id> <expr>\n
- *     Server responds: -> <id> OK <formatted tokens>\n
- *                   or: -> <id> ERR <line:col message>\n
- *     Empty/whitespace expr: -> <id> OK\n
+ * Protocol (v1, JSON frames with Content-Length header):
  *
- *   AST mode:
- *     Client sends: AST <id> <expr>\n
- *     Server responds: -> <id> AST [TYPE value]\n
- *                   or: -> <id> ERR <line:col message>\n
- *     Empty/whitespace expr: -> <id> AST\n
+ *   Framing:
+ *     Content-Length: <N>\r\n
+ *     \r\n
+ *     <N bytes of JSON>
  *
- *   Mode mismatch (AST prefix on non-AST server or vice versa)
- *   produces an explicit error so both sides must agree on --ast.
+ *   Request (client → server):
+ *     { "type":"eval", "id":<uint>, "expr":"<input>",
+ *       "want_tokens":bool, "want_ast":bool }
  *
- * Request IDs must be digit-only strings (e.g. "1", "42").
+ *   Response (server → client):
+ *     { "type":"result", "id":<uint>, "ok":bool,
+ *       "value":"...",    // if ok=true
+ *       "error":"...",    // if ok=false
+ *       "tokens":"...",   // optional debug
+ *       "ast":"..."       // optional debug
+ *     }
+ *
+ *   Debug fields are included only when the server was started with
+ *   the corresponding capability AND the client requests it.
  *
  * The server uses thread-per-client. Each client connection is handled
- * in its own thread, reading lines and responding synchronously.
+ * in its own thread, reading frames and responding synchronously.
  *
  * Designed to be testable: start/stop API allows in-process testing
  * without forking the binary.
@@ -44,10 +47,9 @@ typedef struct ReplServer ReplServer;
 /*
  * Start a TCP REPL server listening on the given host and port.
  *
- * If ast_mode is true, the server expects the "AST <id> <expr>" prefix
- * on every request and uses the parser (repl_format_line_ast) instead of
- * the tokenizer. Both client and server must agree on --ast; a mismatch
- * produces an explicit error response.
+ * enable_tokens and enable_ast control whether the server is capable
+ * of producing debug output. The client must also request it via
+ * want_tokens/want_ast in each request.
  *
  * If port is 0, an ephemeral port is assigned by the OS.
  * The actual port can be retrieved with repl_server_port().
@@ -55,7 +57,8 @@ typedef struct ReplServer ReplServer;
  * Returns a server handle on success, NULL on failure.
  * On failure, if err_out is non-NULL, a static error message is stored.
  */
-ReplServer *repl_server_start(const char *host, uint16_t port, bool ast_mode, const char **err_out);
+ReplServer *repl_server_start(const char *host, uint16_t port, bool enable_tokens, bool enable_ast,
+                              const char **err_out);
 
 /*
  * Get the port the server is actually listening on.

@@ -13,3 +13,19 @@ Cutlet is written in C and has no external dependencies except platform librarie
 - Run `make test` and `make check` after every code change.
 - Never remove, change, or disable any tests without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
+
+## REPL debug flags
+
+The REPL supports two debug flags that can be combined:
+
+- `--tokens` — shows tokenizer output (`TOKENS [TYPE value] ...`) before the evaluated result
+- `--ast` — shows AST output (`AST [TYPE ...]`) before the evaluated result
+
+Both server and client must use the same flags for debug output to appear. The server only produces debug output when started with the flag, and the client only prints it when started with the flag. If the server sends debug fields the client didn't request, the client warns once on stderr.
+
+Examples:
+```
+cutlet repl --tokens --ast              # start server with both debug flags
+cutlet repl --tokens --connect          # connect with token debug output
+cutlet repl --tokens --ast --connect    # connect with both debug outputs
+```

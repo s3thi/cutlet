@@ -314,6 +314,119 @@ TEST(test_result_is_heap_allocated) {
 }
 
 /* ============================================================
+ * repl_eval_line() API tests
+ * ============================================================ */
+
+TEST(test_eval_line_blank) {
+    ReplResult r = repl_eval_line("", false, false);
+    ASSERT(r.ok, "ok for blank");
+    ASSERT(r.value == NULL, "no value for blank");
+    ASSERT(r.error == NULL, "no error");
+    ASSERT(r.tokens == NULL, "no tokens");
+    ASSERT(r.ast == NULL, "no ast");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_null) {
+    ReplResult r = repl_eval_line(NULL, false, false);
+    ASSERT(r.ok, "ok for null");
+    ASSERT(r.value == NULL, "no value for null");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_number) {
+    ReplResult r = repl_eval_line("42", false, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_NOT_NULL(r.value, "value set");
+    ASSERT_STR_EQ(r.value, "42", "plain number value");
+    ASSERT(r.error == NULL, "no error");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_string) {
+    ReplResult r = repl_eval_line("\"hello\"", false, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "hello", "plain string value");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_expression) {
+    ReplResult r = repl_eval_line("1 + 2 * 3", false, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "7", "expression eval");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_parse_error) {
+    ReplResult r = repl_eval_line("\"unterminated", false, false);
+    ASSERT(!r.ok, "not ok");
+    ASSERT(r.value == NULL, "no value on error");
+    ASSERT_NOT_NULL(r.error, "error set");
+    ASSERT(strstr(r.error, "unterminated") != NULL, "error message");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_eval_error) {
+    ReplResult r = repl_eval_line("1 / 0", false, false);
+    ASSERT(!r.ok, "not ok");
+    ASSERT_NOT_NULL(r.error, "error set");
+    ASSERT(strstr(r.error, "division by zero") != NULL, "error message");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_with_tokens) {
+    ReplResult r = repl_eval_line("42", true, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "42", "value");
+    ASSERT_NOT_NULL(r.tokens, "tokens present");
+    ASSERT(strstr(r.tokens, "TOKENS") != NULL, "tokens prefix");
+    ASSERT(strstr(r.tokens, "[NUMBER 42]") != NULL, "token content");
+    ASSERT(r.ast == NULL, "no ast");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_with_ast) {
+    ReplResult r = repl_eval_line("1 + 2", false, true);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "3", "value");
+    ASSERT_NOT_NULL(r.ast, "ast present");
+    ASSERT(strstr(r.ast, "AST") != NULL, "ast prefix");
+    ASSERT(strstr(r.ast, "BINOP") != NULL, "ast content");
+    ASSERT(r.tokens == NULL, "no tokens");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_with_both_debug) {
+    ReplResult r = repl_eval_line("42", true, true);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "42", "value");
+    ASSERT_NOT_NULL(r.tokens, "tokens present");
+    ASSERT_NOT_NULL(r.ast, "ast present");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_tokens_on_error) {
+    /* Best-effort: tokens should still be produced even on parse error. */
+    ReplResult r = repl_eval_line("42foo", true, false);
+    ASSERT(!r.ok, "not ok");
+    ASSERT_NOT_NULL(r.tokens, "tokens present despite error");
+    ASSERT(strstr(r.tokens, "TOKENS") != NULL, "tokens prefix");
+    ASSERT(strstr(r.tokens, "ERR") != NULL, "tokens contain error");
+    repl_result_free(&r);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -373,6 +486,19 @@ int main(void) {
 
     printf("\nReturn value tests:\n");
     RUN_TEST(test_result_is_heap_allocated);
+
+    printf("\nrepl_eval_line() API:\n");
+    RUN_TEST(test_eval_line_blank);
+    RUN_TEST(test_eval_line_null);
+    RUN_TEST(test_eval_line_number);
+    RUN_TEST(test_eval_line_string);
+    RUN_TEST(test_eval_line_expression);
+    RUN_TEST(test_eval_line_parse_error);
+    RUN_TEST(test_eval_line_eval_error);
+    RUN_TEST(test_eval_line_with_tokens);
+    RUN_TEST(test_eval_line_with_ast);
+    RUN_TEST(test_eval_line_with_both_debug);
+    RUN_TEST(test_eval_line_tokens_on_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

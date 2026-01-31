@@ -140,16 +140,16 @@ TEST(test_concurrent_runtime_init) {
  * Test: serialized eval via repl_format_line
  * ============================================================ */
 
-static void *thread_format_line(void *arg) {
+static void *thread_eval_line(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        char *result = repl_format_line("42");
-        free(result);
+        ReplResult r = repl_eval_line("42", false, false);
+        repl_result_free(&r);
     }
     return NULL;
 }
 
-TEST(test_serialized_eval_format_line) {
+TEST(test_serialized_eval_line) {
     /* Reset overlap detection state */
     atomic_store(&in_critical, 0);
     atomic_store(&overlap_detected, 0);
@@ -163,7 +163,7 @@ TEST(test_serialized_eval_format_line) {
 
     pthread_t threads[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
-        int rc = pthread_create(&threads[i], NULL, thread_format_line, NULL);
+        int rc = pthread_create(&threads[i], NULL, thread_eval_line, NULL);
         ASSERT(rc == 0, "pthread_create");
     }
     for (int i = 0; i < NUM_THREADS; i++) {
@@ -175,9 +175,9 @@ TEST(test_serialized_eval_format_line) {
     runtime_test_on_lock_exit = NULL;
 
     ASSERT(atomic_load(&lock_enter_count) == NUM_THREADS * ITERS_PER_THREAD,
-           "Lock must be acquired for every repl_format_line call");
+           "Lock must be acquired for every repl_eval_line call");
     ASSERT(!atomic_load(&overlap_detected),
-           "No two threads should be in the critical section simultaneously (format_line)");
+           "No two threads should be in the critical section simultaneously (eval_line)");
 
     runtime_destroy();
     PASS();
@@ -187,16 +187,16 @@ TEST(test_serialized_eval_format_line) {
  * Test: serialized eval via repl_format_line_ast
  * ============================================================ */
 
-static void *thread_format_line_ast(void *arg) {
+static void *thread_eval_line_with_ast(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        char *result = repl_format_line_ast("42");
-        free(result);
+        ReplResult r = repl_eval_line("42", false, true);
+        repl_result_free(&r);
     }
     return NULL;
 }
 
-TEST(test_serialized_eval_format_line_ast) {
+TEST(test_serialized_eval_line_with_ast) {
     atomic_store(&in_critical, 0);
     atomic_store(&overlap_detected, 0);
     atomic_store(&lock_enter_count, 0);
@@ -208,7 +208,7 @@ TEST(test_serialized_eval_format_line_ast) {
 
     pthread_t threads[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
-        int rc = pthread_create(&threads[i], NULL, thread_format_line_ast, NULL);
+        int rc = pthread_create(&threads[i], NULL, thread_eval_line_with_ast, NULL);
         ASSERT(rc == 0, "pthread_create");
     }
     for (int i = 0; i < NUM_THREADS; i++) {
@@ -219,9 +219,9 @@ TEST(test_serialized_eval_format_line_ast) {
     runtime_test_on_lock_exit = NULL;
 
     ASSERT(atomic_load(&lock_enter_count) == NUM_THREADS * ITERS_PER_THREAD,
-           "Lock must be acquired for every repl_format_line_ast call");
+           "Lock must be acquired for every repl_eval_line (ast) call");
     ASSERT(!atomic_load(&overlap_detected),
-           "No two threads should be in the critical section simultaneously (format_line_ast)");
+           "No two threads should be in the critical section simultaneously (eval_line_ast)");
 
     runtime_destroy();
     PASS();
@@ -234,8 +234,8 @@ TEST(test_serialized_eval_format_line_ast) {
 static void *thread_mixed_even(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        char *result = repl_format_line("hello");
-        free(result);
+        ReplResult r = repl_eval_line("hello", false, false);
+        repl_result_free(&r);
     }
     return NULL;
 }
@@ -243,8 +243,8 @@ static void *thread_mixed_even(void *arg) {
 static void *thread_mixed_odd(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        char *result = repl_format_line_ast("hello");
-        free(result);
+        ReplResult r = repl_eval_line("hello", false, true);
+        repl_result_free(&r);
     }
     return NULL;
 }
@@ -290,11 +290,11 @@ static atomic_int result_errors = 0;
 static void *thread_check_result(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        char *result = repl_format_line("42");
-        if (!result || strcmp(result, "OK [NUMBER 42]") != 0) {
+        ReplResult r = repl_eval_line("42", false, false);
+        if (!r.ok || !r.value || strcmp(r.value, "42") != 0) {
             atomic_fetch_add(&result_errors, 1);
         }
-        free(result);
+        repl_result_free(&r);
     }
     return NULL;
 }
@@ -330,8 +330,8 @@ int main(void) {
     RUN_TEST(test_runtime_init_destroy);
     RUN_TEST(test_runtime_double_init);
     RUN_TEST(test_concurrent_runtime_init);
-    RUN_TEST(test_serialized_eval_format_line);
-    RUN_TEST(test_serialized_eval_format_line_ast);
+    RUN_TEST(test_serialized_eval_line);
+    RUN_TEST(test_serialized_eval_line_with_ast);
     RUN_TEST(test_serialized_eval_mixed);
     RUN_TEST(test_results_correct_under_concurrency);
 

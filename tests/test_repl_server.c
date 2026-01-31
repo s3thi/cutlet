@@ -1,21 +1,22 @@
 /*
- * test_repl_server.c - Tests for the TCP REPL server
+ * test_repl_server.c - Tests for the TCP REPL server (JSON protocol v1)
  *
  * Tests the TCP server by starting it in-process, connecting via
- * sockets, and verifying the line-based protocol.
+ * sockets, and verifying the JSON-framed protocol.
  *
  * Test groups:
  * - Server lifecycle (start, port discovery, stop)
- * - Single client / basic protocol
- * - Single connection, multiple requests
+ * - Basic eval requests (numbers, strings, expressions)
+ * - Error handling (parse errors, eval errors)
+ * - Multiple requests on one connection
  * - Multi-client behavior
  * - Disconnect handling
- * - Error cases (bad IDs, oversized lines)
- * - CRLF handling
+ * - Debug flags (tokens, ast)
  *
  * Uses the same simple test harness as the other test files.
  */
 
+#include "../src/json.h"
 #include "../src/repl_server.h"
 #include "../src/runtime.h"
 #include <arpa/inet.h>
@@ -29,7 +30,7 @@
 #include <unistd.h>
 
 /* ============================================================
- * Simple test harness (same as other test files)
+ * Simple test harness
  * ============================================================ */
 
 static int tests_run = 0;
@@ -57,7 +58,6 @@ static int tests_failed = 0;
         }                                                                                          \
     } while (0)
 
-#define ASSERT_EQ(a, b, msg) ASSERT((a) == (b), msg)
 #define ASSERT_STR_EQ(a, b, msg) ASSERT(strcmp((a), (b)) == 0, msg)
 #define ASSERT_NOT_NULL(ptr, msg) ASSERT((ptr) != NULL, msg)
 
@@ -77,7 +77,6 @@ static int connect_to(uint16_t port) {
     if (fd < 0)
         return -1;
 
-    /* Set a 2-second recv timeout to avoid hanging tests. */
     struct timeval tv = {.tv_sec = 2, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -95,30 +94,32 @@ static int connect_to(uint16_t port) {
     return fd;
 }
 
-/* Send a string on a socket. Returns true on success. */
-static bool send_line(int fd, const char *line) {
-    size_t len = strlen(line);
-    ssize_t n = send(fd, line, len, 0);
-    return n == (ssize_t)len;
-}
-
 /*
- * Read one line (up to \n) from socket into buf.
- * Returns the length read (including \n), or -1 on error/timeout.
- * The line is null-terminated. buf must be at least bufsz bytes.
+ * Send a JSON eval request and receive the response.
+ * Helper that builds request, sends frame, reads frame, parses response.
+ * Returns true on success, populating resp. Caller must json_response_free().
  */
-static ssize_t recv_line(int fd, char *buf, size_t bufsz) {
-    size_t pos = 0;
-    while (pos < bufsz - 1) {
-        ssize_t n = recv(fd, buf + pos, 1, 0);
-        if (n <= 0)
-            return -1;
-        pos++;
-        if (buf[pos - 1] == '\n')
-            break;
-    }
-    buf[pos] = '\0';
-    return (ssize_t)pos;
+static bool send_eval(int fd, unsigned long id, const char *expr, bool want_tokens, bool want_ast,
+                      JsonResponse *resp) {
+    JsonRequest req = {
+        .id = id, .expr = (char *)expr, .want_tokens = want_tokens, .want_ast = want_ast};
+    char *req_json = json_encode_request(&req);
+    if (!req_json)
+        return false;
+
+    bool ok = json_frame_write(fd, req_json, strlen(req_json));
+    free(req_json);
+    if (!ok)
+        return false;
+
+    size_t resp_len = 0;
+    char *resp_json = json_frame_read(fd, &resp_len);
+    if (!resp_json)
+        return false;
+
+    ok = json_parse_response(resp_json, resp_len, resp);
+    free(resp_json);
+    return ok;
 }
 
 /* ============================================================
@@ -127,7 +128,7 @@ static ssize_t recv_line(int fd, char *buf, size_t bufsz) {
 
 TEST(test_start_and_stop) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server should start");
     ASSERT(repl_server_port(srv) > 0, "port should be assigned");
     repl_server_stop(srv);
@@ -135,183 +136,96 @@ TEST(test_start_and_stop) {
 }
 
 TEST(test_start_null_err_out) {
-    /* err_out can be NULL — should not crash. */
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, NULL);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, NULL);
     ASSERT_NOT_NULL(srv, "server should start with NULL err_out");
     repl_server_stop(srv);
     PASS();
 }
 
 TEST(test_stop_null_is_safe) {
-    /* Calling stop with NULL should not crash. */
     repl_server_stop(NULL);
     PASS();
 }
 
 /* ============================================================
- * Single client / basic protocol
+ * Basic eval requests
  * ============================================================ */
 
-TEST(test_ident_token) {
-    /* Identifiers now produce eval errors (unknown variable).
-     * Test with a number instead to verify basic protocol. */
+TEST(test_eval_number) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "1 99\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 99]\n", "response matches");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "42", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok should be true");
+    ASSERT_NOT_NULL(resp.value, "value should be set");
+    ASSERT_STR_EQ(resp.value, "42", "value matches");
+    ASSERT(resp.id == 1, "id matches");
+    ASSERT(resp.tokens == NULL, "no tokens");
+    ASSERT(resp.ast == NULL, "no ast");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
     PASS();
 }
 
-TEST(test_string_token) {
+TEST(test_eval_string) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "2 \"hi\"\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 2 OK [STRING hi]\n", "response matches");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 2, "\"hello\"", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "hello", "value");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
     PASS();
 }
 
-TEST(test_number_token) {
+TEST(test_eval_expression) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "10 42\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 10 OK [NUMBER 42]\n", "response matches");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 3, "1 + 2 * 3", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "7", "expression eval");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
     PASS();
 }
 
-TEST(test_error_unterminated_string) {
+TEST(test_eval_blank_input) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "3 \"unterminated\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    /* Check prefix only — exact error message may vary. */
-    ASSERT(strncmp(buf, "-> 3 ERR 1:", 11) == 0, "error prefix matches");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_adjacent_tokens_valid) {
-    /* 10+10 is now valid: NUMBER, OPERATOR, NUMBER (adjacency allowed) */
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    /* 10+10 evaluates to 20 (adjacency allowed, parsed as expression) */
-    ASSERT(send_line(fd, "4 10+10\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 4 OK [NUMBER 20]\n", "adjacent tokens eval");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_whitespace_only_expr) {
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    /* "5 \n" means id=5 and expr is empty (just whitespace after id). */
-    ASSERT(send_line(fd, "5 \n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 5 OK\n", "empty expr returns OK");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_whitespace_expr_spaces) {
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "6     \n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 6 OK\n", "spaces-only expr returns OK");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_crlf_line_ending) {
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "7 77\r\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 7 OK [NUMBER 77]\n", "CRLF handled");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 4, "   ", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok for blank input");
+    ASSERT(resp.value == NULL, "no value for blank input");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -319,38 +233,77 @@ TEST(test_crlf_line_ending) {
 }
 
 /* ============================================================
- * Single connection, multiple requests
+ * Error handling
+ * ============================================================ */
+
+TEST(test_eval_parse_error) {
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 5, "\"unterminated", false, false, &resp), "send_eval");
+    ASSERT(!resp.ok, "ok should be false");
+    ASSERT_NOT_NULL(resp.error, "error should be set");
+    ASSERT(strstr(resp.error, "unterminated") != NULL, "error mentions unterminated");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_eval_div_by_zero) {
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 6, "1 / 0", false, false, &resp), "send_eval");
+    ASSERT(!resp.ok, "ok should be false");
+    ASSERT_NOT_NULL(resp.error, "error should be set");
+    ASSERT(strstr(resp.error, "division by zero") != NULL, "error msg");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
+ * Multiple requests on one connection
  * ============================================================ */
 
 TEST(test_multiple_requests_one_connection) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    char buf[512];
-    ssize_t n;
+    JsonResponse resp;
 
-    /* Request 1 */
-    ASSERT(send_line(fd, "1 \"hello\"\n"), "send 1");
-    n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv 1");
-    ASSERT_STR_EQ(buf, "-> 1 OK [STRING hello]\n", "response 1");
+    ASSERT(send_eval(fd, 1, "\"hello\"", false, false, &resp), "req 1");
+    ASSERT(resp.ok, "ok 1");
+    ASSERT_STR_EQ(resp.value, "hello", "val 1");
+    json_response_free(&resp);
 
-    /* Request 2 */
-    ASSERT(send_line(fd, "2 42\n"), "send 2");
-    n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv 2");
-    ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 42]\n", "response 2");
+    ASSERT(send_eval(fd, 2, "42", false, false, &resp), "req 2");
+    ASSERT(resp.ok, "ok 2");
+    ASSERT_STR_EQ(resp.value, "42", "val 2");
+    json_response_free(&resp);
 
-    /* Request 3: expression evaluation */
-    ASSERT(send_line(fd, "3 1 + 2\n"), "send 3");
-    n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv 3");
-    ASSERT_STR_EQ(buf, "-> 3 OK [NUMBER 3]\n", "response 3");
+    ASSERT(send_eval(fd, 3, "1 + 2", false, false, &resp), "req 3");
+    ASSERT(resp.ok, "ok 3");
+    ASSERT_STR_EQ(resp.value, "3", "val 3");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -358,25 +311,21 @@ TEST(test_multiple_requests_one_connection) {
 }
 
 TEST(test_connection_stays_open) {
-    /* Verify server doesn't close connection after first response. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    char buf[512];
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "11", false, false, &resp), "req 1");
+    json_response_free(&resp);
 
-    ASSERT(send_line(fd, "1 11\n"), "send 1");
-    recv_line(fd, buf, sizeof(buf));
-
-    /* Second request on same connection should work. */
-    ASSERT(send_line(fd, "2 22\n"), "send 2");
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "second request succeeded");
-    ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 22]\n", "response 2");
+    ASSERT(send_eval(fd, 2, "22", false, false, &resp), "req 2");
+    ASSERT(resp.ok, "ok 2");
+    ASSERT_STR_EQ(resp.value, "22", "val 2");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -387,11 +336,11 @@ TEST(test_connection_stays_open) {
  * Multi-client behavior
  * ============================================================ */
 
-/* Thread arg for concurrent client test. */
 typedef struct {
     uint16_t port;
-    const char *request;
-    char response[512];
+    unsigned long id;
+    const char *expr;
+    char value[64];
     bool ok;
 } ClientArg;
 
@@ -403,14 +352,15 @@ static void *client_thread_fn(void *arg) {
     if (fd < 0)
         return NULL;
 
-    if (!send_line(fd, ca->request)) {
-        close(fd);
-        return NULL;
+    JsonResponse resp;
+    if (send_eval(fd, ca->id, ca->expr, false, false, &resp)) {
+        if (resp.ok && resp.value) {
+            strncpy(ca->value, resp.value, sizeof(ca->value) - 1);
+            ca->value[sizeof(ca->value) - 1] = '\0';
+            ca->ok = true;
+        }
+        json_response_free(&resp);
     }
-
-    ssize_t n = recv_line(fd, ca->response, sizeof(ca->response));
-    if (n > 0)
-        ca->ok = true;
 
     close(fd);
     return NULL;
@@ -418,12 +368,12 @@ static void *client_thread_fn(void *arg) {
 
 TEST(test_two_concurrent_clients) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
-    ClientArg c1 = {.port = port, .request = "100 111\n"};
-    ClientArg c2 = {.port = port, .request = "200 222\n"};
+    ClientArg c1 = {.port = port, .id = 100, .expr = "111"};
+    ClientArg c2 = {.port = port, .id = 200, .expr = "222"};
 
     pthread_t t1, t2;
     pthread_create(&t1, NULL, client_thread_fn, &c1);
@@ -433,10 +383,8 @@ TEST(test_two_concurrent_clients) {
 
     ASSERT(c1.ok, "client 1 got response");
     ASSERT(c2.ok, "client 2 got response");
-
-    /* Each client should get its own response with matching ID. */
-    ASSERT_STR_EQ(c1.response, "-> 100 OK [NUMBER 111]\n", "client 1 response");
-    ASSERT_STR_EQ(c2.response, "-> 200 OK [NUMBER 222]\n", "client 2 response");
+    ASSERT_STR_EQ(c1.value, "111", "client 1 value");
+    ASSERT_STR_EQ(c2.value, "222", "client 2 value");
 
     repl_server_stop(srv);
     PASS();
@@ -448,106 +396,25 @@ TEST(test_two_concurrent_clients) {
 
 TEST(test_client_connects_and_disconnects_immediately) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
     int fd = connect_to(port);
     ASSERT(fd >= 0, "connect");
-    close(fd);
-
-    /* Give server a moment to handle the disconnect. */
-    usleep(50000);
-
-    /* Server should still be alive — try another connection. */
-    fd = connect_to(port);
-    ASSERT(fd >= 0, "reconnect after disconnect");
-
-    ASSERT(send_line(fd, "1 55\n"), "send after reconnect");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv after reconnect");
-    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 55]\n", "response after reconnect");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_partial_line_then_disconnect) {
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    /* Send partial line (no newline) then close. */
-    send_line(fd, "1 partial");
     close(fd);
 
     usleep(50000);
 
-    /* Server should not crash — verify with another connection. */
+    /* Server should still be alive. */
     fd = connect_to(port);
-    ASSERT(fd >= 0, "reconnect after partial disconnect");
+    ASSERT(fd >= 0, "reconnect");
 
-    ASSERT(send_line(fd, "2 88\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 2 OK [NUMBER 88]\n", "response ok");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-/* ============================================================
- * Error cases: bad request IDs
- * ============================================================ */
-
-TEST(test_non_digit_id_is_error) {
-    /*
-     * IDs must be digits-only. A non-digit ID should produce
-     * an error response (not crash, not silently succeed).
-     */
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "abc foo\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    /* Expect error response about invalid ID. */
-    ASSERT(strstr(buf, "ERR") != NULL, "error response for non-digit ID");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_missing_id_is_error) {
-    /* A line with no content (just newline) should be an error. */
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "\n"), "send empty line");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT(strstr(buf, "ERR") != NULL, "error response for empty line");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "55", false, false, &resp), "eval after reconnect");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "55", "value");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -555,32 +422,67 @@ TEST(test_missing_id_is_error) {
 }
 
 /* ============================================================
- * Oversized line handling
+ * Debug flags: tokens
  * ============================================================ */
 
-TEST(test_oversized_line_returns_error) {
+TEST(test_tokens_enabled) {
+    /* Server started with enable_tokens=true. Client requests want_tokens. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    /* Build a line longer than 4096 bytes: "1 " + 4095 'a' + "\n" */
-    char big[4200];
-    memset(big, 'a', sizeof(big));
-    big[0] = '1';
-    big[1] = ' ';
-    big[4196] = '\n';
-    big[4197] = '\0';
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "42", true, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "42", "value");
+    ASSERT_NOT_NULL(resp.tokens, "tokens should be present");
+    ASSERT(strstr(resp.tokens, "TOKENS") != NULL, "tokens starts with TOKENS");
+    ASSERT(strstr(resp.tokens, "[NUMBER 42]") != NULL, "tokens contains number");
+    ASSERT(resp.ast == NULL, "no ast");
+    json_response_free(&resp);
 
-    ASSERT(send_line(fd, big), "send oversized");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    /* Should get an error, not a crash. */
-    ASSERT(strstr(buf, "ERR") != NULL, "error for oversized line");
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_tokens_not_requested) {
+    /* Server has tokens enabled but client doesn't request them. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "42", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT(resp.tokens == NULL, "no tokens when not requested");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_tokens_server_disabled) {
+    /* Server doesn't have tokens enabled; client requests them. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "42", true, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT(resp.tokens == NULL, "no tokens when server disabled");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -588,24 +490,45 @@ TEST(test_oversized_line_returns_error) {
 }
 
 /* ============================================================
- * Multiple tokens in one request
+ * Debug flags: ast
  * ============================================================ */
 
-TEST(test_multiple_tokens) {
+TEST(test_ast_enabled) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    /* Expression evaluation: 10 + 20 * 3 = 70 */
-    ASSERT(send_line(fd, "1 10 + 20 * 3\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 1 OK [NUMBER 70]\n", "expression eval");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "1 + 2", false, true, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "3", "value");
+    ASSERT_NOT_NULL(resp.ast, "ast should be present");
+    ASSERT(strstr(resp.ast, "AST") != NULL, "ast starts with AST");
+    ASSERT(strstr(resp.ast, "BINOP") != NULL, "ast contains BINOP");
+    ASSERT(resp.tokens == NULL, "no tokens");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_ast_not_requested) {
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "1 + 2", false, false, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT(resp.ast == NULL, "no ast when not requested");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -613,24 +536,26 @@ TEST(test_multiple_tokens) {
 }
 
 /* ============================================================
- * ID-only request (no expr)
+ * Debug flags: both tokens and ast
  * ============================================================ */
 
-TEST(test_id_only_no_expr) {
+TEST(test_both_debug_flags) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, true, &err);
     ASSERT_NOT_NULL(srv, "server start");
-    uint16_t port = repl_server_port(srv);
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    /* Just an ID with no space after it. */
-    ASSERT(send_line(fd, "99\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 99 OK\n", "id-only returns OK");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "42", true, true, &resp), "send_eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "42", "value");
+    ASSERT_NOT_NULL(resp.tokens, "tokens present");
+    ASSERT_NOT_NULL(resp.ast, "ast present");
+    ASSERT(strstr(resp.tokens, "TOKENS") != NULL, "tokens format");
+    ASSERT(strstr(resp.ast, "AST") != NULL, "ast format");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -638,67 +563,25 @@ TEST(test_id_only_no_expr) {
 }
 
 /* ============================================================
- * AST mode tests
+ * Best-effort tokens on tokenizer error
  * ============================================================ */
 
-TEST(test_ast_mode_basic) {
-    /* Server started in AST mode should process AST-prefixed requests. */
+TEST(test_tokens_on_tokenizer_error) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, &err);
-    ASSERT_NOT_NULL(srv, "server start (ast mode)");
-    uint16_t port = repl_server_port(srv);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
 
-    int fd = connect_to(port);
+    int fd = connect_to(repl_server_port(srv));
     ASSERT(fd >= 0, "connect");
 
-    ASSERT(send_line(fd, "AST 1 foo\n"), "send");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT_STR_EQ(buf, "-> 1 AST [IDENT foo]\n", "ast response matches");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_ast_mode_mismatch_no_prefix) {
-    /* AST server receives non-AST request → mode mismatch error. */
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, &err);
-    ASSERT_NOT_NULL(srv, "server start (ast mode)");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "1 foo\n"), "send without AST prefix");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT(strstr(buf, "ERR mode mismatch: expected AST") != NULL, "mode mismatch error");
-
-    close(fd);
-    repl_server_stop(srv);
-    PASS();
-}
-
-TEST(test_non_ast_mode_mismatch_with_prefix) {
-    /* Non-AST server receives AST-prefixed request → mode mismatch error. */
-    const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, &err);
-    ASSERT_NOT_NULL(srv, "server start (non-ast mode)");
-    uint16_t port = repl_server_port(srv);
-
-    int fd = connect_to(port);
-    ASSERT(fd >= 0, "connect");
-
-    ASSERT(send_line(fd, "AST 1 foo\n"), "send with AST prefix");
-    char buf[512];
-    ssize_t n = recv_line(fd, buf, sizeof(buf));
-    ASSERT(n > 0, "recv");
-    ASSERT(strstr(buf, "ERR mode mismatch: server not in AST mode") != NULL,
-           "mode mismatch error for non-ast server");
+    JsonResponse resp;
+    /* "42foo" causes a tokenizer error (number followed by ident char). */
+    ASSERT(send_eval(fd, 1, "42foo", true, false, &resp), "send_eval");
+    ASSERT(!resp.ok, "ok should be false (parse error)");
+    ASSERT_NOT_NULL(resp.tokens, "tokens should still be present (best-effort)");
+    ASSERT(strstr(resp.tokens, "TOKENS") != NULL, "tokens format");
+    ASSERT(strstr(resp.tokens, "ERR") != NULL, "tokens should contain error");
+    json_response_free(&resp);
 
     close(fd);
     repl_server_stop(srv);
@@ -711,47 +594,47 @@ TEST(test_non_ast_mode_mismatch_with_prefix) {
 
 int main(void) {
     runtime_init();
-    printf("=== TCP REPL Server Tests ===\n\n");
+    printf("=== TCP REPL Server Tests (JSON protocol v1) ===\n\n");
 
     printf("Server lifecycle:\n");
     RUN_TEST(test_start_and_stop);
     RUN_TEST(test_start_null_err_out);
     RUN_TEST(test_stop_null_is_safe);
 
-    printf("\nSingle client / basic protocol:\n");
-    RUN_TEST(test_ident_token);
-    RUN_TEST(test_string_token);
-    RUN_TEST(test_number_token);
-    RUN_TEST(test_error_unterminated_string);
-    RUN_TEST(test_adjacent_tokens_valid);
-    RUN_TEST(test_whitespace_only_expr);
-    RUN_TEST(test_whitespace_expr_spaces);
-    RUN_TEST(test_crlf_line_ending);
+    printf("\nBasic eval requests:\n");
+    RUN_TEST(test_eval_number);
+    RUN_TEST(test_eval_string);
+    RUN_TEST(test_eval_expression);
+    RUN_TEST(test_eval_blank_input);
 
-    printf("\nSingle connection, multiple requests:\n");
+    printf("\nError handling:\n");
+    RUN_TEST(test_eval_parse_error);
+    RUN_TEST(test_eval_div_by_zero);
+
+    printf("\nMultiple requests:\n");
     RUN_TEST(test_multiple_requests_one_connection);
     RUN_TEST(test_connection_stays_open);
 
-    printf("\nMulti-client behavior:\n");
+    printf("\nMulti-client:\n");
     RUN_TEST(test_two_concurrent_clients);
 
     printf("\nDisconnect handling:\n");
     RUN_TEST(test_client_connects_and_disconnects_immediately);
-    RUN_TEST(test_partial_line_then_disconnect);
 
-    printf("\nError cases:\n");
-    RUN_TEST(test_non_digit_id_is_error);
-    RUN_TEST(test_missing_id_is_error);
-    RUN_TEST(test_oversized_line_returns_error);
+    printf("\nDebug flags (tokens):\n");
+    RUN_TEST(test_tokens_enabled);
+    RUN_TEST(test_tokens_not_requested);
+    RUN_TEST(test_tokens_server_disabled);
 
-    printf("\nMultiple tokens / edge cases:\n");
-    RUN_TEST(test_multiple_tokens);
-    RUN_TEST(test_id_only_no_expr);
+    printf("\nDebug flags (ast):\n");
+    RUN_TEST(test_ast_enabled);
+    RUN_TEST(test_ast_not_requested);
 
-    printf("\nAST mode:\n");
-    RUN_TEST(test_ast_mode_basic);
-    RUN_TEST(test_ast_mode_mismatch_no_prefix);
-    RUN_TEST(test_non_ast_mode_mismatch_with_prefix);
+    printf("\nDebug flags (both):\n");
+    RUN_TEST(test_both_debug_flags);
+
+    printf("\nBest-effort tokens:\n");
+    RUN_TEST(test_tokens_on_tokenizer_error);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     if (tests_failed > 0) {

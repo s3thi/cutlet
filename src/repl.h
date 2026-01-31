@@ -1,55 +1,71 @@
 /*
  * repl.h - Cutlet REPL core interface
  *
- * Provides the core REPL formatting functions that parse and evaluate
- * an input expression and return a formatted result string.
+ * Provides the core REPL evaluation function that parses and evaluates
+ * an input expression and returns a structured result.
  *
- * Token mode (repl_format_line) output format:
- * - Success: "OK [TYPE value]" (e.g., "OK [NUMBER 42]", "OK [STRING hello]")
- * - Parse error: "ERR line:col message"
- * - Eval error: "ERR message"
- * - Empty/whitespace input: "OK"
+ * The primary API is repl_eval_line(), which returns:
+ * - ok=true, value set: successful evaluation
+ * - ok=false, error set: parse or eval error
+ * - ok=true, value=NULL: empty/whitespace input
  *
- * AST mode (repl_format_line_ast) output format:
- * - Success: "AST [TYPE ...]" (nested S-expression)
- * - Parse error: "ERR line:col message"
- * - Empty/whitespace input: "AST"
+ * Optional debug fields (tokens, ast) are populated when requested.
  */
 
 #ifndef CUTLET_REPL_H
 #define CUTLET_REPL_H
 
+#include <stdbool.h>
+
 /*
- * Format a single line of input into a REPL response.
+ * Structured result from evaluating a REPL line.
  *
- * Parses the input as an expression, evaluates it, and returns a
- * newly allocated string containing the formatted result.
+ * ok=true means evaluation succeeded (or input was blank).
+ * ok=false means a parse or eval error occurred.
  *
- * Return format:
- * - On successful evaluation: "OK [TYPE value]"
- * - On parse error: "ERR line:col message"
- * - On eval error: "ERR message" (no position info)
- * - On empty/whitespace input: "OK"
+ * Fields are mutually exclusive: value is set on success, error on failure.
+ * tokens and ast are optional debug outputs, set only when requested.
+ * All string fields are heap-allocated; use repl_result_free() to clean up.
+ */
+typedef struct {
+    bool ok;
+    char *value;  /* plain value string (e.g. "42", "hello"), NULL for blank input */
+    char *error;  /* error string (e.g. "1:5 unterminated string") */
+    char *tokens; /* debug: token dump, e.g. "TOKENS [NUMBER 42]" */
+    char *ast;    /* debug: AST dump, e.g. "AST [NUMBER 42]" */
+} ReplResult;
+
+/*
+ * Evaluate a single line of input.
  *
- * The caller is responsible for freeing the returned string.
- * Returns NULL on allocation failure.
+ * Parses the input as an expression, evaluates it, and returns
+ * a structured result. Optionally includes token and/or AST
+ * debug output.
+ *
+ * Thread-safe: acquires the global eval lock internally.
+ *
+ * The caller must call repl_result_free() on the result.
  *
  * If input is NULL, treats it as empty string.
+ */
+ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast);
+
+/*
+ * Free all heap-allocated fields in a ReplResult.
+ */
+void repl_result_free(ReplResult *r);
+
+/*
+ * Legacy API: format a line in the old "OK [TYPE value]" / "ERR ..." format.
+ * Kept for backward compatibility during transition.
+ * The caller must free the returned string.
  */
 char *repl_format_line(const char *input);
 
 /*
- * Format a single line of input into an AST REPL response.
- *
- * Uses the parser to produce AST output instead of raw tokens.
- *
- * Return format:
- * - On successful parse: "AST [TYPE value]"
- * - On parse error: "ERR line:col message"
- * - On empty/whitespace input: "AST"
- *
- * The caller is responsible for freeing the returned string.
- * Returns NULL on allocation failure.
+ * Legacy API: format a line in the old "AST [TYPE ...]" / "ERR ..." format.
+ * Kept for backward compatibility during transition.
+ * The caller must free the returned string.
  */
 char *repl_format_line_ast(const char *input);
 

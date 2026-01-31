@@ -13,7 +13,7 @@ TEST_DIR = tests
 BUILD_DIR = build
 
 # Library source files (everything except main.c)
-LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/eval.c $(SRC_DIR)/runtime.c
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/eval.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
 
 # Main binary

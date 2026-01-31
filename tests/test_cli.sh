@@ -2,7 +2,8 @@
 #
 # test_cli.sh - Integration tests for the Cutlet CLI
 #
-# Tests the cutlet repl command end-to-end.
+# Tests the cutlet repl command end-to-end using the JSON protocol.
+# Default mode is server (--listen). Tests use --listen + --connect.
 # Exit code: 0 if all tests pass, 1 otherwise.
 #
 
@@ -12,14 +13,47 @@ CUTLET="${CUTLET:-./build/cutlet}"
 PASS=0
 FAIL=0
 
-# Test helper: check output matches expected
-test_output() {
+# Helper: start a server, get its port, run a test, then kill it.
+# Usage: with_server [server_flags...] -- test_body
+# Sets SERVER_PORT for use in the test body.
+
+start_server() {
+    local server_out
+    server_out=$(mktemp)
+    local server_flags="$1"
+
+    # shellcheck disable=SC2086
+    "$CUTLET" repl $server_flags --listen 127.0.0.1:0 > "$server_out" 2>&1 &
+    local server_pid=$!
+
+    # Wait for server to start.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if grep -q "^Listening on " "$server_out" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    SERVER_PORT=$(grep "^Listening on " "$server_out" | sed 's/.*:\([0-9]*\)$/\1/')
+    SERVER_PID=$server_pid
+    SERVER_OUT=$server_out
+}
+
+stop_server() {
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    rm -f "$SERVER_OUT"
+}
+
+# Test helper: send input to server via --connect and check output.
+test_via_server() {
     name="$1"
     input="$2"
     expected="$3"
-    extra_flag="$4"
+    connect_flags="$4"
 
-    actual=$(echo "$input" | "$CUTLET" repl $extra_flag)
+    # shellcheck disable=SC2086
+    actual=$(echo "$input" | "$CUTLET" repl $connect_flags --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
 
     if [ "$actual" = "$expected" ]; then
         echo "  PASS: $name"
@@ -33,180 +67,110 @@ test_output() {
     fi
 }
 
-# Test helper: check error output contains expected prefix
-test_error_prefix() {
+# Test helper: check output contains expected string.
+test_via_server_contains() {
     name="$1"
     input="$2"
-    prefix="$3"
-    extra_flag="$4"
+    expected="$3"
+    connect_flags="$4"
 
-    actual=$(echo "$input" | "$CUTLET" repl $extra_flag)
+    # shellcheck disable=SC2086
+    actual=$(echo "$input" | "$CUTLET" repl $connect_flags --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
 
-    case "$actual" in
-        "$prefix"*)
-            echo "  PASS: $name"
-            PASS=$((PASS + 1))
-            ;;
-        *)
-            echo "  FAIL: $name"
-            echo "    Input:    $input"
-            echo "    Expected prefix: $prefix"
-            echo "    Got:      $actual"
-            FAIL=$((FAIL + 1))
-            ;;
-    esac
+    if echo "$actual" | grep -qF "$expected"; then
+        echo "  PASS: $name"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name"
+        echo "    Input:    $input"
+        echo "    Expected to contain: $expected"
+        echo "    Got:      $actual"
+        FAIL=$((FAIL + 1))
+    fi
 }
 
 echo "Running CLI integration tests..."
 echo
 
-echo "Basic evaluation (token mode):"
-test_output "empty input" "" "OK"
-test_output "single number" "42" "OK [NUMBER 42]"
-test_output "single string" '"hello"' "OK [STRING hello]"
-test_output "addition" "1 + 2" "OK [NUMBER 3]"
-test_output "multiplication" "2 * 3" "OK [NUMBER 6]"
-test_output "float division" "7 / 2" "OK [NUMBER 3.5]"
-test_output "precedence" "1 + 2 * 3" "OK [NUMBER 7]"
-test_output "parentheses" "(1 + 2) * 3" "OK [NUMBER 9]"
-test_output "exponentiation" "2 ** 10" "OK [NUMBER 1024]"
-test_output "unary minus" "-3" "OK [NUMBER -3]"
-test_output "whitespace only" "   " "OK"
-
-echo
-echo "Error cases (token mode):"
-test_error_prefix "unterminated string" '"hello' "ERR "
-test_error_prefix "number adjacent ident" "42foo" "ERR "
-test_error_prefix "unknown ident" "foo" "ERR "
-test_error_prefix "division by zero" "1 / 0" "ERR "
-
-echo
-echo "Multiple lines:"
-multi_result=$(printf '42\n1 + 2\n"hi"' | "$CUTLET" repl)
-multi_expected="OK [NUMBER 42]
-OK [NUMBER 3]
-OK [STRING hi]"
-if [ "$multi_result" = "$multi_expected" ]; then
-    echo "  PASS: multiple lines"
-    PASS=$((PASS + 1))
-else
-    echo "  FAIL: multiple lines"
-    echo "    Expected:"
-    echo "$multi_expected"
-    echo "    Got:"
-    echo "$multi_result"
-    FAIL=$((FAIL + 1))
-fi
-
-echo
-echo "AST mode (--ast):"
-test_output "ast number" "42" "AST [NUMBER 42]" "--ast"
-test_output "ast string" '"hello"' "AST [STRING hello]" "--ast"
-test_output "ast ident" "foo" "AST [IDENT foo]" "--ast"
-test_output "ast empty" "" "AST" "--ast"
-test_output "ast whitespace" "   " "AST" "--ast"
-test_output "ast binop" "1 + 2" "AST [BINOP + [NUMBER 1] [NUMBER 2]]" "--ast"
-test_output "ast precedence" "1 + 2 * 3" "AST [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]" "--ast"
-test_output "ast unary" "-3" "AST [UNARY - [NUMBER 3]]" "--ast"
-test_error_prefix "ast parse error" "(" "ERR " "--ast"
-test_error_prefix "ast tokenizer error" "42foo" "ERR " "--ast"
-
-echo
-echo "CLI arguments:"
-# Test help
-if "$CUTLET" --help 2>&1 | grep -q "Usage:"; then
-    echo "  PASS: --help shows usage"
-    PASS=$((PASS + 1))
-else
-    echo "  FAIL: --help should show usage"
-    FAIL=$((FAIL + 1))
-fi
-
-# Test unknown command
-if "$CUTLET" unknown 2>&1 | grep -q "Unknown command"; then
-    echo "  PASS: unknown command shows error"
-    PASS=$((PASS + 1))
-else
-    echo "  FAIL: unknown command should show error"
-    FAIL=$((FAIL + 1))
-fi
-
-# Test no arguments
-if "$CUTLET" 2>&1 | grep -q "Usage:"; then
-    echo "  PASS: no args shows usage"
-    PASS=$((PASS + 1))
-else
-    echo "  FAIL: no args should show usage"
-    FAIL=$((FAIL + 1))
-fi
-
-echo
-echo "TCP REPL (--listen and --connect):"
-
-# Start a server on an ephemeral port, capture the port from stdout.
-# The server prints "Listening on HOST:PORT" to stdout on startup.
-SERVER_OUT=$(mktemp)
-"$CUTLET" repl --listen 127.0.0.1:0 > "$SERVER_OUT" 2>&1 &
-SERVER_PID=$!
-# Wait for server to print its listening line.
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    if grep -q "^Listening on " "$SERVER_OUT" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
-
-SERVER_PORT=$(grep "^Listening on " "$SERVER_OUT" | sed 's/.*:\([0-9]*\)$/\1/')
+# ============================================================
+# Basic evaluation (via server)
+# ============================================================
+echo "Basic evaluation (via server):"
+start_server ""
 
 if [ -n "$SERVER_PORT" ]; then
-    echo "  (server started on port $SERVER_PORT)"
-
-    # Test: connect and send a single expression
-    connect_result=$(echo "1 + 2" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$connect_result" | grep -q "OK \[NUMBER 3\]"; then
-        echo "  PASS: connect single expression"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: connect single expression"
-        echo "    Got: $connect_result"
-        FAIL=$((FAIL + 1))
-    fi
-
-    # Test: connect and send multiple expressions
-    multi_connect=$(printf '42\n1 + 2\n"hi"' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$multi_connect" | grep -q "OK \[NUMBER 42\]" && \
-       echo "$multi_connect" | grep -q "OK \[NUMBER 3\]" && \
-       echo "$multi_connect" | grep -q "OK \[STRING hi\]"; then
-        echo "  PASS: connect multiple expressions"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: connect multiple expressions"
-        echo "    Got: $multi_connect"
-        FAIL=$((FAIL + 1))
-    fi
-
-    # Test: connect with tokenization error
-    err_connect=$(echo '"unterminated' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
-    if echo "$err_connect" | grep -q "ERR "; then
-        echo "  PASS: connect error expression"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: connect error expression"
-        echo "    Got: $err_connect"
-        FAIL=$((FAIL + 1))
-    fi
-
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
+    test_via_server "single number" "42" "42"
+    test_via_server "single string" '"hello"' "hello"
+    test_via_server "addition" "1 + 2" "3"
+    test_via_server "multiplication" "2 * 3" "6"
+    test_via_server "float division" "7 / 2" "3.5"
+    test_via_server "precedence" "1 + 2 * 3" "7"
+    test_via_server "parentheses" "(1 + 2) * 3" "9"
+    test_via_server "exponentiation" "2 ** 10" "1024"
+    test_via_server "unary minus" "-3" "-3"
 else
     echo "  FAIL: server did not start"
-    FAIL=$((FAIL + 3))
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
+    FAIL=$((FAIL + 9))
 fi
-rm -f "$SERVER_OUT"
 
-# Test: --listen with no arg defaults to 127.0.0.1:7117
+stop_server
+
+# ============================================================
+# Error cases
+# ============================================================
+echo
+echo "Error cases:"
+start_server ""
+
+if [ -n "$SERVER_PORT" ]; then
+    test_via_server_contains "unterminated string" '"hello' "ERR"
+    test_via_server_contains "number adjacent ident" "42foo" "ERR"
+    test_via_server_contains "unknown ident" "foo" "ERR"
+    test_via_server_contains "division by zero" "1 / 0" "ERR"
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 4))
+fi
+
+stop_server
+
+# ============================================================
+# Multiple lines
+# ============================================================
+echo
+echo "Multiple lines:"
+start_server ""
+
+if [ -n "$SERVER_PORT" ]; then
+    multi_result=$(printf '42\n1 + 2\n"hi"' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    multi_expected="42
+3
+hi"
+    if [ "$multi_result" = "$multi_expected" ]; then
+        echo "  PASS: multiple lines"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: multiple lines"
+        echo "    Expected:"
+        echo "$multi_expected"
+        echo "    Got:"
+        echo "$multi_result"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 1))
+fi
+
+stop_server
+
+# ============================================================
+# Default mode starts server
+# ============================================================
+echo
+echo "Default mode:"
+
+# cutlet repl (no --listen) should start a server on default port
 SERVER_OUT_DEF=$(mktemp)
 "$CUTLET" repl --listen > "$SERVER_OUT_DEF" 2>&1 &
 SERVER_PID_DEF=$!
@@ -218,9 +182,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 if grep -q "^Listening on 127.0.0.1:7117$" "$SERVER_OUT_DEF" 2>/dev/null; then
-    # Verify we can connect with default --connect (no arg)
     def_result=$(echo "42" | "$CUTLET" repl --connect 2>/dev/null)
-    if echo "$def_result" | grep -q "OK \[NUMBER 42\]"; then
+    if [ "$def_result" = "42" ]; then
         echo "  PASS: --listen default, --connect default"
         PASS=$((PASS + 1))
     else
@@ -255,7 +218,7 @@ done
 
 if grep -q "^Listening on 127.0.0.1:9111$" "$SERVER_OUT_CP" 2>/dev/null; then
     cp_result=$(echo "42" | "$CUTLET" repl --connect :9111 2>/dev/null)
-    if echo "$cp_result" | grep -q "OK \[NUMBER 42\]"; then
+    if [ "$cp_result" = "42" ]; then
         echo "  PASS: --listen :PORT, --connect :PORT"
         PASS=$((PASS + 1))
     else
@@ -277,103 +240,154 @@ kill "$SERVER_PID_CP" 2>/dev/null || true
 wait "$SERVER_PID_CP" 2>/dev/null || true
 rm -f "$SERVER_OUT_CP"
 
-# Test: --listen --ast with --connect --ast (AST over TCP)
-SERVER_OUT_AST=$(mktemp)
-"$CUTLET" repl --ast --listen 127.0.0.1:0 > "$SERVER_OUT_AST" 2>&1 &
-SERVER_PID_AST=$!
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    if grep -q "^Listening on " "$SERVER_OUT_AST" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
+# ============================================================
+# Debug flags: --tokens
+# ============================================================
+echo
+echo "Debug flags (--tokens):"
+start_server "--tokens"
 
-AST_PORT=$(grep "^Listening on " "$SERVER_OUT_AST" | sed 's/.*:\([0-9]*\)$/\1/')
-
-if [ -n "$AST_PORT" ]; then
-    echo "  (AST server started on port $AST_PORT)"
-
-    # Both sides --ast: should get AST output
-    ast_result=$(echo "1 + 2" | "$CUTLET" repl --ast --connect "127.0.0.1:$AST_PORT" 2>/dev/null)
-    if echo "$ast_result" | grep -q "AST \[BINOP"; then
-        echo "  PASS: --ast --listen + --ast --connect"
+if [ -n "$SERVER_PORT" ]; then
+    # Client with --tokens should see TOKENS line + value
+    tokens_result=$(echo "42" | "$CUTLET" repl --tokens --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$tokens_result" | grep -q "TOKENS" && echo "$tokens_result" | grep -q "42"; then
+        echo "  PASS: --tokens shows token output"
         PASS=$((PASS + 1))
     else
-        echo "  FAIL: --ast --listen + --ast --connect"
+        echo "  FAIL: --tokens should show token output"
+        echo "    Got: $tokens_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Client without --tokens should NOT see TOKENS line
+    no_tokens_result=$(echo "42" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$no_tokens_result" | grep -q "TOKENS"; then
+        echo "  FAIL: no --tokens should not see TOKENS"
+        echo "    Got: $no_tokens_result"
+        FAIL=$((FAIL + 1))
+    else
+        echo "  PASS: no --tokens hides token output"
+        PASS=$((PASS + 1))
+    fi
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 2))
+fi
+
+stop_server
+
+# ============================================================
+# Debug flags: --ast
+# ============================================================
+echo
+echo "Debug flags (--ast):"
+start_server "--ast"
+
+if [ -n "$SERVER_PORT" ]; then
+    ast_result=$(echo "1 + 2" | "$CUTLET" repl --ast --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$ast_result" | grep -q "AST" && echo "$ast_result" | grep -q "BINOP"; then
+        echo "  PASS: --ast shows AST output"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --ast should show AST output"
         echo "    Got: $ast_result"
         FAIL=$((FAIL + 1))
     fi
 
-    # Mismatch: server --ast, client no --ast → error, non-zero exit
-    mismatch1_exit=0
-    mismatch1=$(echo "42" | "$CUTLET" repl --connect "127.0.0.1:$AST_PORT" 2>/dev/null) || mismatch1_exit=$?
-    if echo "$mismatch1" | grep -q "mode mismatch"; then
-        echo "  PASS: server --ast, client no --ast gives mismatch error"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: server --ast, client no --ast should give mismatch error"
-        echo "    Got: $mismatch1"
+    # Client without --ast should NOT see AST
+    no_ast_result=$(echo "1 + 2" | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$no_ast_result" | grep -q "AST"; then
+        echo "  FAIL: no --ast should not see AST"
+        echo "    Got: $no_ast_result"
         FAIL=$((FAIL + 1))
-    fi
-    if [ "$mismatch1_exit" -ne 0 ]; then
-        echo "  PASS: server --ast, client no --ast exits non-zero"
-        PASS=$((PASS + 1))
     else
-        echo "  FAIL: server --ast, client no --ast should exit non-zero"
-        FAIL=$((FAIL + 1))
+        echo "  PASS: no --ast hides AST output"
+        PASS=$((PASS + 1))
     fi
-
-    kill "$SERVER_PID_AST" 2>/dev/null || true
-    wait "$SERVER_PID_AST" 2>/dev/null || true
 else
-    echo "  FAIL: AST server did not start"
-    FAIL=$((FAIL + 3))
-    kill "$SERVER_PID_AST" 2>/dev/null || true
-    wait "$SERVER_PID_AST" 2>/dev/null || true
-fi
-rm -f "$SERVER_OUT_AST"
-
-# Mismatch: server no --ast, client --connect --ast
-SERVER_OUT_NOAST=$(mktemp)
-"$CUTLET" repl --listen 127.0.0.1:0 > "$SERVER_OUT_NOAST" 2>&1 &
-SERVER_PID_NOAST=$!
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    if grep -q "^Listening on " "$SERVER_OUT_NOAST" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
-
-NOAST_PORT=$(grep "^Listening on " "$SERVER_OUT_NOAST" | sed 's/.*:\([0-9]*\)$/\1/')
-
-if [ -n "$NOAST_PORT" ]; then
-    mismatch2_exit=0
-    mismatch2=$(echo "42" | "$CUTLET" repl --ast --connect "127.0.0.1:$NOAST_PORT" 2>/dev/null) || mismatch2_exit=$?
-    if echo "$mismatch2" | grep -q "mode mismatch"; then
-        echo "  PASS: server no --ast, client --ast gives mismatch error"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: server no --ast, client --ast should give mismatch error"
-        echo "    Got: $mismatch2"
-        FAIL=$((FAIL + 1))
-    fi
-    if [ "$mismatch2_exit" -ne 0 ]; then
-        echo "  PASS: server no --ast, client --ast exits non-zero"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: server no --ast, client --ast should exit non-zero"
-        FAIL=$((FAIL + 1))
-    fi
-
-    kill "$SERVER_PID_NOAST" 2>/dev/null || true
-    wait "$SERVER_PID_NOAST" 2>/dev/null || true
-else
-    echo "  FAIL: non-AST server did not start"
+    echo "  FAIL: server did not start"
     FAIL=$((FAIL + 2))
-    kill "$SERVER_PID_NOAST" 2>/dev/null || true
-    wait "$SERVER_PID_NOAST" 2>/dev/null || true
 fi
-rm -f "$SERVER_OUT_NOAST"
+
+stop_server
+
+# ============================================================
+# Debug flags: --tokens --ast combined
+# ============================================================
+echo
+echo "Debug flags (combined):"
+start_server "--tokens --ast"
+
+if [ -n "$SERVER_PORT" ]; then
+    both_result=$(echo "42" | "$CUTLET" repl --tokens --ast --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$both_result" | grep -q "TOKENS" && echo "$both_result" | grep -q "AST"; then
+        echo "  PASS: --tokens --ast shows both"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: --tokens --ast should show both"
+        echo "    Got: $both_result"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 1))
+fi
+
+stop_server
+
+# ============================================================
+# Debug flags: server without flags, client with flags
+# ============================================================
+echo
+echo "Debug flags (server without, client with):"
+start_server ""
+
+if [ -n "$SERVER_PORT" ]; then
+    # Client requests --tokens but server doesn't have it — no tokens in output
+    no_srv_tokens=$(echo "42" | "$CUTLET" repl --tokens --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    if echo "$no_srv_tokens" | grep -q "TOKENS"; then
+        echo "  FAIL: server without --tokens should not produce tokens"
+        echo "    Got: $no_srv_tokens"
+        FAIL=$((FAIL + 1))
+    else
+        echo "  PASS: server without --tokens produces no tokens"
+        PASS=$((PASS + 1))
+    fi
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 1))
+fi
+
+stop_server
+
+# ============================================================
+# CLI arguments
+# ============================================================
+echo
+echo "CLI arguments:"
+if "$CUTLET" --help 2>&1 | grep -q "Usage:"; then
+    echo "  PASS: --help shows usage"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --help should show usage"
+    FAIL=$((FAIL + 1))
+fi
+
+if "$CUTLET" unknown 2>&1 | grep -q "Unknown command"; then
+    echo "  PASS: unknown command shows error"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: unknown command should show error"
+    FAIL=$((FAIL + 1))
+fi
+
+if "$CUTLET" 2>&1 | grep -q "Usage:"; then
+    echo "  PASS: no args shows usage"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: no args should show usage"
+    FAIL=$((FAIL + 1))
+fi
 
 # Test: invalid --listen arg
 if "$CUTLET" repl --listen "badaddr" 2>&1 | grep -qi "error\|invalid\|failed"; then
