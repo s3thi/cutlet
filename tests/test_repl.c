@@ -244,6 +244,125 @@ TEST(test_error_div_by_zero) {
 }
 
 /* ============================================================
+ * Variable declaration and assignment tests
+ * ============================================================ */
+
+TEST(test_decl_returns_value) {
+    ASSERT(format_matches("my x = 2", "OK [NUMBER 2]"), "decl returns value");
+    PASS();
+}
+
+TEST(test_decl_then_read) {
+    /* Declare, then read in separate eval calls (persistent env). */
+    char *r1 = repl_format_line("my x = 2");
+    ASSERT_NOT_NULL(r1, "decl result");
+    ASSERT_STR_EQ(r1, "OK [NUMBER 2]", "decl value");
+    free(r1);
+
+    char *r2 = repl_format_line("x + 3");
+    ASSERT_NOT_NULL(r2, "read result");
+    ASSERT_STR_EQ(r2, "OK [NUMBER 5]", "x + 3 = 5");
+    free(r2);
+    PASS();
+}
+
+TEST(test_decl_expr_precedence) {
+    /* my x = 1 + 2 * 3 → assigns 7 (assignment binds looser) */
+    ASSERT(format_matches("my y = 1 + 2 * 3", "OK [NUMBER 7]"), "decl precedence");
+    PASS();
+}
+
+TEST(test_assign_returns_value) {
+    /* Must declare first, then reassign. */
+    char *r1 = repl_format_line("my z = 10");
+    free(r1);
+    ASSERT(format_matches("z = 20", "OK [NUMBER 20]"), "assign returns value");
+    PASS();
+}
+
+TEST(test_assign_updates_variable) {
+    char *r1 = repl_format_line("my w = 5");
+    free(r1);
+    char *r2 = repl_format_line("w = 99");
+    free(r2);
+    ASSERT(format_matches("w", "OK [NUMBER 99]"), "assign updates var");
+    PASS();
+}
+
+TEST(test_assign_undeclared_error) {
+    /* Assigning to undeclared variable is a runtime error. */
+    ASSERT(format_matches("undeclared = 1", "ERR undefined variable 'undeclared'"),
+           "undeclared assign error");
+    PASS();
+}
+
+TEST(test_decl_chain) {
+    /* my a = my b = 2 → both declared with value 2 */
+    char *r = repl_format_line("my aa = my bb = 2");
+    ASSERT_NOT_NULL(r, "chain result");
+    ASSERT_STR_EQ(r, "OK [NUMBER 2]", "chain value");
+    free(r);
+
+    ASSERT(format_matches("aa", "OK [NUMBER 2]"), "aa is 2");
+    ASSERT(format_matches("bb", "OK [NUMBER 2]"), "bb is 2");
+    PASS();
+}
+
+TEST(test_assign_chain) {
+    /* Declare p and q, then p = q = 42 */
+    char *r1 = repl_format_line("my p = 0");
+    free(r1);
+    char *r2 = repl_format_line("my q = 0");
+    free(r2);
+
+    char *r3 = repl_format_line("p = q = 42");
+    ASSERT_NOT_NULL(r3, "assign chain result");
+    ASSERT_STR_EQ(r3, "OK [NUMBER 42]", "chain value");
+    free(r3);
+
+    ASSERT(format_matches("p", "OK [NUMBER 42]"), "p is 42");
+    ASSERT(format_matches("q", "OK [NUMBER 42]"), "q is 42");
+    PASS();
+}
+
+TEST(test_unknown_ident_still_errors) {
+    ASSERT(format_matches("nope + 1", "ERR unknown variable 'nope'"), "unknown ident error");
+    PASS();
+}
+
+TEST(test_invalid_lhs_error) {
+    /* 1 = 2 should be a parse error */
+    char *r = repl_format_line("1 = 2");
+    ASSERT_NOT_NULL(r, "result not null");
+    ASSERT(strncmp(r, "ERR", 3) == 0, "should be error");
+    ASSERT(strstr(r, "invalid assignment target") != NULL, "error message");
+    free(r);
+    PASS();
+}
+
+TEST(test_decl_string_value) {
+    char *r1 = repl_format_line("my greeting = \"hello\"");
+    ASSERT_NOT_NULL(r1, "decl string result");
+    ASSERT_STR_EQ(r1, "OK [STRING hello]", "decl string value");
+    free(r1);
+
+    ASSERT(format_matches("greeting", "OK [STRING hello]"), "read string var");
+    PASS();
+}
+
+TEST(test_decl_ast_format) {
+    /* Check AST output for my x = 2 */
+    ASSERT(ast_format_matches("my x = 2", "AST [DECL x [NUMBER 2]]"), "decl ast");
+    PASS();
+}
+
+TEST(test_assign_ast_format) {
+    /* Check AST output for x = 2 */
+    ASSERT(ast_format_matches("x = 2", "AST [ASSIGN x [NUMBER 2]]"), "assign ast");
+    PASS();
+}
+
+/* ============================================================
  * AST mode tests
  * ============================================================ */
 
@@ -472,6 +591,23 @@ int main(void) {
     RUN_TEST(test_error_number_adjacent_ident);
     RUN_TEST(test_error_unknown_ident);
     RUN_TEST(test_error_div_by_zero);
+
+    printf("\nVariable declaration (my):\n");
+    RUN_TEST(test_decl_returns_value);
+    RUN_TEST(test_decl_then_read);
+    RUN_TEST(test_decl_expr_precedence);
+    RUN_TEST(test_decl_string_value);
+    RUN_TEST(test_decl_chain);
+    RUN_TEST(test_decl_ast_format);
+
+    printf("\nAssignment:\n");
+    RUN_TEST(test_assign_returns_value);
+    RUN_TEST(test_assign_updates_variable);
+    RUN_TEST(test_assign_undeclared_error);
+    RUN_TEST(test_assign_chain);
+    RUN_TEST(test_unknown_ident_still_errors);
+    RUN_TEST(test_invalid_lhs_error);
+    RUN_TEST(test_assign_ast_format);
 
     printf("\nAST mode:\n");
     RUN_TEST(test_ast_empty);

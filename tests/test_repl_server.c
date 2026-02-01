@@ -563,6 +563,90 @@ TEST(test_both_debug_flags) {
 }
 
 /* ============================================================
+ * Shared state: variables across clients
+ * ============================================================ */
+
+TEST(test_shared_state_across_clients) {
+    /* Client 1 declares a variable; client 2 reads it. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    /* Client 1: declare variable */
+    int fd1 = connect_to(port);
+    ASSERT(fd1 >= 0, "connect client 1");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd1, 1, "my shared_var = 42", false, false, &resp), "decl");
+    ASSERT(resp.ok, "decl ok");
+    ASSERT_STR_EQ(resp.value, "42", "decl value");
+    json_response_free(&resp);
+    close(fd1);
+
+    /* Client 2: read the variable */
+    int fd2 = connect_to(port);
+    ASSERT(fd2 >= 0, "connect client 2");
+
+    ASSERT(send_eval(fd2, 2, "shared_var + 8", false, false, &resp), "read");
+    ASSERT(resp.ok, "read ok");
+    ASSERT_STR_EQ(resp.value, "50", "shared_var + 8 = 50");
+    json_response_free(&resp);
+    close(fd2);
+
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_shared_state_concurrent_writers) {
+    /* Two clients write to different variables concurrently, then verify. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    /* Declare variables sequentially first */
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect setup");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "my cv1 = 0", false, false, &resp), "decl cv1");
+    json_response_free(&resp);
+    ASSERT(send_eval(fd, 2, "my cv2 = 0", false, false, &resp), "decl cv2");
+    json_response_free(&resp);
+    close(fd);
+
+    /* Concurrent writers */
+    ClientArg c1 = {.port = port, .id = 10, .expr = "cv1 = 111"};
+    ClientArg c2 = {.port = port, .id = 20, .expr = "cv2 = 222"};
+
+    pthread_t t1, t2;
+    pthread_create(&t1, NULL, client_thread_fn, &c1);
+    pthread_create(&t2, NULL, client_thread_fn, &c2);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    ASSERT(c1.ok, "writer 1 ok");
+    ASSERT(c2.ok, "writer 2 ok");
+
+    /* Verify both variables were set */
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "connect verify");
+    ASSERT(send_eval(fd, 30, "cv1", false, false, &resp), "read cv1");
+    ASSERT(resp.ok, "cv1 ok");
+    ASSERT_STR_EQ(resp.value, "111", "cv1 value");
+    json_response_free(&resp);
+
+    ASSERT(send_eval(fd, 31, "cv2", false, false, &resp), "read cv2");
+    ASSERT(resp.ok, "cv2 ok");
+    ASSERT_STR_EQ(resp.value, "222", "cv2 value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
  * Best-effort tokens on tokenizer error
  * ============================================================ */
 
@@ -632,6 +716,10 @@ int main(void) {
 
     printf("\nDebug flags (both):\n");
     RUN_TEST(test_both_debug_flags);
+
+    printf("\nShared state (variables):\n");
+    RUN_TEST(test_shared_state_across_clients);
+    RUN_TEST(test_shared_state_concurrent_writers);
 
     printf("\nBest-effort tokens:\n");
     RUN_TEST(test_tokens_on_tokenizer_error);

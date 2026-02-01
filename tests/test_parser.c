@@ -380,6 +380,114 @@ TEST(test_expr_adjacent_numbers) {
 }
 
 /* ============================================================
+ * Variable declaration (my) and assignment parsing tests
+ * ============================================================ */
+
+TEST(test_decl_basic) {
+    /* my x = 2 → AST [DECL x [NUMBER 2]] */
+    ASSERT(ast_matches("my x = 2", "AST [DECL x [NUMBER 2]]"), "basic decl");
+    PASS();
+}
+
+TEST(test_decl_with_expr) {
+    /* my x = 1 + 2 * 3 → assignment binds looser than arithmetic */
+    ASSERT(ast_matches("my x = 1 + 2 * 3",
+                       "AST [DECL x [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]]"),
+           "decl with expr");
+    PASS();
+}
+
+TEST(test_decl_chained) {
+    /* my a = my b = 2 → right-associative */
+    ASSERT(ast_matches("my a = my b = 2", "AST [DECL a [DECL b [NUMBER 2]]]"), "chained decl");
+    PASS();
+}
+
+TEST(test_assign_basic) {
+    /* x = 2 → AST [ASSIGN x [NUMBER 2]] */
+    ASSERT(ast_matches("x = 2", "AST [ASSIGN x [NUMBER 2]]"), "basic assign");
+    PASS();
+}
+
+TEST(test_assign_with_expr) {
+    /* x = 1 + 2 * 3 */
+    ASSERT(ast_matches("x = 1 + 2 * 3",
+                       "AST [ASSIGN x [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]]"),
+           "assign with expr");
+    PASS();
+}
+
+TEST(test_assign_chained) {
+    /* a = b = 2 → right-associative */
+    ASSERT(ast_matches("a = b = 2", "AST [ASSIGN a [ASSIGN b [NUMBER 2]]]"), "chained assign");
+    PASS();
+}
+
+TEST(test_assign_mixed_chain) {
+    /* my a = b = 2 → decl then assign */
+    ASSERT(ast_matches("my a = b = 2", "AST [DECL a [ASSIGN b [NUMBER 2]]]"), "mixed chain");
+    PASS();
+}
+
+TEST(test_assign_invalid_lhs_number) {
+    /* 1 = 2 → syntax error */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("1 = 2", &node, &err), "number lhs should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    ASSERT(strstr(err.message, "invalid assignment target") != NULL, "error message");
+    PASS();
+}
+
+TEST(test_assign_invalid_lhs_string) {
+    /* "x" = 2 → syntax error */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("\"x\" = 2", &node, &err), "string lhs should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    ASSERT(strstr(err.message, "invalid assignment target") != NULL, "error message");
+    PASS();
+}
+
+TEST(test_assign_invalid_lhs_parens) {
+    /* (x) = 2 → syntax error */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("(x) = 2", &node, &err), "paren lhs should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_decl_missing_ident) {
+    /* my 42 = 2 → error: expected identifier after 'my' */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my 42 = 2", &node, &err), "my without ident should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    ASSERT(strstr(err.message, "expected identifier after 'my'") != NULL, "error message");
+    PASS();
+}
+
+TEST(test_decl_missing_equals) {
+    /* my x 2 → error: expected '=' after variable name */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my x 2", &node, &err), "my without equals should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    ASSERT(strstr(err.message, "expected '=' after variable name") != NULL, "error message");
+    PASS();
+}
+
+TEST(test_decl_missing_expr) {
+    /* my x = → error: expected expression */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my x =", &node, &err), "my without expr should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -442,6 +550,23 @@ int main(void) {
     RUN_TEST(test_expr_empty_parens);
     RUN_TEST(test_expr_extra_close_paren);
     RUN_TEST(test_expr_adjacent_numbers);
+
+    printf("\nVariable declaration (my):\n");
+    RUN_TEST(test_decl_basic);
+    RUN_TEST(test_decl_with_expr);
+    RUN_TEST(test_decl_chained);
+    RUN_TEST(test_decl_missing_ident);
+    RUN_TEST(test_decl_missing_equals);
+    RUN_TEST(test_decl_missing_expr);
+
+    printf("\nAssignment:\n");
+    RUN_TEST(test_assign_basic);
+    RUN_TEST(test_assign_with_expr);
+    RUN_TEST(test_assign_chained);
+    RUN_TEST(test_assign_mixed_chain);
+    RUN_TEST(test_assign_invalid_lhs_number);
+    RUN_TEST(test_assign_invalid_lhs_string);
+    RUN_TEST(test_assign_invalid_lhs_parens);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);
