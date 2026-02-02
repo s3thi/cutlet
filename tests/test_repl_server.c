@@ -337,11 +337,11 @@ TEST(test_connection_stays_open) {
  * ============================================================ */
 
 typedef struct {
-    uint16_t port;
     unsigned long id;
     const char *expr;
-    char value[64];
+    uint16_t port;
     bool ok;
+    char value[64];
 } ClientArg;
 
 static void *client_thread_fn(void *arg) {
@@ -777,6 +777,482 @@ TEST(test_server_survives_idle_period) {
 }
 
 /* ============================================================
+ * Helper: send raw bytes directly on a socket
+ * ============================================================ */
+
+static bool send_raw(int fd, const char *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n <= 0)
+            return false;
+        sent += (size_t)n;
+    }
+    return true;
+}
+
+/*
+ * Helper: send a raw frame (Content-Length header + body) without
+ * going through the json_encode_request path.
+ */
+static bool send_raw_frame(int fd, const char *body, size_t body_len) {
+    char header[64];
+    int hlen = snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n", body_len);
+    if (!send_raw(fd, header, (size_t)hlen))
+        return false;
+    if (body_len > 0 && body)
+        return send_raw(fd, body, body_len);
+    return true;
+}
+
+/*
+ * Helper: read a raw JSON response frame and parse it.
+ * Returns true on success.
+ */
+static bool recv_response(int fd, JsonResponse *resp) {
+    size_t resp_len = 0;
+    char *resp_json = json_frame_read(fd, &resp_len, NULL);
+    if (!resp_json)
+        return false;
+    bool ok = json_parse_response(resp_json, resp_len, resp);
+    free(resp_json);
+    return ok;
+}
+
+/* ============================================================
+ * Group 1: Partial / malformed frame headers
+ * ============================================================ */
+
+TEST(test_incomplete_header_then_close) {
+    /* Send a partial header then close. Server should not crash
+     * and should still accept new connections afterward. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+    send_raw(fd, "Content-Len", 11);
+    close(fd);
+
+    usleep(50000);
+
+    /* Server should still be alive. */
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "reconnect after partial header");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "99", false, false, &resp), "eval after partial header");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "99", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_missing_content_length) {
+    /* Send a valid header terminator but no Content-Length field.
+     * json_frame_read returns NULL. Server should close that client
+     * but remain alive. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+    const char *bad = "X-Custom: foo\r\n\r\n";
+    send_raw(fd, bad, strlen(bad));
+    /* Give server time to process and close the connection. */
+    usleep(50000);
+    close(fd);
+
+    /* Server should still accept new connections. */
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "reconnect after missing content-length");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "77", false, false, &resp), "eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "77", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_content_length_zero) {
+    /* Content-Length: 0 is treated as error by json_frame_read.
+     * Server should survive and accept next connection. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+    const char *frame = "Content-Length: 0\r\n\r\n";
+    send_raw(fd, frame, strlen(frame));
+    usleep(50000);
+    close(fd);
+
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "reconnect after zero content-length");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "88", false, false, &resp), "eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "88", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_content_length_exceeds_max) {
+    /* Content-Length exceeds JSON_MAX_FRAME_SIZE (65536).
+     * Server should drop the client but stay alive. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+    const char *frame = "Content-Length: 999999\r\n\r\n";
+    send_raw(fd, frame, strlen(frame));
+    usleep(50000);
+    close(fd);
+
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "reconnect after oversized content-length");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "66", false, false, &resp), "eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "66", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
+ * Group 2: Malformed JSON body
+ * ============================================================ */
+
+TEST(test_garbage_json_body) {
+    /* Valid frame with body that isn't valid JSON. Server should send
+     * error response and keep connection open. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    /* Send garbage body in a valid frame. */
+    const char *body = "not json at all";
+    send_raw_frame(fd, body, strlen(body));
+
+    /* Should get error response. */
+    JsonResponse resp;
+    ASSERT(recv_response(fd, &resp), "recv error response");
+    ASSERT(!resp.ok, "ok should be false");
+    ASSERT(resp.id == 0, "error response id should be 0");
+    ASSERT_NOT_NULL(resp.error, "error should be set");
+    ASSERT(strstr(resp.error, "invalid request JSON") != NULL, "error message");
+    json_response_free(&resp);
+
+    /* Connection should still work for valid requests. */
+    ASSERT(send_eval(fd, 1, "42", false, false, &resp), "eval after garbage");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "42", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_empty_json_object) {
+    /* Valid frame with body "{}". The parser succeeds but expr is NULL.
+     * Server should handle it gracefully. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    const char *body = "{}";
+    send_raw_frame(fd, body, strlen(body));
+
+    /* Server should respond (either error or blank-input OK). */
+    JsonResponse resp;
+    ASSERT(recv_response(fd, &resp), "recv response for empty object");
+    json_response_free(&resp);
+
+    /* Connection should still work. */
+    ASSERT(send_eval(fd, 1, "55", false, false, &resp), "eval after empty object");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "55", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_json_missing_expr) {
+    /* Valid JSON with type/id but no expr key. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    const char *body = "{\"type\":\"eval\",\"id\":1,\"want_tokens\":false,\"want_ast\":false}";
+    send_raw_frame(fd, body, strlen(body));
+
+    /* Server should handle gracefully. */
+    JsonResponse resp;
+    ASSERT(recv_response(fd, &resp), "recv response for missing expr");
+    json_response_free(&resp);
+
+    /* Connection should still work. */
+    ASSERT(send_eval(fd, 2, "33", false, false, &resp), "eval after missing expr");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "33", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_truncated_json_body) {
+    /* Send Content-Length: 100 but only 20 bytes, then close.
+     * recv_exact will fail. Server should not crash. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect");
+
+    const char *header = "Content-Length: 100\r\n\r\n";
+    send_raw(fd, header, strlen(header));
+    /* Send only 20 bytes of the promised 100. */
+    send_raw(fd, "{\"type\":\"eval\",\"id\":", 20);
+    close(fd);
+
+    usleep(50000);
+
+    /* Server should still accept new connections. */
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "reconnect after truncated body");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "44", false, false, &resp), "eval");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "44", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
+ * Group 3: Concurrency stress
+ * ============================================================ */
+
+TEST(test_ten_concurrent_clients) {
+    /* Spawn 10 threads, each sending a unique expression.
+     * Verify every thread got the correct result. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+#define NUM_CLIENTS 10
+    ClientArg clients[NUM_CLIENTS];
+    pthread_t threads[NUM_CLIENTS];
+    /* Expressions: "100 + 0", "100 + 1", ..., "100 + 9" */
+    char exprs[NUM_CLIENTS][16];
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        snprintf(exprs[i], sizeof(exprs[i]), "100 + %d", i);
+        clients[i] = (ClientArg){.port = port, .id = (unsigned long)(i + 1), .expr = exprs[i]};
+    }
+
+    for (int i = 0; i < NUM_CLIENTS; i++)
+        pthread_create(&threads[i], NULL, client_thread_fn, &clients[i]);
+    for (int i = 0; i < NUM_CLIENTS; i++)
+        pthread_join(threads[i], NULL);
+
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        char expected[16];
+        snprintf(expected, sizeof(expected), "%d", 100 + i);
+        ASSERT(clients[i].ok, "client got response");
+        ASSERT(strcmp(clients[i].value, expected) == 0, "client value correct");
+    }
+#undef NUM_CLIENTS
+
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_rapid_connect_disconnect) {
+    /* Connect and immediately close 20 times, then verify server
+     * still works. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    for (int i = 0; i < 20; i++) {
+        int fd = connect_to(port);
+        if (fd >= 0)
+            close(fd);
+    }
+
+    usleep(100000); /* Let server process all the churn. */
+
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect after rapid churn");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "123", false, false, &resp), "eval after churn");
+    ASSERT(resp.ok, "ok");
+    ASSERT_STR_EQ(resp.value, "123", "value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/*
+ * Thread function for concurrent shared state stress test.
+ * Each thread does multiple sequential increment operations.
+ */
+typedef struct {
+    uint16_t port;
+    int num_iterations;
+    bool ok;
+} StressClientArg;
+
+static void *stress_client_thread_fn(void *arg) {
+    StressClientArg *sa = arg;
+    sa->ok = false;
+
+    int fd = connect_to(sa->port);
+    if (fd < 0)
+        return NULL;
+
+    for (int i = 0; i < sa->num_iterations; i++) {
+        JsonResponse resp;
+        unsigned long req_id = (unsigned long)i + 1UL;
+        if (!send_eval(fd, req_id, "counter = counter + 1", false, false, &resp)) {
+            close(fd);
+            return NULL;
+        }
+        if (!resp.ok) {
+            json_response_free(&resp);
+            close(fd);
+            return NULL;
+        }
+        json_response_free(&resp);
+    }
+
+    sa->ok = true;
+    close(fd);
+    return NULL;
+}
+
+TEST(test_concurrent_shared_state_stress) {
+    /* Pre-declare counter = 0. Spawn 4 threads doing 50 increments each.
+     * Final value must be exactly 200 (serialized by global write lock). */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+    uint16_t port = repl_server_port(srv);
+
+    /* Declare the counter variable. */
+    int fd = connect_to(port);
+    ASSERT(fd >= 0, "connect setup");
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "my counter = 0", false, false, &resp), "declare counter");
+    ASSERT(resp.ok, "declare ok");
+    json_response_free(&resp);
+    close(fd);
+
+#define STRESS_THREADS 4
+#define STRESS_ITERS 50
+    StressClientArg stress_args[STRESS_THREADS];
+    pthread_t stress_threads[STRESS_THREADS];
+
+    for (int i = 0; i < STRESS_THREADS; i++) {
+        stress_args[i] = (StressClientArg){.port = port, .num_iterations = STRESS_ITERS};
+        pthread_create(&stress_threads[i], NULL, stress_client_thread_fn, &stress_args[i]);
+    }
+    for (int i = 0; i < STRESS_THREADS; i++)
+        pthread_join(stress_threads[i], NULL);
+
+    for (int i = 0; i < STRESS_THREADS; i++)
+        ASSERT(stress_args[i].ok, "stress thread completed");
+
+    /* Read final counter value. */
+    fd = connect_to(port);
+    ASSERT(fd >= 0, "connect verify");
+    ASSERT(send_eval(fd, 1, "counter", false, false, &resp), "read counter");
+    ASSERT(resp.ok, "counter ok");
+    ASSERT_NOT_NULL(resp.value, "counter value set");
+    ASSERT_STR_EQ(resp.value, "200", "counter should be 200");
+    json_response_free(&resp);
+
+    close(fd);
+#undef STRESS_THREADS
+#undef STRESS_ITERS
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
+ * Group 4: Request ID handling
+ * ============================================================ */
+
+TEST(test_response_id_matches_request) {
+    /* Send 5 requests with IDs [7, 42, 0, 999, 1]. Verify each
+     * response's id field matches exactly. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    unsigned long ids[] = {7, 42, 0, 999, 1};
+    for (int i = 0; i < 5; i++) {
+        JsonResponse resp;
+        ASSERT(send_eval(fd, ids[i], "1", false, false, &resp), "send_eval");
+        ASSERT(resp.ok, "ok");
+        ASSERT(resp.id == ids[i], "response id matches request id");
+        json_response_free(&resp);
+    }
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -833,6 +1309,26 @@ int main(void) {
     RUN_TEST(test_json_frame_read_timed_out_false_on_eof);
     RUN_TEST(test_json_frame_read_timed_out_null_param);
     RUN_TEST(test_server_survives_idle_period);
+
+    printf("\nPartial/malformed frame headers:\n");
+    RUN_TEST(test_incomplete_header_then_close);
+    RUN_TEST(test_missing_content_length);
+    RUN_TEST(test_content_length_zero);
+    RUN_TEST(test_content_length_exceeds_max);
+
+    printf("\nMalformed JSON body:\n");
+    RUN_TEST(test_garbage_json_body);
+    RUN_TEST(test_empty_json_object);
+    RUN_TEST(test_json_missing_expr);
+    RUN_TEST(test_truncated_json_body);
+
+    printf("\nConcurrency stress:\n");
+    RUN_TEST(test_ten_concurrent_clients);
+    RUN_TEST(test_rapid_connect_disconnect);
+    RUN_TEST(test_concurrent_shared_state_stress);
+
+    printf("\nRequest ID handling:\n");
+    RUN_TEST(test_response_id_matches_request);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     if (tests_failed > 0) {
