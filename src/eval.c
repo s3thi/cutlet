@@ -90,7 +90,68 @@ Value eval(const AstNode *node) {
             return right;
         }
 
-        /* Both operands must be numbers for arithmetic */
+        const char *op = node->value;
+
+        /* == and != work on any types (mixed types: == is false, != is true) */
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
+            bool equal = false;
+            if (left.type == right.type) {
+                if (left.type == VAL_NUMBER) {
+                    equal = left.number == right.number;
+                } else if (left.type == VAL_STRING) {
+                    equal = strcmp(left.string, right.string) == 0;
+                } else if (left.type == VAL_BOOL) {
+                    equal = left.boolean == right.boolean;
+                }
+                /* VAL_ERROR and unknown types: equal stays false */
+            }
+            value_free(&left);
+            value_free(&right);
+            return make_bool(op[0] == '=' ? equal : !equal);
+        }
+
+        /* Ordered comparisons: <, >, <=, >= */
+        if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0 || strcmp(op, "<=") == 0 ||
+            strcmp(op, ">=") == 0) {
+            /* Ordered comparisons require same type, and not bools */
+            if (left.type != right.type) {
+                value_free(&left);
+                value_free(&right);
+                return make_error("ordered comparison requires same types");
+            }
+            if (left.type == VAL_BOOL) {
+                value_free(&left);
+                value_free(&right);
+                return make_error("ordered comparison not supported for booleans");
+            }
+
+            int cmp;
+            if (left.type == VAL_NUMBER) {
+                cmp = (left.number > right.number) - (left.number < right.number);
+            } else if (left.type == VAL_STRING) {
+                cmp = strcmp(left.string, right.string);
+            } else {
+                value_free(&left);
+                value_free(&right);
+                return make_error("ordered comparison not supported for this type");
+            }
+
+            bool result;
+            if (strcmp(op, "<") == 0)
+                result = cmp < 0;
+            else if (strcmp(op, ">") == 0)
+                result = cmp > 0;
+            else if (strcmp(op, "<=") == 0)
+                result = cmp <= 0;
+            else
+                result = cmp >= 0;
+
+            value_free(&left);
+            value_free(&right);
+            return make_bool(result);
+        }
+
+        /* Arithmetic operators require numbers */
         if (left.type != VAL_NUMBER || right.type != VAL_NUMBER) {
             value_free(&left);
             value_free(&right);
@@ -98,7 +159,6 @@ Value eval(const AstNode *node) {
         }
 
         double result;
-        const char *op = node->value;
 
         if (strcmp(op, "+") == 0) {
             result = left.number + right.number;

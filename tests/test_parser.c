@@ -558,6 +558,95 @@ TEST(test_bool_false_decl_error) {
 }
 
 /* ============================================================
+ * Comparison operator parsing tests
+ * ============================================================ */
+
+TEST(test_cmp_eq_ast) {
+    ASSERT(ast_matches("1 == 2", "AST [BINOP == [NUMBER 1] [NUMBER 2]]"), "1 == 2 AST");
+    PASS();
+}
+
+TEST(test_cmp_neq_ast) {
+    ASSERT(ast_matches("1 != 2", "AST [BINOP != [NUMBER 1] [NUMBER 2]]"), "1 != 2 AST");
+    PASS();
+}
+
+TEST(test_cmp_lt_ast) {
+    ASSERT(ast_matches("1 < 2", "AST [BINOP < [NUMBER 1] [NUMBER 2]]"), "1 < 2 AST");
+    PASS();
+}
+
+TEST(test_cmp_gt_ast) {
+    ASSERT(ast_matches("2 > 1", "AST [BINOP > [NUMBER 2] [NUMBER 1]]"), "2 > 1 AST");
+    PASS();
+}
+
+TEST(test_cmp_lte_ast) {
+    ASSERT(ast_matches("1 <= 2", "AST [BINOP <= [NUMBER 1] [NUMBER 2]]"), "1 <= 2 AST");
+    PASS();
+}
+
+TEST(test_cmp_gte_ast) {
+    ASSERT(ast_matches("2 >= 1", "AST [BINOP >= [NUMBER 2] [NUMBER 1]]"), "2 >= 1 AST");
+    PASS();
+}
+
+TEST(test_cmp_precedence_vs_add) {
+    /* 1 + 2 == 3 → (1 + 2) == 3: comparison binds looser than arithmetic */
+    ASSERT(ast_matches("1 + 2 == 3", "AST [BINOP == [BINOP + [NUMBER 1] [NUMBER 2]] [NUMBER 3]]"),
+           "comparison binds looser than +");
+    PASS();
+}
+
+TEST(test_cmp_precedence_vs_mul) {
+    /* 2 * 3 < 7 → (2 * 3) < 7 */
+    ASSERT(ast_matches("2 * 3 < 7", "AST [BINOP < [BINOP * [NUMBER 2] [NUMBER 3]] [NUMBER 7]]"),
+           "comparison binds looser than *");
+    PASS();
+}
+
+TEST(test_cmp_chained_error) {
+    /* 1 < 2 < 3 → parse error (non-associative) */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("1 < 2 < 3", &node, &err), "chained comparison should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_cmp_chained_eq_eq_error) {
+    /* 1 == 2 == 3 → parse error (non-associative) */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("1 == 2 == 3", &node, &err), "chained == should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_cmp_chained_mixed_error) {
+    /* 1 < 2 == true → parse error (non-associative) */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("1 < 2 == true", &node, &err), "chained mixed cmp should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_cmp_with_strings) {
+    ASSERT(ast_matches("\"a\" < \"b\"", "AST [BINOP < [STRING a] [STRING b]]"),
+           "string comparison AST");
+    PASS();
+}
+
+TEST(test_cmp_with_parens) {
+    /* (1 < 2) == true is OK: the parens group the first comparison */
+    ASSERT(ast_matches("(1 < 2) == true",
+                       "AST [BINOP == [BINOP < [NUMBER 1] [NUMBER 2]] [BOOL true]]"),
+           "parens allow comparison of comparison result");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -647,6 +736,21 @@ int main(void) {
     RUN_TEST(test_bool_true_decl_error);
     RUN_TEST(test_bool_false_assign_error);
     RUN_TEST(test_bool_false_decl_error);
+
+    printf("\nComparison operators:\n");
+    RUN_TEST(test_cmp_eq_ast);
+    RUN_TEST(test_cmp_neq_ast);
+    RUN_TEST(test_cmp_lt_ast);
+    RUN_TEST(test_cmp_gt_ast);
+    RUN_TEST(test_cmp_lte_ast);
+    RUN_TEST(test_cmp_gte_ast);
+    RUN_TEST(test_cmp_precedence_vs_add);
+    RUN_TEST(test_cmp_precedence_vs_mul);
+    RUN_TEST(test_cmp_chained_error);
+    RUN_TEST(test_cmp_chained_eq_eq_error);
+    RUN_TEST(test_cmp_chained_mixed_error);
+    RUN_TEST(test_cmp_with_strings);
+    RUN_TEST(test_cmp_with_parens);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

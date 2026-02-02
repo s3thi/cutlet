@@ -75,6 +75,84 @@ static int token_matches(Token *tok, TokenType type, const char *value, size_t v
 }
 
 /* ============================================================
+ * Comparison operator tokenization tests
+ * ============================================================ */
+
+TEST(test_tok_eq_eq) {
+    Tokenizer *tok = tokenizer_create("==");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "==", 2), "== is single operator");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_not_eq) {
+    Tokenizer *tok = tokenizer_create("!=");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "!=", 2), "!= is single operator");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_less_eq) {
+    Tokenizer *tok = tokenizer_create("<=");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "<=", 2), "<= is single operator");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_greater_eq) {
+    Tokenizer *tok = tokenizer_create(">=");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ">=", 2), ">= is single operator");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_less_than) {
+    Tokenizer *tok = tokenizer_create("< 2");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "<", 1), "< is operator");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "2", 1), "then 2");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_greater_than) {
+    Tokenizer *tok = tokenizer_create("> 2");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ">", 1), "> is operator");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_tok_comparison_in_expr) {
+    /* "1 == 2" should tokenize as NUMBER OPERATOR NUMBER */
+    Tokenizer *tok = tokenizer_create("1 == 2");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "1");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "==", 2), "==");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "2", 1), "2");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Tokenizer creation and destruction tests
  * ============================================================ */
 
@@ -1515,6 +1593,15 @@ int main(void) {
     printf("\nEdge cases:\n");
     RUN_TEST(test_token_type_str);
     RUN_TEST(test_adjacent_tokens_with_space_ok);
+
+    printf("\nComparison operator tokenization:\n");
+    RUN_TEST(test_tok_eq_eq);
+    RUN_TEST(test_tok_not_eq);
+    RUN_TEST(test_tok_less_eq);
+    RUN_TEST(test_tok_greater_eq);
+    RUN_TEST(test_tok_less_than);
+    RUN_TEST(test_tok_greater_than);
+    RUN_TEST(test_tok_comparison_in_expr);
 
     printf("\nNull input handling:\n");
     RUN_TEST(test_null_tokenizer_next);

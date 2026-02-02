@@ -4,10 +4,11 @@
  * Implements a Pratt (precedence climbing) parser for expressions.
  * Precedence (low to high):
  *   0. assignment / declaration (=, "my") (right-associative)
- *   1. +, - (binary, left-associative)
- *   2. *, / (left-associative)
- *   3. unary - (prefix)
- *   4. ** (right-associative)
+ *   1. ==, !=, <, >, <=, >= (comparison, non-associative)
+ *   2. +, - (binary, left-associative)
+ *   3. *, / (left-associative)
+ *   4. unary - (prefix)
+ *   5. ** (right-associative)
  *
  * Grammar:
  *   expr     → assignment
@@ -159,17 +160,43 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
  * Operator precedence and associativity
  * ============================================================ */
 
-/* Precedence levels for infix operators */
+/*
+ * Precedence levels for infix operators (low to high):
+ *   1: comparison (==, !=, <, >, <=, >=) — non-associative
+ *   2: +, - (left-associative)
+ *   3: *, / (left-associative)
+ *   4: unary - (prefix, handled in parse_atom)
+ *   5: ** (right-associative)
+ */
 static int infix_precedence(const char *op, size_t len) {
     if (len == 1) {
-        if (op[0] == '+' || op[0] == '-')
+        if (op[0] == '<' || op[0] == '>')
             return 1;
-        if (op[0] == '*' || op[0] == '/')
+        if (op[0] == '+' || op[0] == '-')
             return 2;
+        if (op[0] == '*' || op[0] == '/')
+            return 3;
     }
-    if (len == 2 && op[0] == '*' && op[1] == '*')
-        return 4; /* ** is above unary (3) */
-    return 0;     /* not a known infix operator */
+    if (len == 2) {
+        if ((op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
+            (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '='))
+            return 1;
+        if (op[0] == '*' && op[1] == '*')
+            return 5; /* ** is above unary (4) */
+    }
+    return 0; /* not a known infix operator */
+}
+
+/*
+ * Check if an operator is a comparison operator (non-associative).
+ */
+static bool is_comparison_op(const char *op, size_t len) {
+    if (len == 1)
+        return op[0] == '<' || op[0] == '>';
+    if (len == 2)
+        return (op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
+               (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '=');
+    return false;
 }
 
 /*
@@ -259,8 +286,8 @@ static AstNode *parse_atom(Parser *p) {
         /* Unary minus */
         if (t.value_len == 1 && t.value[0] == '-') {
             advance(p);
-            /* Unary minus has precedence 3 (between * and **) */
-            AstNode *operand = parse_expr(p, 3);
+            /* Unary minus has precedence 4 (between * and **) */
+            AstNode *operand = parse_expr(p, 4);
             if (!operand)
                 return NULL;
             AstNode *node = make_unary("-", 1, operand);
@@ -436,6 +463,15 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
             return NULL;
         }
         left = binop;
+
+        /* Non-associative check: reject chained comparisons like 1 < 2 < 3 */
+        if (is_comparison_op(op_buf, op_len) && p->current.type == TOK_OPERATOR &&
+            is_comparison_op(p->current.value, p->current.value_len)) {
+            parser_error(p, p->current.line, p->current.col,
+                         "comparison operators cannot be chained");
+            ast_free(left);
+            return NULL;
+        }
     }
 
     return left;

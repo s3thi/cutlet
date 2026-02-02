@@ -313,6 +313,64 @@ TEST(test_bool_true_assign_error) { assert_eval_error("true = 1", "cannot assign
 TEST(test_bool_true_decl_error) { assert_eval_error("my true = 1", "cannot declare true"); }
 
 /* ============================================================
+ * Comparison operators
+ * ============================================================ */
+
+/* == */
+TEST(test_cmp_num_eq_true) { assert_eval_bool("1 == 1", true, "1==1"); }
+TEST(test_cmp_num_eq_false) { assert_eval_bool("1 == 2", false, "1==2"); }
+TEST(test_cmp_str_eq_true) { assert_eval_bool("\"a\" == \"a\"", true, "a==a"); }
+TEST(test_cmp_str_eq_false) { assert_eval_bool("\"a\" == \"b\"", false, "a==b"); }
+TEST(test_cmp_bool_eq_true) { assert_eval_bool("true == true", true, "true==true"); }
+TEST(test_cmp_bool_eq_false) { assert_eval_bool("true == false", false, "true==false"); }
+TEST(test_cmp_mixed_eq) { assert_eval_bool("1 == \"1\"", false, "1==\"1\" mixed"); }
+
+/* != */
+TEST(test_cmp_num_neq_true) { assert_eval_bool("1 != 2", true, "1!=2"); }
+TEST(test_cmp_num_neq_false) { assert_eval_bool("1 != 1", false, "1!=1"); }
+TEST(test_cmp_mixed_neq) { assert_eval_bool("1 != \"1\"", true, "1!=\"1\" mixed"); }
+
+/* < */
+TEST(test_cmp_lt_true) { assert_eval_bool("1 < 2", true, "1<2"); }
+TEST(test_cmp_lt_false) { assert_eval_bool("2 < 1", false, "2<1"); }
+TEST(test_cmp_lt_equal) { assert_eval_bool("1 < 1", false, "1<1"); }
+TEST(test_cmp_str_lt) { assert_eval_bool("\"a\" < \"b\"", true, "a<b"); }
+
+/* > */
+TEST(test_cmp_gt_true) { assert_eval_bool("2 > 1", true, "2>1"); }
+TEST(test_cmp_gt_false) { assert_eval_bool("1 > 2", false, "1>2"); }
+
+/* <= */
+TEST(test_cmp_lte_lt) { assert_eval_bool("1 <= 2", true, "1<=2"); }
+TEST(test_cmp_lte_eq) { assert_eval_bool("1 <= 1", true, "1<=1"); }
+TEST(test_cmp_lte_gt) { assert_eval_bool("2 <= 1", false, "2<=1"); }
+
+/* >= */
+TEST(test_cmp_gte_gt) { assert_eval_bool("2 >= 1", true, "2>=1"); }
+TEST(test_cmp_gte_eq) { assert_eval_bool("1 >= 1", true, "1>=1"); }
+TEST(test_cmp_gte_lt) { assert_eval_bool("1 >= 2", false, "1>=2"); }
+
+/* Ordered comparison on mixed types → error */
+TEST(test_cmp_mixed_lt_error) { assert_eval_error("1 < \"1\"", "mixed type ordered cmp"); }
+TEST(test_cmp_mixed_gt_error) { assert_eval_error("1 > \"1\"", "mixed type ordered cmp"); }
+TEST(test_cmp_mixed_lte_error) { assert_eval_error("1 <= \"1\"", "mixed type ordered cmp"); }
+TEST(test_cmp_mixed_gte_error) { assert_eval_error("1 >= \"1\"", "mixed type ordered cmp"); }
+
+/* Ordered comparison on bools → error */
+TEST(test_cmp_bool_lt_error) { assert_eval_error("true < false", "bool ordered cmp"); }
+TEST(test_cmp_bool_gt_error) { assert_eval_error("true > false", "bool ordered cmp"); }
+TEST(test_cmp_bool_lte_error) { assert_eval_error("true <= false", "bool ordered cmp"); }
+TEST(test_cmp_bool_gte_error) { assert_eval_error("true >= false", "bool ordered cmp"); }
+
+/* Precedence: 1 + 2 == 3 → true */
+TEST(test_cmp_precedence_add) { assert_eval_bool("1 + 2 == 3", true, "1+2==3"); }
+
+/* String ordered comparison */
+TEST(test_cmp_str_gt) { assert_eval_bool("\"b\" > \"a\"", true, "b>a"); }
+TEST(test_cmp_str_lte) { assert_eval_bool("\"a\" <= \"a\"", true, "a<=a"); }
+TEST(test_cmp_str_gte) { assert_eval_bool("\"b\" >= \"a\"", true, "b>=a"); }
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -371,6 +429,42 @@ int main(void) {
     RUN_TEST(test_bool_false_format);
     RUN_TEST(test_bool_true_assign_error);
     RUN_TEST(test_bool_true_decl_error);
+
+    printf("\nComparison operators:\n");
+    RUN_TEST(test_cmp_num_eq_true);
+    RUN_TEST(test_cmp_num_eq_false);
+    RUN_TEST(test_cmp_str_eq_true);
+    RUN_TEST(test_cmp_str_eq_false);
+    RUN_TEST(test_cmp_bool_eq_true);
+    RUN_TEST(test_cmp_bool_eq_false);
+    RUN_TEST(test_cmp_mixed_eq);
+    RUN_TEST(test_cmp_num_neq_true);
+    RUN_TEST(test_cmp_num_neq_false);
+    RUN_TEST(test_cmp_mixed_neq);
+    RUN_TEST(test_cmp_lt_true);
+    RUN_TEST(test_cmp_lt_false);
+    RUN_TEST(test_cmp_lt_equal);
+    RUN_TEST(test_cmp_str_lt);
+    RUN_TEST(test_cmp_gt_true);
+    RUN_TEST(test_cmp_gt_false);
+    RUN_TEST(test_cmp_lte_lt);
+    RUN_TEST(test_cmp_lte_eq);
+    RUN_TEST(test_cmp_lte_gt);
+    RUN_TEST(test_cmp_gte_gt);
+    RUN_TEST(test_cmp_gte_eq);
+    RUN_TEST(test_cmp_gte_lt);
+    RUN_TEST(test_cmp_mixed_lt_error);
+    RUN_TEST(test_cmp_mixed_gt_error);
+    RUN_TEST(test_cmp_mixed_lte_error);
+    RUN_TEST(test_cmp_mixed_gte_error);
+    RUN_TEST(test_cmp_bool_lt_error);
+    RUN_TEST(test_cmp_bool_gt_error);
+    RUN_TEST(test_cmp_bool_lte_error);
+    RUN_TEST(test_cmp_bool_gte_error);
+    RUN_TEST(test_cmp_precedence_add);
+    RUN_TEST(test_cmp_str_gt);
+    RUN_TEST(test_cmp_str_lte);
+    RUN_TEST(test_cmp_str_gte);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);
