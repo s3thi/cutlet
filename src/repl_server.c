@@ -46,14 +46,21 @@ struct ReplServer {
 
 /*
  * Process one JSON request and send the JSON response.
- * Returns true if the connection should continue, false to close.
+ * Returns:
+ *   1  = success, continue
+ *   0  = connection closed / real error, stop
+ *  -1  = timeout (EAGAIN/EWOULDBLOCK), caller should retry
  */
-static bool handle_json_request(int fd, ReplServer *srv) {
+static int handle_json_request(int fd, ReplServer *srv) {
     /* Read a JSON frame from the client. */
     size_t req_len = 0;
-    char *req_json = json_frame_read(fd, &req_len);
-    if (!req_json)
-        return false; /* EOF or read error. */
+    bool timed_out = false;
+    char *req_json = json_frame_read(fd, &req_len, &timed_out);
+    if (!req_json) {
+        if (timed_out)
+            return -1; /* Timeout — caller retries. */
+        return 0;      /* EOF or real error. */
+    }
 
     /* Parse the request. */
     JsonRequest req;
@@ -66,7 +73,7 @@ static bool handle_json_request(int fd, ReplServer *srv) {
             json_frame_write(fd, resp_json, strlen(resp_json));
             free(resp_json);
         }
-        return true;
+        return 1;
     }
     free(req_json);
 
@@ -99,7 +106,7 @@ static bool handle_json_request(int fd, ReplServer *srv) {
     json_request_free(&req);
     repl_result_free(&rr);
 
-    return send_ok;
+    return send_ok ? 1 : 0;
 }
 
 /* ============================================================
@@ -124,8 +131,10 @@ static void *client_thread_fn(void *arg) {
     fprintf(stderr, "[server] client connected: %s\n", addr);
 
     while (!srv->shutdown) {
-        if (!handle_json_request(fd, srv))
-            break;
+        int rc = handle_json_request(fd, srv);
+        if (rc == 0)
+            break; /* Real EOF or error. */
+        /* rc == -1 (timeout) or rc == 1 (success): keep looping. */
     }
 
     fprintf(stderr, "[server] client disconnected: %s\n", addr);

@@ -113,7 +113,7 @@ static bool send_eval(int fd, unsigned long id, const char *expr, bool want_toke
         return false;
 
     size_t resp_len = 0;
-    char *resp_json = json_frame_read(fd, &resp_len);
+    char *resp_json = json_frame_read(fd, &resp_len, NULL);
     if (!resp_json)
         return false;
 
@@ -673,6 +673,110 @@ TEST(test_tokens_on_tokenizer_error) {
 }
 
 /* ============================================================
+ * Timeout handling
+ * ============================================================ */
+
+TEST(test_json_frame_read_sets_timed_out_on_timeout) {
+    /*
+     * Use a socketpair with a short SO_RCVTIMEO to verify that
+     * json_frame_read returns NULL and sets *timed_out = true
+     * when the recv times out (no data sent).
+     */
+    int sv[2];
+    int rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    ASSERT(rc == 0, "socketpair");
+
+    /* Set a very short recv timeout on the reading end. */
+    struct timeval tv = {.tv_sec = 0, .tv_usec = 100000}; /* 100ms */
+    setsockopt(sv[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    bool timed_out = false;
+    size_t len = 0;
+    char *result = json_frame_read(sv[0], &len, &timed_out);
+    ASSERT(result == NULL, "should return NULL on timeout");
+    ASSERT(timed_out == true, "timed_out should be true");
+
+    close(sv[0]);
+    close(sv[1]);
+    PASS();
+}
+
+TEST(test_json_frame_read_timed_out_false_on_eof) {
+    /*
+     * When the peer closes the connection, json_frame_read should
+     * return NULL with *timed_out = false (real EOF, not timeout).
+     */
+    int sv[2];
+    int rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    ASSERT(rc == 0, "socketpair");
+
+    /* Close the writing end immediately to cause EOF. */
+    close(sv[1]);
+
+    bool timed_out = true; /* pre-set to true to verify it gets cleared */
+    size_t len = 0;
+    char *result = json_frame_read(sv[0], &len, &timed_out);
+    ASSERT(result == NULL, "should return NULL on EOF");
+    ASSERT(timed_out == false, "timed_out should be false on EOF");
+
+    close(sv[0]);
+    PASS();
+}
+
+TEST(test_json_frame_read_timed_out_null_param) {
+    /*
+     * Passing NULL for timed_out should not crash.
+     */
+    int sv[2];
+    int rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    ASSERT(rc == 0, "socketpair");
+
+    close(sv[1]);
+
+    size_t len = 0;
+    char *result = json_frame_read(sv[0], &len, NULL);
+    ASSERT(result == NULL, "should return NULL on EOF");
+
+    close(sv[0]);
+    PASS();
+}
+
+TEST(test_server_survives_idle_period) {
+    /*
+     * After connecting and sending one request, wait briefly, then
+     * send another request. The connection should still work.
+     * (This tests the retry-on-timeout logic in client_thread_fn,
+     * though the actual 30s timeout won't fire in this short test.
+     * It serves as a regression test that the plumbing is correct.)
+     */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    JsonResponse resp;
+    ASSERT(send_eval(fd, 1, "10", false, false, &resp), "first request");
+    ASSERT(resp.ok, "first ok");
+    ASSERT_STR_EQ(resp.value, "10", "first value");
+    json_response_free(&resp);
+
+    /* Brief pause — not enough to trigger the 30s timeout, but
+     * validates that the loop logic is correct. */
+    usleep(200000); /* 200ms */
+
+    ASSERT(send_eval(fd, 2, "20", false, false, &resp), "second request after pause");
+    ASSERT(resp.ok, "second ok");
+    ASSERT_STR_EQ(resp.value, "20", "second value");
+    json_response_free(&resp);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -723,6 +827,12 @@ int main(void) {
 
     printf("\nBest-effort tokens:\n");
     RUN_TEST(test_tokens_on_tokenizer_error);
+
+    printf("\nTimeout handling:\n");
+    RUN_TEST(test_json_frame_read_sets_timed_out_on_timeout);
+    RUN_TEST(test_json_frame_read_timed_out_false_on_eof);
+    RUN_TEST(test_json_frame_read_timed_out_null_param);
+    RUN_TEST(test_server_survives_idle_period);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     if (tests_failed > 0) {

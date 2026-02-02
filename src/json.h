@@ -91,7 +91,11 @@ bool json_frame_write(int fd, const char *json, size_t len);
  * Read a framed JSON message from a file descriptor.
  * Returns a newly allocated string with the JSON body, or NULL on error.
  * Sets *out_len to the length of the JSON body.
+ *
+ * If timed_out is non-NULL, it is set to true when the read failed due
+ * to a socket timeout (EAGAIN/EWOULDBLOCK), or false otherwise. This
+ * lets callers distinguish idle timeouts from real errors/EOF.
  */
-char *json_frame_read(int fd, size_t *out_len);
+char *json_frame_read(int fd, size_t *out_len, bool *timed_out);
 
 #endif /* CUTLET_JSON_H */

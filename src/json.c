@@ -14,6 +14,7 @@
 #include "json.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -517,7 +518,10 @@ static bool recv_exact(int fd, char *buf, size_t n) {
     return true;
 }
 
-char *json_frame_read(int fd, size_t *out_len) {
+char *json_frame_read(int fd, size_t *out_len, bool *timed_out) {
+    if (timed_out)
+        *timed_out = false;
+
     /*
      * Read headers byte-by-byte until we see "\r\n\r\n".
      * Parse Content-Length from the header.
@@ -527,8 +531,11 @@ char *json_frame_read(int fd, size_t *out_len) {
 
     while (hpos < sizeof(hdr) - 1) {
         ssize_t n = recv(fd, hdr + hpos, 1, 0);
-        if (n <= 0)
+        if (n <= 0) {
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && timed_out)
+                *timed_out = true;
             return NULL;
+        }
         hpos++;
 
         /* Check for end of headers: \r\n\r\n */

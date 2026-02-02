@@ -190,10 +190,6 @@ static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
         return 1;
     }
 
-    /* Set a recv timeout. */
-    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
     int is_tty = isatty(fileno(stdin));
     char line[MAX_LINE_LEN];
     unsigned long req_id = 0;
@@ -239,7 +235,7 @@ static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
 
         /* Read JSON response. */
         size_t resp_len = 0;
-        char *resp_json = json_frame_read(fd, &resp_len);
+        char *resp_json = json_frame_read(fd, &resp_len, NULL);
         if (!resp_json) {
             fprintf(stderr, "Error: connection lost\n");
             close(fd);
