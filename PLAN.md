@@ -8,10 +8,11 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 ## What exists today (all complete + tested)
 
 - **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char. Adjacent tokens without whitespace allowed.
-- **Pratt parser**: Precedence climbing. Binary `+ -` (prec 1, left), `* /` (prec 2, left), `**` (prec 4, right). Unary minus (prec 3, prefix). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
-- **AST nodes**: NUMBER, STRING, IDENT, BOOL, BINOP, UNARY, DECL, ASSIGN. S-expr format output.
+- **Pratt parser**: Precedence climbing. `or` (prec 1, left), `and` (prec 2, left), `not` (prec 3, prefix), comparison (prec 4, non-assoc), `+ -` (prec 5, left), `* /` (prec 6, left), unary minus (prec 7, prefix), `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
+- **AST nodes**: NUMBER, STRING, IDENT, BOOL, BINOP, UNARY, DECL, ASSIGN. S-expr format output. BINOP includes `and`/`or` keyword operators. UNARY includes `not`.
 - **Evaluator**: Walks AST, produces VAL_NUMBER, VAL_STRING, VAL_BOOL, or VAL_ERROR. All arithmetic in double precision. Division always float. Integers format without decimal.
 - **Booleans**: `true` and `false` are keywords that produce `AST_BOOL` nodes and evaluate to `VAL_BOOL`. Cannot be used as variable names. REPL output: `OK [BOOL true]` / `OK [BOOL false]`.
+- **Logical operators**: `and`, `or` (keyword infix), `not` (keyword prefix). Short-circuit evaluation with Python semantics: `and`/`or` return operand values. `not` always returns `VAL_BOOL`. Truthiness: `false`, `0`, `""`, errors are falsy; everything else truthy. `and`/`or`/`not` are reserved keywords.
 - **Runtime**: Global pthread rwlock serializes eval. Linked-list variable environment with thread-safe get/define/assign.
 - **REPL/CLI**: TCP server (thread-per-client), TCP client. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs.
 - **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server (protocol + concurrency). Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
@@ -71,7 +72,7 @@ Add `==`, `!=`, `<`, `>`, `<=`, `>=`. All return VAL_BOOL.
 - Precedence: `1 + 2 == 3` → true (comparison binds looser than arithmetic)
 - AST output for comparison expressions
 
-### Step 3: Logical operators (next)
+### Step 3: Logical operators ✅
 
 Add `and`, `or`, `not`. These are keyword-based (not `&&`, `||`, `!`).
 

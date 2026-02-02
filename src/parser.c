@@ -4,11 +4,14 @@
  * Implements a Pratt (precedence climbing) parser for expressions.
  * Precedence (low to high):
  *   0. assignment / declaration (=, "my") (right-associative)
- *   1. ==, !=, <, >, <=, >= (comparison, non-associative)
- *   2. +, - (binary, left-associative)
- *   3. *, / (left-associative)
- *   4. unary - (prefix)
- *   5. ** (right-associative)
+ *   1. or (left-associative, keyword infix)
+ *   2. and (left-associative, keyword infix)
+ *   3. not (prefix, keyword)
+ *   4. ==, !=, <, >, <=, >= (comparison, non-associative)
+ *   5. +, - (binary, left-associative)
+ *   6. *, / (left-associative)
+ *   7. unary - (prefix)
+ *   8. ** (right-associative)
  *
  * Grammar:
  *   expr     → assignment
@@ -162,29 +165,44 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
 
 /*
  * Precedence levels for infix operators (low to high):
- *   1: comparison (==, !=, <, >, <=, >=) — non-associative
- *   2: +, - (left-associative)
- *   3: *, / (left-associative)
- *   4: unary - (prefix, handled in parse_atom)
- *   5: ** (right-associative)
+ *   1: or (keyword, left-associative)
+ *   2: and (keyword, left-associative)
+ *   3: not (keyword, prefix — handled in parse_atom)
+ *   4: comparison (==, !=, <, >, <=, >=) — non-associative
+ *   5: +, - (left-associative)
+ *   6: *, / (left-associative)
+ *   7: unary - (prefix, handled in parse_atom)
+ *   8: ** (right-associative)
  */
 static int infix_precedence(const char *op, size_t len) {
     if (len == 1) {
         if (op[0] == '<' || op[0] == '>')
-            return 1;
+            return 4;
         if (op[0] == '+' || op[0] == '-')
-            return 2;
+            return 5;
         if (op[0] == '*' || op[0] == '/')
-            return 3;
+            return 6;
     }
     if (len == 2) {
         if ((op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
             (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '='))
-            return 1;
+            return 4;
         if (op[0] == '*' && op[1] == '*')
-            return 5; /* ** is above unary (4) */
+            return 8; /* ** is above unary (7) */
+        if (op[0] == 'o' && op[1] == 'r')
+            return 1;
     }
+    if (len == 3 && op[0] == 'a' && op[1] == 'n' && op[2] == 'd')
+        return 2;
     return 0; /* not a known infix operator */
+}
+
+/*
+ * Check if a token is a keyword-based infix operator (and, or).
+ * These tokenize as TOK_IDENT but act as infix operators in the parser.
+ */
+static bool is_keyword_infix(const Token *t) {
+    return token_is_keyword(t, "and") || token_is_keyword(t, "or");
 }
 
 /*
@@ -205,6 +223,15 @@ static bool is_comparison_op(const char *op, size_t len) {
  */
 static bool is_right_assoc(const char *op, size_t len) {
     return len == 2 && op[0] == '*' && op[1] == '*';
+}
+
+/*
+ * Check if a keyword is reserved and cannot be used as a variable name.
+ * This includes true, false, and, or, not.
+ */
+static bool is_reserved_keyword(const Token *t) {
+    return token_is_keyword(t, "true") || token_is_keyword(t, "false") ||
+           token_is_keyword(t, "and") || token_is_keyword(t, "or") || token_is_keyword(t, "not");
 }
 
 /* ============================================================
@@ -270,6 +297,29 @@ static AstNode *parse_atom(Parser *p) {
         return node;
     }
 
+    /* "not" prefix operator: precedence 3, binds looser than comparisons */
+    if (token_is_keyword(&t, "not")) {
+        advance(p);
+        /* Parse operand at precedence 3 so comparisons (prec 4) bind tighter */
+        AstNode *operand = parse_expr(p, 3);
+        if (!operand)
+            return NULL;
+        AstNode *node = make_unary("not", 3, operand);
+        if (!node) {
+            ast_free(operand);
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        return node;
+    }
+
+    /* Reject other reserved keywords used as bare identifiers in expression position.
+     * "and" and "or" are infix operators — seeing them in prefix position is an error. */
+    if (token_is_keyword(&t, "and") || token_is_keyword(&t, "or")) {
+        parser_error(p, t.line, t.col, "unexpected keyword '%.*s'", (int)t.value_len, t.value);
+        return NULL;
+    }
+
     /* Identifier */
     if (t.type == TOK_IDENT) {
         AstNode *node = make_leaf(AST_IDENT, t.value, t.value_len);
@@ -286,8 +336,8 @@ static AstNode *parse_atom(Parser *p) {
         /* Unary minus */
         if (t.value_len == 1 && t.value[0] == '-') {
             advance(p);
-            /* Unary minus has precedence 4 (between * and **) */
-            AstNode *operand = parse_expr(p, 4);
+            /* Unary minus has precedence 7 (between * and **) */
+            AstNode *operand = parse_expr(p, 7);
             if (!operand)
                 return NULL;
             AstNode *node = make_unary("-", 1, operand);
@@ -342,8 +392,8 @@ static AstNode *parse_assignment(Parser *p) {
         Token kw = p->current;
         advance(p);
 
-        /* Reject boolean keywords as variable names. */
-        if (token_is_keyword(&p->current, "true") || token_is_keyword(&p->current, "false")) {
+        /* Reject reserved keywords as variable names. */
+        if (is_reserved_keyword(&p->current)) {
             parser_error(p, p->current.line, p->current.col,
                          "cannot declare keyword '%.*s' as variable", (int)p->current.value_len,
                          p->current.value);
@@ -425,8 +475,10 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
     if (!left)
         return NULL;
 
-    /* Loop: consume infix operators with sufficient precedence */
-    while (!p->has_error && p->current.type == TOK_OPERATOR) {
+    /* Loop: consume infix operators with sufficient precedence.
+     * Handles both symbol operators (TOK_OPERATOR) and keyword operators
+     * like "and"/"or" (TOK_IDENT that act as infix operators). */
+    while (!p->has_error && (p->current.type == TOK_OPERATOR || is_keyword_infix(&p->current))) {
         const char *op_value = p->current.value;
         size_t op_len = p->current.value_len;
         size_t op_line = p->current.line;

@@ -647,6 +647,116 @@ TEST(test_cmp_with_parens) {
 }
 
 /* ============================================================
+ * Logical operator parsing tests
+ * ============================================================ */
+
+TEST(test_logic_and_ast) {
+    ASSERT(ast_matches("true and false", "AST [BINOP and [BOOL true] [BOOL false]]"), "and AST");
+    PASS();
+}
+
+TEST(test_logic_or_ast) {
+    ASSERT(ast_matches("true or false", "AST [BINOP or [BOOL true] [BOOL false]]"), "or AST");
+    PASS();
+}
+
+TEST(test_logic_not_ast) {
+    ASSERT(ast_matches("not true", "AST [UNARY not [BOOL true]]"), "not AST");
+    PASS();
+}
+
+TEST(test_logic_not_not_ast) {
+    ASSERT(ast_matches("not not true", "AST [UNARY not [UNARY not [BOOL true]]]"), "not not AST");
+    PASS();
+}
+
+/* Precedence: and binds tighter than or */
+TEST(test_logic_or_and_precedence) {
+    /* true or true and false → true or (true and false) */
+    ASSERT(ast_matches("true or true and false",
+                       "AST [BINOP or [BOOL true] [BINOP and [BOOL true] [BOOL false]]]"),
+           "and binds tighter than or");
+    PASS();
+}
+
+/* Precedence: not binds looser than comparison (Python model) */
+TEST(test_logic_not_cmp_precedence) {
+    /* not 1 < 2 → not (1 < 2) */
+    ASSERT(ast_matches("not 1 < 2", "AST [UNARY not [BINOP < [NUMBER 1] [NUMBER 2]]]"),
+           "not binds looser than comparison");
+    PASS();
+}
+
+/* Precedence: not binds tighter than and */
+TEST(test_logic_not_and_precedence) {
+    /* not true and false → (not true) and false */
+    ASSERT(
+        ast_matches("not true and false", "AST [BINOP and [UNARY not [BOOL true]] [BOOL false]]"),
+        "not binds tighter than and");
+    PASS();
+}
+
+/* and/or/not cannot be assignment targets */
+TEST(test_logic_and_assign_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("and = 1", &node, &err), "and assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_logic_or_assign_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("or = 1", &node, &err), "or assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_logic_not_assign_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("not = 1", &node, &err), "not assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* and/or/not cannot be declaration targets */
+TEST(test_logic_and_decl_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my and = 1", &node, &err), "my and should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_logic_or_decl_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my or = 1", &node, &err), "my or should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_logic_not_decl_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my not = 1", &node, &err), "my not should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Logical operators with arithmetic */
+TEST(test_logic_and_with_comparison) {
+    /* 1 < 2 and 3 > 1 → (1 < 2) and (3 > 1) */
+    ASSERT(ast_matches(
+               "1 < 2 and 3 > 1",
+               "AST [BINOP and [BINOP < [NUMBER 1] [NUMBER 2]] [BINOP > [NUMBER 3] [NUMBER 1]]]"),
+           "and with comparisons");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -751,6 +861,22 @@ int main(void) {
     RUN_TEST(test_cmp_chained_mixed_error);
     RUN_TEST(test_cmp_with_strings);
     RUN_TEST(test_cmp_with_parens);
+
+    printf("\nLogical operators:\n");
+    RUN_TEST(test_logic_and_ast);
+    RUN_TEST(test_logic_or_ast);
+    RUN_TEST(test_logic_not_ast);
+    RUN_TEST(test_logic_not_not_ast);
+    RUN_TEST(test_logic_or_and_precedence);
+    RUN_TEST(test_logic_not_cmp_precedence);
+    RUN_TEST(test_logic_not_and_precedence);
+    RUN_TEST(test_logic_and_assign_error);
+    RUN_TEST(test_logic_or_assign_error);
+    RUN_TEST(test_logic_not_assign_error);
+    RUN_TEST(test_logic_and_decl_error);
+    RUN_TEST(test_logic_or_decl_error);
+    RUN_TEST(test_logic_not_decl_error);
+    RUN_TEST(test_logic_and_with_comparison);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

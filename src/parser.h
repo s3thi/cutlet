@@ -18,8 +18,8 @@ typedef enum {
     AST_STRING, /* string literal */
     AST_IDENT,  /* identifier */
     AST_BOOL,   /* boolean literal: true, false */
-    AST_BINOP,  /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >= */
-    AST_UNARY,  /* unary minus */
+    AST_BINOP,  /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >=, and, or */
+    AST_UNARY,  /* unary: - (minus), not */
     AST_DECL,   /* declaration: my name = expr */
     AST_ASSIGN, /* assignment: name = expr */
 } AstNodeType;

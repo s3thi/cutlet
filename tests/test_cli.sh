@@ -165,6 +165,31 @@ fi
 stop_server
 
 # ============================================================
+# Logical operators
+# ============================================================
+echo
+echo "Logical operators:"
+start_server ""
+
+if [ -n "$SERVER_PORT" ]; then
+    test_via_server "and true" "true and true" "true"
+    test_via_server "and false" "true and false" "false"
+    test_via_server "or true" "false or true" "true"
+    test_via_server "or false" "false or false" "false"
+    test_via_server "not true" "not true" "false"
+    test_via_server "not false" "not false" "true"
+    test_via_server "and returns operand" "1 and 2" "2"
+    test_via_server "or returns operand" "0 or 2" "2"
+    test_via_server "not zero" "not 0" "true"
+    test_via_server "precedence or/and" "true or true and false" "true"
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 10))
+fi
+
+stop_server
+
+# ============================================================
 # Default mode starts server
 # ============================================================
 echo

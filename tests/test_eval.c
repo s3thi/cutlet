@@ -371,6 +371,96 @@ TEST(test_cmp_str_lte) { assert_eval_bool("\"a\" <= \"a\"", true, "a<=a"); }
 TEST(test_cmp_str_gte) { assert_eval_bool("\"b\" >= \"a\"", true, "b>=a"); }
 
 /* ============================================================
+ * Logical operators
+ * ============================================================ */
+
+/* and */
+TEST(test_logic_and_tt) { assert_eval_bool("true and true", true, "true and true"); }
+TEST(test_logic_and_tf) { assert_eval_bool("true and false", false, "true and false"); }
+TEST(test_logic_and_ft) { assert_eval_bool("false and true", false, "false and true"); }
+TEST(test_logic_and_ff) { assert_eval_bool("false and false", false, "false and false"); }
+
+/* or */
+TEST(test_logic_or_tt) { assert_eval_bool("true or false", true, "true or false"); }
+TEST(test_logic_or_ft) { assert_eval_bool("false or true", true, "false or true"); }
+TEST(test_logic_or_ff) { assert_eval_bool("false or false", false, "false or false"); }
+
+/* not */
+TEST(test_logic_not_true) { assert_eval_bool("not true", false, "not true"); }
+TEST(test_logic_not_false) { assert_eval_bool("not false", true, "not false"); }
+
+/* Truthiness: 0 is falsy, nonzero truthy */
+TEST(test_logic_not_zero) { assert_eval_bool("not 0", true, "not 0"); }
+TEST(test_logic_not_one) { assert_eval_bool("not 1", false, "not 1"); }
+TEST(test_logic_not_empty_str) { assert_eval_bool("not \"\"", true, "not empty string"); }
+TEST(test_logic_not_nonempty_str) { assert_eval_bool("not \"hi\"", false, "not nonempty string"); }
+
+/* and/or return operand values (Python semantics) */
+TEST(test_logic_and_numbers) { assert_eval_number("1 and 2", 2.0, "1 and 2 → 2"); }
+TEST(test_logic_and_zero_short) { assert_eval_number("0 and 2", 0.0, "0 and 2 → 0"); }
+TEST(test_logic_or_numbers) { assert_eval_number("0 or 2", 2.0, "0 or 2 → 2"); }
+TEST(test_logic_or_falsy_last) { assert_eval_bool("0 or false", false, "0 or false → false"); }
+
+/* Precedence: and binds tighter than or */
+TEST(test_logic_prec_or_and) { assert_eval_bool("true or true and false", true, "or/and prec"); }
+
+/* not binds looser than comparison (Python model): not 1 < 2 → not (1 < 2) → false */
+TEST(test_logic_not_lt) { assert_eval_bool("not 1 < 2", false, "not 1 < 2"); }
+
+/* not true and false → (not true) and false → false */
+TEST(test_logic_not_and) { assert_eval_bool("not true and false", false, "not true and false"); }
+
+/* Short-circuit: false and (my x = 1) should not define x */
+TEST(test_logic_short_circuit_and) {
+    AstNode *node = NULL;
+    ParseError perr;
+    /* false and (my x = 1) — x should not be defined */
+    ASSERT(parser_parse("false and (my x_sc = 1)", &node, &perr), "parse short-circuit and");
+    Value v = eval(node);
+    ast_free(node);
+    /* Result should be false (the first falsy operand) */
+    ASSERT(v.type == VAL_BOOL, "should be bool");
+    ASSERT(v.boolean == false, "should be false");
+    value_free(&v);
+
+    /* x_sc should not be defined */
+    ASSERT(parser_parse("x_sc", &node, &perr), "parse x_sc");
+    v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "x_sc should not be defined");
+    value_free(&v);
+    PASS();
+}
+
+/* Short-circuit: true or (my y = 1) should not define y */
+TEST(test_logic_short_circuit_or) {
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("true or (my y_sc = 1)", &node, &perr), "parse short-circuit or");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_BOOL, "should be bool");
+    ASSERT(v.boolean == true, "should be true");
+    value_free(&v);
+
+    /* y_sc should not be defined */
+    ASSERT(parser_parse("y_sc", &node, &perr), "parse y_sc");
+    v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "y_sc should not be defined");
+    value_free(&v);
+    PASS();
+}
+
+/* and/or/not cannot be variable names */
+TEST(test_logic_and_assign_error) { assert_eval_error("and = 1", "and assign"); }
+TEST(test_logic_or_assign_error) { assert_eval_error("or = 1", "or assign"); }
+TEST(test_logic_not_assign_error) { assert_eval_error("not = 1", "not assign"); }
+TEST(test_logic_and_decl_error) { assert_eval_error("my and = 1", "my and"); }
+TEST(test_logic_or_decl_error) { assert_eval_error("my or = 1", "my or"); }
+TEST(test_logic_not_decl_error) { assert_eval_error("my not = 1", "my not"); }
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -465,6 +555,36 @@ int main(void) {
     RUN_TEST(test_cmp_str_gt);
     RUN_TEST(test_cmp_str_lte);
     RUN_TEST(test_cmp_str_gte);
+
+    printf("\nLogical operators:\n");
+    RUN_TEST(test_logic_and_tt);
+    RUN_TEST(test_logic_and_tf);
+    RUN_TEST(test_logic_and_ft);
+    RUN_TEST(test_logic_and_ff);
+    RUN_TEST(test_logic_or_tt);
+    RUN_TEST(test_logic_or_ft);
+    RUN_TEST(test_logic_or_ff);
+    RUN_TEST(test_logic_not_true);
+    RUN_TEST(test_logic_not_false);
+    RUN_TEST(test_logic_not_zero);
+    RUN_TEST(test_logic_not_one);
+    RUN_TEST(test_logic_not_empty_str);
+    RUN_TEST(test_logic_not_nonempty_str);
+    RUN_TEST(test_logic_and_numbers);
+    RUN_TEST(test_logic_and_zero_short);
+    RUN_TEST(test_logic_or_numbers);
+    RUN_TEST(test_logic_or_falsy_last);
+    RUN_TEST(test_logic_prec_or_and);
+    RUN_TEST(test_logic_not_lt);
+    RUN_TEST(test_logic_not_and);
+    RUN_TEST(test_logic_short_circuit_and);
+    RUN_TEST(test_logic_short_circuit_or);
+    RUN_TEST(test_logic_and_assign_error);
+    RUN_TEST(test_logic_or_assign_error);
+    RUN_TEST(test_logic_not_assign_error);
+    RUN_TEST(test_logic_and_decl_error);
+    RUN_TEST(test_logic_or_decl_error);
+    RUN_TEST(test_logic_not_decl_error);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

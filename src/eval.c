@@ -36,6 +36,29 @@ static Value make_bool(bool b) {
     return (Value){.type = VAL_BOOL, .boolean = b, .number = 0, .string = NULL};
 }
 
+/*
+ * Helper: determine if a Value is truthy.
+ * Truthiness rules:
+ * - false is falsy, true is truthy
+ * - 0 is falsy, all other numbers are truthy
+ * - empty string "" is falsy, all other strings are truthy
+ * - errors are falsy
+ */
+static bool is_truthy(const Value *v) {
+    switch (v->type) {
+    case VAL_BOOL:
+        return v->boolean;
+    case VAL_NUMBER:
+        return v->number != 0;
+    case VAL_STRING:
+        return v->string != NULL && v->string[0] != '\0';
+    case VAL_ERROR: // NOLINT(bugprone-branch-clone)
+        return false;
+    default:
+        return false;
+    }
+}
+
 static Value make_error(const char *fmt, ...) {
     char buf[256];
     va_list ap;
@@ -79,7 +102,32 @@ Value eval(const AstNode *node) {
     }
 
     case AST_BINOP: {
-        /* Evaluate both operands */
+        const char *op = node->value;
+
+        /* Short-circuit logical operators: and, or.
+         * These return operand values (Python semantics), not necessarily bools.
+         * "and" returns the first falsy operand, or the last operand.
+         * "or" returns the first truthy operand, or the last operand. */
+        if (strcmp(op, "and") == 0) {
+            Value left = eval(node->left);
+            if (left.type == VAL_ERROR)
+                return left;
+            if (!is_truthy(&left))
+                return left; /* short-circuit: return first falsy */
+            value_free(&left);
+            return eval(node->right);
+        }
+        if (strcmp(op, "or") == 0) {
+            Value left = eval(node->left);
+            if (left.type == VAL_ERROR)
+                return left;
+            if (is_truthy(&left))
+                return left; /* short-circuit: return first truthy */
+            value_free(&left);
+            return eval(node->right);
+        }
+
+        /* Non-short-circuit operators: evaluate both operands */
         Value left = eval(node->left);
         if (left.type == VAL_ERROR) {
             return left;
@@ -89,8 +137,6 @@ Value eval(const AstNode *node) {
             value_free(&left);
             return right;
         }
-
-        const char *op = node->value;
 
         /* == and != work on any types (mixed types: == is false, != is true) */
         if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
@@ -192,6 +238,15 @@ Value eval(const AstNode *node) {
         if (operand.type == VAL_ERROR) {
             return operand;
         }
+
+        /* "not" operator: always returns a VAL_BOOL based on truthiness */
+        if (strcmp(node->value, "not") == 0) {
+            bool truthy = is_truthy(&operand);
+            value_free(&operand);
+            return make_bool(!truthy);
+        }
+
+        /* Unary minus: requires a number */
         if (operand.type != VAL_NUMBER) {
             value_free(&operand);
             return make_error("unary minus requires a number");
