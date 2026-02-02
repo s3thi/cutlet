@@ -10,12 +10,14 @@
 #define CUTLET_EVAL_H
 
 #include "parser.h"
+#include <stdbool.h>
 
-typedef enum { VAL_NUMBER, VAL_STRING, VAL_ERROR } ValueType;
+typedef enum { VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_ERROR } ValueType;
 
 typedef struct {
     ValueType type;
     double number;
+    bool boolean;
     char *string; /* owned; also used for error message */
 } Value;
 

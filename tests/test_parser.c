@@ -488,6 +488,76 @@ TEST(test_decl_missing_expr) {
 }
 
 /* ============================================================
+ * Boolean literal parsing tests
+ * ============================================================ */
+
+TEST(test_bool_true) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("true", &node, &err), "should parse true");
+    ASSERT(node->type == AST_BOOL, "type should be BOOL");
+    ASSERT_STR_EQ(node->value, "true", "value should be true");
+    ast_free(node);
+    PASS();
+}
+
+TEST(test_bool_false) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("false", &node, &err), "should parse false");
+    ASSERT(node->type == AST_BOOL, "type should be BOOL");
+    ASSERT_STR_EQ(node->value, "false", "value should be false");
+    ast_free(node);
+    PASS();
+}
+
+TEST(test_bool_ast_format_true) {
+    ASSERT(ast_matches("true", "AST [BOOL true]"), "AST format for true");
+    PASS();
+}
+
+TEST(test_bool_ast_format_false) {
+    ASSERT(ast_matches("false", "AST [BOOL false]"), "AST format for false");
+    PASS();
+}
+
+TEST(test_bool_true_assign_error) {
+    /* true = 1 → error: cannot assign to keyword */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("true = 1", &node, &err), "true assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_bool_true_decl_error) {
+    /* my true = 1 → error: cannot declare keyword as variable */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my true = 1", &node, &err), "my true should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_bool_false_assign_error) {
+    /* false = 1 → error */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("false = 1", &node, &err), "false assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_bool_false_decl_error) {
+    /* my false = 1 → error */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my false = 1", &node, &err), "my false should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -567,6 +637,16 @@ int main(void) {
     RUN_TEST(test_assign_invalid_lhs_number);
     RUN_TEST(test_assign_invalid_lhs_string);
     RUN_TEST(test_assign_invalid_lhs_parens);
+
+    printf("\nBoolean literals:\n");
+    RUN_TEST(test_bool_true);
+    RUN_TEST(test_bool_false);
+    RUN_TEST(test_bool_ast_format_true);
+    RUN_TEST(test_bool_ast_format_false);
+    RUN_TEST(test_bool_true_assign_error);
+    RUN_TEST(test_bool_true_decl_error);
+    RUN_TEST(test_bool_false_assign_error);
+    RUN_TEST(test_bool_false_decl_error);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

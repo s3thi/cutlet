@@ -29,6 +29,13 @@ static Value make_string(char *s) { return (Value){.type = VAL_STRING, .number =
 /*
  * Helper: create an error Value with a formatted message.
  */
+/*
+ * Helper: create a boolean Value.
+ */
+static Value make_bool(bool b) {
+    return (Value){.type = VAL_BOOL, .boolean = b, .number = 0, .string = NULL};
+}
+
 static Value make_error(const char *fmt, ...) {
     char buf[256];
     va_list ap;
@@ -53,6 +60,11 @@ Value eval(const AstNode *node) {
     case AST_STRING: {
         /* Return a copy of the string value */
         return make_string(strdup(node->value));
+    }
+
+    case AST_BOOL: {
+        /* Boolean literal: "true" or "false" */
+        return make_bool(strcmp(node->value, "true") == 0);
     }
 
     case AST_IDENT: {
@@ -200,6 +212,9 @@ char *value_format(const Value *v) {
         }
         return strdup(buf);
     }
+
+    case VAL_BOOL:
+        return strdup(v->boolean ? "true" : "false");
 
     case VAL_STRING:
         return strdup(v->string ? v->string : "");

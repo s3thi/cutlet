@@ -546,6 +546,38 @@ TEST(test_eval_line_tokens_on_error) {
 }
 
 /* ============================================================
+ * Boolean literal REPL output tests
+ * ============================================================ */
+
+TEST(test_bool_true_repl_format) {
+    ASSERT(format_matches("true", "OK [BOOL true]"), "true format");
+    PASS();
+}
+
+TEST(test_bool_false_repl_format) {
+    ASSERT(format_matches("false", "OK [BOOL false]"), "false format");
+    PASS();
+}
+
+TEST(test_bool_true_eval_line) {
+    ReplResult r = repl_eval_line("true", false, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_NOT_NULL(r.value, "value present");
+    ASSERT_STR_EQ(r.value, "true", "value is true");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_bool_false_eval_line) {
+    ReplResult r = repl_eval_line("false", false, false);
+    ASSERT(r.ok, "ok");
+    ASSERT_NOT_NULL(r.value, "value present");
+    ASSERT_STR_EQ(r.value, "false", "value is false");
+    repl_result_free(&r);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -622,6 +654,12 @@ int main(void) {
 
     printf("\nReturn value tests:\n");
     RUN_TEST(test_result_is_heap_allocated);
+
+    printf("\nBoolean literals:\n");
+    RUN_TEST(test_bool_true_repl_format);
+    RUN_TEST(test_bool_false_repl_format);
+    RUN_TEST(test_bool_true_eval_line);
+    RUN_TEST(test_bool_false_eval_line);
 
     printf("\nrepl_eval_line() API:\n");
     RUN_TEST(test_eval_line_blank);

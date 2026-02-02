@@ -232,6 +232,17 @@ static AstNode *parse_atom(Parser *p) {
         return node;
     }
 
+    /* Boolean literals: true, false */
+    if (token_is_keyword(&t, "true") || token_is_keyword(&t, "false")) {
+        AstNode *node = make_leaf(AST_BOOL, t.value, t.value_len);
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+        return node;
+    }
+
     /* Identifier */
     if (t.type == TOK_IDENT) {
         AstNode *node = make_leaf(AST_IDENT, t.value, t.value_len);
@@ -303,6 +314,14 @@ static AstNode *parse_assignment(Parser *p) {
     if (token_is_keyword(&p->current, "my")) {
         Token kw = p->current;
         advance(p);
+
+        /* Reject boolean keywords as variable names. */
+        if (token_is_keyword(&p->current, "true") || token_is_keyword(&p->current, "false")) {
+            parser_error(p, p->current.line, p->current.col,
+                         "cannot declare keyword '%.*s' as variable", (int)p->current.value_len,
+                         p->current.value);
+            return NULL;
+        }
 
         if (p->current.type != TOK_IDENT) {
             parser_error(p, p->current.line, p->current.col, "expected identifier after 'my'");
@@ -508,6 +527,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "NUMBER";
     case AST_STRING:
         return "STRING";
+    case AST_BOOL:
+        return "BOOL";
     case AST_IDENT:
         return "IDENT";
     case AST_BINOP:
@@ -533,7 +554,8 @@ static char *ast_format_node(const AstNode *node) {
 
     const char *type_str = ast_node_type_str(node->type);
 
-    if (node->type == AST_NUMBER || node->type == AST_STRING || node->type == AST_IDENT) {
+    if (node->type == AST_NUMBER || node->type == AST_STRING || node->type == AST_IDENT ||
+        node->type == AST_BOOL) {
         /* Leaf node: [TYPE value] */
         size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + 1;
         char *buf = malloc(len);

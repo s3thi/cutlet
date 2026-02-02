@@ -190,16 +190,16 @@ char *repl_format_line(const char *input) {
         result = strdup("OK");
     } else {
         /* Determine type from value string. */
-        /* Check if value looks like a number (starts with digit or minus). */
         const char *type_str;
         const char *v = r.value;
         bool is_num = false;
+        bool is_bool = (strcmp(v, "true") == 0 || strcmp(v, "false") == 0);
         if (*v == '-')
             v++;
         if (*v >= '0' && *v <= '9')
             is_num = true;
 
-        type_str = is_num ? "NUMBER" : "STRING";
+        type_str = is_bool ? "BOOL" : is_num ? "NUMBER" : "STRING";
         size_t len = 4 + strlen(type_str) + 1 + strlen(r.value) + 1 + 1;
         result = malloc(len);
         if (result) {

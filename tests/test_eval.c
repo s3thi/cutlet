@@ -8,6 +8,7 @@
 #include "../src/eval.h"
 #include "../src/parser.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -245,6 +246,73 @@ TEST(test_format_error_val) {
 }
 
 /* ============================================================
+ * Boolean literals
+ * ============================================================ */
+
+/*
+ * Helper: parse input, eval, check result is a boolean with expected value.
+ */
+static void assert_eval_bool(const char *input, bool expected, const char *label) {
+    AstNode *node = NULL;
+    ParseError perr;
+    if (!parser_parse(input, &node, &perr)) {
+        printf("FAIL\n    parse failed for '%s': %s\n", input, perr.message);
+        tests_failed++;
+        return;
+    }
+    Value v = eval(node);
+    ast_free(node);
+
+    if (v.type != VAL_BOOL) {
+        char *s = value_format(&v);
+        printf("FAIL\n    expected bool for '%s', got: %s\n", input, s ? s : "(null)");
+        free(s);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+
+    if (v.boolean != expected) {
+        printf("FAIL\n    '%s': expected %s, got %s\n", input, expected ? "true" : "false",
+               v.boolean ? "true" : "false");
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+
+    value_free(&v);
+    printf("PASS\n");
+    tests_passed++;
+    (void)label;
+}
+
+TEST(test_bool_true_eval) { assert_eval_bool("true", true, "true literal"); }
+
+TEST(test_bool_false_eval) { assert_eval_bool("false", false, "false literal"); }
+
+TEST(test_bool_true_format) {
+    Value v = {.type = VAL_BOOL, .boolean = true, .string = NULL};
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "true", "true formats as 'true'");
+    free(s);
+    PASS();
+}
+
+TEST(test_bool_false_format) {
+    Value v = {.type = VAL_BOOL, .boolean = false, .string = NULL};
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "false", "false formats as 'false'");
+    free(s);
+    PASS();
+}
+
+TEST(test_bool_true_assign_error) { assert_eval_error("true = 1", "cannot assign to true"); }
+
+TEST(test_bool_true_decl_error) { assert_eval_error("my true = 1", "cannot declare true"); }
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -295,6 +363,14 @@ int main(void) {
     RUN_TEST(test_format_negative);
     RUN_TEST(test_format_string_val);
     RUN_TEST(test_format_error_val);
+
+    printf("\nBoolean literals:\n");
+    RUN_TEST(test_bool_true_eval);
+    RUN_TEST(test_bool_false_eval);
+    RUN_TEST(test_bool_true_format);
+    RUN_TEST(test_bool_false_format);
+    RUN_TEST(test_bool_true_assign_error);
+    RUN_TEST(test_bool_true_decl_error);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

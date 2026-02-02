@@ -17,6 +17,7 @@ typedef enum {
     AST_NUMBER, /* numeric literal */
     AST_STRING, /* string literal */
     AST_IDENT,  /* identifier */
+    AST_BOOL,   /* boolean literal: true, false */
     AST_BINOP,  /* binary operator: +, -, *, /, ** */
     AST_UNARY,  /* unary minus */
     AST_DECL,   /* declaration: my name = expr */
