@@ -2,9 +2,13 @@
 
 Cutlet is a dynamic programming language built entirely using coding agents.
 
-Cutlet is a dynamic programming language similar to Python, Ruby, Lua, and JavaScript. It borrows most heavily from Raku, Perl, and Tcl. It excels at parsing text, navigating files and directories, inter-process communication, job control, and quickly building simple user interfaces for one-off tasks. It's designed to be a glue language that can bring together and orchestrate disparate programs. It's optimized for REPL-driven programming
+Cutlet is a dynamic programming language similar to Python, Ruby, Lua, and JavaScript. It excels at parsing text, navigating files and directories, inter-process communication, job control, and quickly building simple user interfaces for one-off tasks. It's designed to be a glue language that can bring together and orchestrate disparate programs. It's optimized for REPL-driven programming, similar to how it's done in Common Lisp or Clojure.
 
-Cutlet is written in C and has no external dependencies except platform libraries. It only requires a working C23 compiler and a POSIX compliant `make` program. It's designed to run on Linux, macOS, and Windows.
+Cutlet is written in C and has no external dependencies except platform libraries. It only requires a working C23 compiler and a POSIX compliant `make` program. It's designed to run on Linux and macOS.
+
+## Limitations of the author
+
+The author of this project is an experienced developer of 20 years. But they don't have experience building and designing programming languages outside of college-level theoretical texts. They also don't have experience with C, primarily being a Rust developer. The author will often need guidance on how best to proceed with the implementation of this language. They will also need an explanation of what the C code is doing.
 
 ## Important instructions
 
