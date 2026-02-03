@@ -23,6 +23,7 @@
  */
 
 #include "parser.h"
+#include "ptr_array.h"
 #include "tokenizer.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -587,13 +588,13 @@ static void skip_newlines(Parser *p) {
 }
 
 /*
- * Helper: free an array of expressions (used during cleanup on error).
+ * Helper: free all expressions in a PtrArray and destroy the array.
  */
-static void free_expr_array(AstNode **exprs, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        ast_free(exprs[i]);
+static void free_expr_array(PtrArray *arr) {
+    for (size_t i = 0; i < arr->count; i++) {
+        ast_free((AstNode *)arr->items[i]);
     }
-    free((void *)exprs); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    ptr_array_destroy(arr);
 }
 
 bool parser_parse(const char *input, AstNode **out, ParseError *err) {
@@ -643,11 +644,8 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     }
 
     /* Parse newline-separated expressions into a dynamic array */
-    size_t capacity = 4;
-    size_t count = 0;
-    // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-    AstNode **exprs = (AstNode **)malloc(capacity * sizeof(AstNode *));
-    if (!exprs) {
+    PtrArray exprs;
+    if (!ptr_array_init(&exprs, 4)) {
         parser_error(&p, 1, 1, "memory allocation failed");
         tokenizer_destroy(tok);
         return false;
@@ -657,12 +655,11 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     AstNode *expr = parse_assignment(&p);
     if (p.has_error || !expr) {
         ast_free(expr); /* Free expr if it was allocated before error */
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-        free((void *)exprs);
+        ptr_array_destroy(&exprs);
         tokenizer_destroy(tok);
         return false;
     }
-    exprs[count++] = expr;
+    ptr_array_push(&exprs, expr);
 
     /* Parse additional newline-separated expressions */
     while (!p.has_error && p.current.type == TOK_NEWLINE) {
@@ -678,7 +675,7 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
         if (p.current.type == TOK_ERROR) {
             parser_error(&p, p.current.line, p.current.col, "%.*s", (int)p.current.value_len,
                          p.current.value);
-            free_expr_array(exprs, count);
+            free_expr_array(&exprs);
             tokenizer_destroy(tok);
             return false;
         }
@@ -686,30 +683,23 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
         /* Parse next expression */
         expr = parse_assignment(&p);
         if (p.has_error || !expr) {
-            free_expr_array(exprs, count);
+            free_expr_array(&exprs);
             tokenizer_destroy(tok);
             return false;
         }
 
-        /* Grow array if needed */
-        if (count >= capacity) {
-            capacity *= 2;
-            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-            AstNode **new_exprs = (AstNode **)realloc((void *)exprs, capacity * sizeof(AstNode *));
-            if (!new_exprs) {
-                ast_free(expr);
-                free_expr_array(exprs, count);
-                parser_error(&p, 1, 1, "memory allocation failed");
-                tokenizer_destroy(tok);
-                return false;
-            }
-            exprs = new_exprs;
+        /* Push to array (auto-grows if needed) */
+        if (!ptr_array_push(&exprs, expr)) {
+            ast_free(expr);
+            free_expr_array(&exprs);
+            parser_error(&p, 1, 1, "memory allocation failed");
+            tokenizer_destroy(tok);
+            return false;
         }
-        exprs[count++] = expr;
     }
 
     if (p.has_error) {
-        free_expr_array(exprs, count);
+        free_expr_array(&exprs);
         tokenizer_destroy(tok);
         return false;
     }
@@ -718,7 +708,7 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     if (p.current.type == TOK_ERROR) {
         parser_error(&p, p.current.line, p.current.col, "%.*s", (int)p.current.value_len,
                      p.current.value);
-        free_expr_array(exprs, count);
+        free_expr_array(&exprs);
         tokenizer_destroy(tok);
         return false;
     }
@@ -726,7 +716,7 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     if (p.current.type != TOK_EOF && p.current.type != TOK_NEWLINE) {
         parser_error(&p, p.current.line, p.current.col, "unexpected extra token '%.*s'",
                      (int)p.current.value_len, p.current.value);
-        free_expr_array(exprs, count);
+        free_expr_array(&exprs);
         tokenizer_destroy(tok);
         return false;
     }
@@ -734,17 +724,22 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     tokenizer_destroy(tok);
 
     /* If only one expression, return it directly (no block wrapper) */
-    if (count == 1) {
-        *out = exprs[0];
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-        free((void *)exprs);
+    if (exprs.count == 1) {
+        *out = (AstNode *)exprs.items[0];
+        ptr_array_destroy(&exprs);
         return true;
     }
 
     /* Multiple expressions: wrap in AST_BLOCK */
-    AstNode *block = make_block(exprs, count);
+    size_t count = exprs.count;
+    AstNode **children = (AstNode **)ptr_array_release(&exprs);
+    AstNode *block = make_block(children, count);
     if (!block) {
-        free_expr_array(exprs, count);
+        /* On failure, free_expr_array can't be used since array was released */
+        for (size_t i = 0; i < count; i++) {
+            ast_free(children[i]);
+        }
+        ptr_array_free_raw((void *)children);
         if (err) {
             err->line = 1;
             err->col = 1;
@@ -767,8 +762,7 @@ void ast_free(AstNode *node) {
         for (size_t i = 0; i < node->child_count; i++) {
             ast_free(node->children[i]);
         }
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-        free((void *)node->children);
+        ptr_array_free_raw((void *)node->children);
     }
     free(node->value);
     free(node);
@@ -881,47 +875,44 @@ static char *ast_format_node(const AstNode *node) {
     if (node->type == AST_BLOCK) {
         /* Block: [BLOCK child1 child2 ...] */
         /* First, format all children and calculate total length */
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-        char **child_strs = (char **)malloc(node->child_count * sizeof(char *));
-        if (!child_strs)
+        PtrArray child_strs;
+        if (!ptr_array_init(&child_strs, node->child_count))
             return NULL;
 
         size_t total_len = 1 + strlen(type_str); /* "[BLOCK" */
         for (size_t i = 0; i < node->child_count; i++) {
-            child_strs[i] = ast_format_node(node->children[i]);
-            if (!child_strs[i]) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
                 /* Free already-allocated strings */
-                for (size_t j = 0; j < i; j++) {
-                    free(child_strs[j]);
+                for (size_t j = 0; j < child_strs.count; j++) {
+                    free(child_strs.items[j]);
                 }
-                // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-                free((void *)child_strs);
+                ptr_array_destroy(&child_strs);
                 return NULL;
             }
-            total_len += 1 + strlen(child_strs[i]); /* " child" */
+            ptr_array_push(&child_strs, str);
+            total_len += 1 + strlen(str); /* " child" */
         }
         total_len += 1 + 1; /* "]" + null terminator */
 
         char *buf = malloc(total_len);
         if (!buf) {
-            for (size_t i = 0; i < node->child_count; i++) {
-                free(child_strs[i]);
+            for (size_t i = 0; i < child_strs.count; i++) {
+                free(child_strs.items[i]);
             }
-            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-            free((void *)child_strs);
+            ptr_array_destroy(&child_strs);
             return NULL;
         }
 
         /* Build the string */
         size_t pos = 0;
         pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s", type_str);
-        for (size_t i = 0; i < node->child_count; i++) {
-            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", child_strs[i]);
-            free(child_strs[i]);
+        for (size_t i = 0; i < child_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)child_strs.items[i]);
+            free(child_strs.items[i]);
         }
         snprintf(buf + pos, total_len - pos, "]");
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
-        free((void *)child_strs);
+        ptr_array_destroy(&child_strs);
         return buf;
     }
 
