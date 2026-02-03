@@ -16,6 +16,7 @@ The author of this project is an experienced developer of 20 years. But they don
 - Before implementing any new code, run `make test` and `make check` to prove that your tests are failing. Pause after test failures and require user confirmation to proceed with implementation.
 - Run `make test` and `make check` after every code change.
 - Never remove, change, or disable any tests without user confirmation.
+- Never disable any linter errors without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
 - Update README if command line flags change. Also update README if build flags change, the dependencies change, or if we change the behavior of the REPL.
 
