@@ -874,6 +874,210 @@ TEST(test_block_mixed_whitespace) {
 }
 
 /* ============================================================
+ * If/else expression parsing tests (Step 3)
+ * ============================================================ */
+
+TEST(test_if_simple_true) {
+    /* if true then 1 else 2 end */
+    ASSERT(ast_matches("if true then 1 else 2 end", "AST [IF [BOOL true] [NUMBER 1] [NUMBER 2]]"),
+           "simple if/else");
+    PASS();
+}
+
+TEST(test_if_simple_no_else) {
+    /* if false then 1 end */
+    ASSERT(ast_matches("if false then 1 end", "AST [IF [BOOL false] [NUMBER 1]]"),
+           "if without else");
+    PASS();
+}
+
+TEST(test_if_with_comparison) {
+    /* if 1 < 2 then "yes" else "no" end */
+    ASSERT(ast_matches("if 1 < 2 then \"yes\" else \"no\" end",
+                       "AST [IF [BINOP < [NUMBER 1] [NUMBER 2]] [STRING yes] [STRING no]]"),
+           "if with comparison condition");
+    PASS();
+}
+
+TEST(test_if_with_expression_body) {
+    /* if true then 1 + 2 else 3 * 4 end */
+    ASSERT(ast_matches("if true then 1 + 2 else 3 * 4 end",
+                       "AST [IF [BOOL true] [BINOP + [NUMBER 1] [NUMBER 2]] "
+                       "[BINOP * [NUMBER 3] [NUMBER 4]]]"),
+           "if with expression bodies");
+    PASS();
+}
+
+TEST(test_if_nested) {
+    /* if true then if false then 1 else 2 end else 3 end */
+    ASSERT(ast_matches("if true then if false then 1 else 2 end else 3 end",
+                       "AST [IF [BOOL true] [IF [BOOL false] [NUMBER 1] [NUMBER 2]] [NUMBER 3]]"),
+           "nested if in then branch");
+    PASS();
+}
+
+TEST(test_if_nested_in_else) {
+    /* if false then 1 else if true then 2 else 3 end */
+    /* With else-if special case, only one 'end' needed */
+    ASSERT(ast_matches("if false then 1 else if true then 2 else 3 end",
+                       "AST [IF [BOOL false] [NUMBER 1] [IF [BOOL true] [NUMBER 2] [NUMBER 3]]]"),
+           "else if special case");
+    PASS();
+}
+
+TEST(test_if_else_if_chain) {
+    /* if false then 1 else if false then 2 else 3 end */
+    ASSERT(ast_matches("if false then 1 else if false then 2 else 3 end",
+                       "AST [IF [BOOL false] [NUMBER 1] [IF [BOOL false] [NUMBER 2] [NUMBER 3]]]"),
+           "else if chain");
+    PASS();
+}
+
+TEST(test_if_multiline_body) {
+    /* if true then
+         my x = 1
+         x + 1
+       else
+         0
+       end */
+    ASSERT(ast_matches("if true then\nmy x = 1\nx + 1\nelse\n0\nend",
+                       "AST [IF [BOOL true] [BLOCK [DECL x [NUMBER 1]] "
+                       "[BINOP + [IDENT x] [NUMBER 1]]] [NUMBER 0]]"),
+           "multiline then body");
+    PASS();
+}
+
+TEST(test_if_multiline_else_body) {
+    /* if false then
+         1
+       else
+         my y = 2
+         y * 2
+       end */
+    ASSERT(ast_matches("if false then\n1\nelse\nmy y = 2\ny * 2\nend",
+                       "AST [IF [BOOL false] [NUMBER 1] [BLOCK [DECL y [NUMBER 2]] "
+                       "[BINOP * [IDENT y] [NUMBER 2]]]]"),
+           "multiline else body");
+    PASS();
+}
+
+TEST(test_if_in_assignment) {
+    /* my x = if true then 42 else 0 end */
+    ASSERT(ast_matches("my x = if true then 42 else 0 end",
+                       "AST [DECL x [IF [BOOL true] [NUMBER 42] [NUMBER 0]]]"),
+           "if as assignment value");
+    PASS();
+}
+
+TEST(test_if_in_expression) {
+    /* 1 + if true then 2 else 3 end */
+    ASSERT(ast_matches("1 + if true then 2 else 3 end",
+                       "AST [BINOP + [NUMBER 1] [IF [BOOL true] [NUMBER 2] [NUMBER 3]]]"),
+           "if in expression");
+    PASS();
+}
+
+TEST(test_if_single_line) {
+    /* Single-line if/else should work */
+    ASSERT(ast_matches("if true then 1 else 2 end", "AST [IF [BOOL true] [NUMBER 1] [NUMBER 2]]"),
+           "single-line if/else");
+    PASS();
+}
+
+TEST(test_if_condition_complex) {
+    /* if 1 < 2 and 3 > 0 then "yes" else "no" end */
+    ASSERT(ast_matches("if 1 < 2 and 3 > 0 then \"yes\" else \"no\" end",
+                       "AST [IF [BINOP and [BINOP < [NUMBER 1] [NUMBER 2]] "
+                       "[BINOP > [NUMBER 3] [NUMBER 0]]] [STRING yes] [STRING no]]"),
+           "complex condition");
+    PASS();
+}
+
+/* Error cases */
+
+TEST(test_if_missing_then) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if true 1 else 2 end", &node, &err), "missing then should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_if_missing_end) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if true then 1 else 2", &node, &err), "missing end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_if_missing_condition) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if then 1 end", &node, &err), "missing condition should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_if_missing_then_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if true then else 2 end", &node, &err), "missing then body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_if_missing_else_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if true then 1 else end", &node, &err), "missing else body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Reserved keyword tests */
+
+TEST(test_if_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my if = 1", &node, &err), "if as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_then_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my then = 1", &node, &err), "then as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_else_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my else = 1", &node, &err), "else as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_end_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my end = 1", &node, &err), "end as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_if_assign_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if = 1", &node, &err), "if assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -1013,6 +1217,35 @@ int main(void) {
     RUN_TEST(test_block_with_assign);
     RUN_TEST(test_block_complex_exprs);
     RUN_TEST(test_block_mixed_whitespace);
+
+    printf("\nIf/else expressions:\n");
+    RUN_TEST(test_if_simple_true);
+    RUN_TEST(test_if_simple_no_else);
+    RUN_TEST(test_if_with_comparison);
+    RUN_TEST(test_if_with_expression_body);
+    RUN_TEST(test_if_nested);
+    RUN_TEST(test_if_nested_in_else);
+    RUN_TEST(test_if_else_if_chain);
+    RUN_TEST(test_if_multiline_body);
+    RUN_TEST(test_if_multiline_else_body);
+    RUN_TEST(test_if_in_assignment);
+    RUN_TEST(test_if_in_expression);
+    RUN_TEST(test_if_single_line);
+    RUN_TEST(test_if_condition_complex);
+
+    printf("\nIf/else error cases:\n");
+    RUN_TEST(test_if_missing_then);
+    RUN_TEST(test_if_missing_end);
+    RUN_TEST(test_if_missing_condition);
+    RUN_TEST(test_if_missing_then_body);
+    RUN_TEST(test_if_missing_else_body);
+
+    printf("\nIf/else reserved keywords:\n");
+    RUN_TEST(test_if_keyword_reserved);
+    RUN_TEST(test_then_keyword_reserved);
+    RUN_TEST(test_else_keyword_reserved);
+    RUN_TEST(test_end_keyword_reserved);
+    RUN_TEST(test_if_assign_error);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

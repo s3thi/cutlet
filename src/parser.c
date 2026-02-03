@@ -186,6 +186,40 @@ static AstNode *make_block(AstNode **children, size_t count) {
     return node;
 }
 
+/*
+ * Create an if expression AST node.
+ * Uses children array: children[0]=condition, children[1]=then-body,
+ * children[2]=else-body (if has_else is true).
+ * Takes ownership of condition, then_body, and else_body.
+ */
+static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_body) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+
+    size_t count = else_body ? 3 : 2;
+    AstNode **children = (AstNode **)malloc(count * sizeof(AstNode *));
+    if (!children) {
+        free(node);
+        return NULL;
+    }
+
+    children[0] = condition;
+    children[1] = then_body;
+    if (else_body) {
+        children[2] = else_body;
+    }
+
+    node->type = AST_IF;
+    node->value = NULL;
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->children = children;
+    node->child_count = count;
+    return node;
+}
+
 /* ============================================================
  * Operator precedence and associativity
  * ============================================================ */
@@ -254,12 +288,13 @@ static bool is_right_assoc(const char *op, size_t len) {
 
 /*
  * Check if a keyword is reserved and cannot be used as a variable name.
- * This includes true, false, nothing, and, or, not.
+ * This includes true, false, nothing, and, or, not, if, then, else, end.
  */
 static bool is_reserved_keyword(const Token *t) {
     return token_is_keyword(t, "true") || token_is_keyword(t, "false") ||
            token_is_keyword(t, "nothing") || token_is_keyword(t, "and") ||
-           token_is_keyword(t, "or") || token_is_keyword(t, "not");
+           token_is_keyword(t, "or") || token_is_keyword(t, "not") || token_is_keyword(t, "if") ||
+           token_is_keyword(t, "then") || token_is_keyword(t, "else") || token_is_keyword(t, "end");
 }
 
 /* ============================================================
@@ -269,6 +304,9 @@ static bool is_reserved_keyword(const Token *t) {
 /* Forward declarations */
 static AstNode *parse_assignment(Parser *p);
 static AstNode *parse_expr(Parser *p, int min_prec);
+static AstNode *parse_if(Parser *p);
+static void skip_newlines(Parser *p);
+static void free_expr_array(PtrArray *arr);
 
 /*
  * Parse an atom (prefix position).
@@ -340,6 +378,11 @@ static AstNode *parse_atom(Parser *p) {
         }
         advance(p);
         return node;
+    }
+
+    /* If expression */
+    if (token_is_keyword(&t, "if")) {
+        return parse_if(p);
     }
 
     /* "not" prefix operator: precedence 3, binds looser than comparisons */
@@ -574,6 +617,233 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
     return left;
 }
 
+/*
+ * Parse an if expression.
+ * Syntax: if condition then body [else body] end
+ *
+ * Special case: "else if" is treated as a single construct, so
+ * "if a then b else if c then d else e end" only needs one "end".
+ */
+static AstNode *parse_if(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    Token if_tok = p->current;
+
+    /* Consume 'if' keyword (already verified by caller) */
+    advance(p);
+    skip_newlines(p);
+
+    /* Parse condition - stops at 'then' keyword */
+    if (token_is_keyword(&p->current, "then")) {
+        parser_error(p, p->current.line, p->current.col, "expected condition after 'if'");
+        return NULL;
+    }
+
+    AstNode *condition = parse_assignment(p);
+    if (!condition)
+        return NULL;
+
+    skip_newlines(p);
+
+    /* Expect 'then' */
+    if (!token_is_keyword(&p->current, "then")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'then' after condition");
+        ast_free(condition);
+        return NULL;
+    }
+    advance(p);
+    skip_newlines(p);
+
+    /* Parse then-body: collect expressions until 'else' or 'end' */
+    if (token_is_keyword(&p->current, "else") || token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected expression in 'then' body");
+        ast_free(condition);
+        return NULL;
+    }
+
+    PtrArray then_exprs;
+    if (!ptr_array_init(&then_exprs, 4)) {
+        parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+        ast_free(condition);
+        return NULL;
+    }
+
+    /* Parse first then-body expression */
+    AstNode *expr = parse_assignment(p);
+    if (!expr) {
+        ast_free(condition);
+        ptr_array_destroy(&then_exprs);
+        return NULL;
+    }
+    ptr_array_push(&then_exprs, expr);
+
+    /* Parse additional newline-separated expressions in then-body */
+    while (!p->has_error && p->current.type == TOK_NEWLINE) {
+        skip_newlines(p);
+        if (token_is_keyword(&p->current, "else") || token_is_keyword(&p->current, "end"))
+            break;
+        if (p->current.type == TOK_EOF)
+            break;
+
+        expr = parse_assignment(p);
+        if (!expr) {
+            ast_free(condition);
+            free_expr_array(&then_exprs);
+            return NULL;
+        }
+        if (!ptr_array_push(&then_exprs, expr)) {
+            ast_free(expr);
+            ast_free(condition);
+            free_expr_array(&then_exprs);
+            parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    /* Build then-body: unwrap if single expression */
+    AstNode *then_body;
+    if (then_exprs.count == 1) {
+        then_body = (AstNode *)then_exprs.items[0];
+        ptr_array_destroy(&then_exprs);
+    } else {
+        size_t count = then_exprs.count;
+        AstNode **children = (AstNode **)ptr_array_release(&then_exprs);
+        then_body = make_block(children, count);
+        if (!then_body) {
+            for (size_t i = 0; i < count; i++)
+                ast_free(children[i]);
+            ptr_array_free_raw((void *)children);
+            ast_free(condition);
+            parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    skip_newlines(p);
+
+    /* Check for 'else' or 'end' */
+    AstNode *else_body = NULL;
+
+    if (token_is_keyword(&p->current, "else")) {
+        advance(p);
+        skip_newlines(p);
+
+        /* Special case: "else if" - parse as nested if-expression */
+        if (token_is_keyword(&p->current, "if")) {
+            else_body = parse_if(p);
+            if (!else_body) {
+                ast_free(condition);
+                ast_free(then_body);
+                return NULL;
+            }
+            /* No 'end' needed for outer if - the inner if consumed it */
+        } else {
+            /* Regular else body */
+            if (token_is_keyword(&p->current, "end")) {
+                parser_error(p, p->current.line, p->current.col,
+                             "expected expression in 'else' body");
+                ast_free(condition);
+                ast_free(then_body);
+                return NULL;
+            }
+
+            PtrArray else_exprs;
+            if (!ptr_array_init(&else_exprs, 4)) {
+                parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+                ast_free(condition);
+                ast_free(then_body);
+                return NULL;
+            }
+
+            /* Parse first else-body expression */
+            expr = parse_assignment(p);
+            if (!expr) {
+                ast_free(condition);
+                ast_free(then_body);
+                ptr_array_destroy(&else_exprs);
+                return NULL;
+            }
+            ptr_array_push(&else_exprs, expr);
+
+            /* Parse additional newline-separated expressions in else-body */
+            while (!p->has_error && p->current.type == TOK_NEWLINE) {
+                skip_newlines(p);
+                if (token_is_keyword(&p->current, "end"))
+                    break;
+                if (p->current.type == TOK_EOF)
+                    break;
+
+                expr = parse_assignment(p);
+                if (!expr) {
+                    ast_free(condition);
+                    ast_free(then_body);
+                    free_expr_array(&else_exprs);
+                    return NULL;
+                }
+                if (!ptr_array_push(&else_exprs, expr)) {
+                    ast_free(expr);
+                    ast_free(condition);
+                    ast_free(then_body);
+                    free_expr_array(&else_exprs);
+                    parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+                    return NULL;
+                }
+            }
+
+            /* Build else-body: unwrap if single expression */
+            if (else_exprs.count == 1) {
+                else_body = (AstNode *)else_exprs.items[0];
+                ptr_array_destroy(&else_exprs);
+            } else {
+                size_t count = else_exprs.count;
+                AstNode **children = (AstNode **)ptr_array_release(&else_exprs);
+                else_body = make_block(children, count);
+                if (!else_body) {
+                    for (size_t i = 0; i < count; i++)
+                        ast_free(children[i]);
+                    ptr_array_free_raw((void *)children);
+                    ast_free(condition);
+                    ast_free(then_body);
+                    parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+                    return NULL;
+                }
+            }
+
+            skip_newlines(p);
+
+            /* Expect 'end' */
+            if (!token_is_keyword(&p->current, "end")) {
+                parser_error(p, p->current.line, p->current.col, "expected 'end' to close 'if'");
+                ast_free(condition);
+                ast_free(then_body);
+                ast_free(else_body);
+                return NULL;
+            }
+            advance(p);
+        }
+    } else if (token_is_keyword(&p->current, "end")) {
+        /* No else clause */
+        advance(p);
+    } else {
+        parser_error(p, p->current.line, p->current.col, "expected 'else' or 'end'");
+        ast_free(condition);
+        ast_free(then_body);
+        return NULL;
+    }
+
+    AstNode *if_node = make_if(condition, then_body, else_body);
+    if (!if_node) {
+        ast_free(condition);
+        ast_free(then_body);
+        ast_free(else_body);
+        parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    return if_node;
+}
+
 /* ============================================================
  * Public API
  * ============================================================ */
@@ -790,6 +1060,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "ASSIGN";
     case AST_BLOCK:
         return "BLOCK";
+    case AST_IF:
+        return "IF";
     default:
         return "UNKNOWN";
     }
@@ -913,6 +1185,58 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf + pos, total_len - pos, "]");
         ptr_array_destroy(&child_strs);
+        return buf;
+    }
+
+    if (node->type == AST_IF) {
+        /* If: [IF cond then-body [else-body]]
+         * children[0] = condition
+         * children[1] = then-body
+         * children[2] = else-body (optional) */
+        if (node->child_count < 2)
+            return NULL;
+
+        char *cond_str = ast_format_node(node->children[0]);
+        char *then_str = ast_format_node(node->children[1]);
+        if (!cond_str || !then_str) {
+            free(cond_str);
+            free(then_str);
+            return NULL;
+        }
+
+        char *else_str = NULL;
+        if (node->child_count >= 3) {
+            else_str = ast_format_node(node->children[2]);
+            if (!else_str) {
+                free(cond_str);
+                free(then_str);
+                return NULL;
+            }
+        }
+
+        size_t len = 1 + strlen(type_str) + 1 + strlen(cond_str) + 1 + strlen(then_str);
+        if (else_str) {
+            len += 1 + strlen(else_str);
+        }
+        len += 1 + 1; /* "]" + null terminator */
+
+        char *buf = malloc(len);
+        if (!buf) {
+            free(cond_str);
+            free(then_str);
+            free(else_str);
+            return NULL;
+        }
+
+        if (else_str) {
+            snprintf(buf, len, "[%s %s %s %s]", type_str, cond_str, then_str, else_str);
+        } else {
+            snprintf(buf, len, "[%s %s %s]", type_str, cond_str, then_str);
+        }
+
+        free(cond_str);
+        free(then_str);
+        free(else_str);
         return buf;
     }
 

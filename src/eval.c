@@ -349,6 +349,36 @@ Value eval(const AstNode *node) {
         return result;
     }
 
+    case AST_IF: {
+        /* If expression: evaluate condition, then evaluate the appropriate branch.
+         * children[0] = condition
+         * children[1] = then-body
+         * children[2] = else-body (optional)
+         * Only the taken branch is evaluated (like short-circuit). */
+        if (node->child_count < 2) {
+            return make_error("malformed if expression");
+        }
+
+        Value cond = eval(node->children[0]);
+        if (cond.type == VAL_ERROR) {
+            return cond;
+        }
+
+        bool condition_true = is_truthy(&cond);
+        value_free(&cond);
+
+        if (condition_true) {
+            /* Evaluate then-body */
+            return eval(node->children[1]);
+        } else if (node->child_count >= 3) {
+            /* Evaluate else-body */
+            return eval(node->children[2]);
+        } else {
+            /* No else clause and condition is false → return nothing */
+            return make_nothing();
+        }
+    }
+
     default:
         return make_error("unknown AST node type");
     }

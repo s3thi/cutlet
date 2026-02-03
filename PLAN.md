@@ -9,12 +9,14 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 - **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char.
 - **Pratt parser**: Precedence climbing. `or` (prec 1) → `and` (prec 2) → `not` (prec 3, prefix) → comparison (prec 4, non-assoc) → `+ -` (prec 5) → `* /` (prec 6) → unary minus (prec 7) → `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
-- **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN. S-expr format output.
+- **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN, BLOCK, IF. S-expr format output.
 - **Evaluator**: Tree-walking. Produces VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, or VAL_ERROR. All arithmetic in double precision.
 - **Booleans**: `true`/`false` keywords → `AST_BOOL` → `VAL_BOOL`.
 - **Nothing**: `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true; `nothing == anything_else` is false. Ordered comparisons with nothing produce errors.
 - **Comparison operators**: `==`, `!=`, `<`, `>`, `<=`, `>=`. All return VAL_BOOL. Non-associative (no chaining). Mixed-type equality allowed; mixed-type ordering is an error.
 - **Logical operators**: `and`, `or` (keyword infix, short-circuit, Python semantics — return operand values), `not` (keyword prefix, returns VAL_BOOL). Truthiness: `false`, `nothing`, `0`, `""`, errors are falsy.
+- **Multi-line input**: `TOK_NEWLINE` token, `AST_BLOCK` for multiple statements, newlines as separators.
+- **If/else expressions**: `if cond then body [else body] end`. Expression form (returns value). `else if` special case (single `end`). Only taken branch evaluated.
 - **Runtime**: Global pthread rwlock serializes eval. Linked-list variable environment with thread-safe get/define/assign.
 - **REPL/CLI**: TCP server (thread-per-client), TCP client. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs.
 - **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server. Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
@@ -76,44 +78,28 @@ Added `nothing` keyword, `AST_NOTHING` node type, and `VAL_NOTHING` value type. 
 - Eval: 8 new tests for block evaluation (returns last, decl-then-use, reassign, comparisons, etc.)
 - Updated 4 existing tokenizer tests that assumed newlines were whitespace
 
-### Step 3: If/else expressions
+### Step 3: If/else expressions ✓ COMPLETE
 
 If/else is an expression (it evaluates to a value). Syntax: `if condition then body else body end`. The `else` clause is optional; if omitted and condition is false, the expression evaluates to nothing.
 
-**Keywords**: `if`, `then`, `else`, `end` are all reserved (cannot be used as variable names).
+**Implementation summary**:
+- **Parser**: Added `AST_IF` node type using `children` array:
+  - `children[0]` = condition
+  - `children[1]` = then-body
+  - `children[2]` = else-body (optional, `child_count` = 2 or 3)
+- **Keywords**: `if`, `then`, `else`, `end` are reserved (cannot be variable names)
+- **Special case**: `else if` only requires one `end` (inner if consumes the shared end)
+- **Bodies**: Multi-line bodies are wrapped in `AST_BLOCK`; single expressions are unwrapped
+- **Evaluator**: Only evaluates the taken branch (short-circuit behavior)
+  - If condition truthy → evaluate then-body
+  - If condition falsy → evaluate else-body if present, otherwise return `nothing`
+- **AST format**: `[IF [cond] [then-body] [else-body]]` or `[IF [cond] [then-body]]`
 
-**Parser**:
-- Add `AST_IF` node type with three children: condition, then-body, else-body (nullable).
-- Parse in `parse_atom()` when current token is the `if` keyword:
-  1. Consume `if`.
-  2. Parse condition expression (stop before `then`).
-  3. Expect and consume `then`.
-  4. Parse body as a block of newline-separated expressions (stop at `else` or `end`).
-  5. If `else`, consume it and parse else-body as a block (stop at `end`).
-  6. Expect and consume `end`.
-- If no else clause, else-body child is NULL.
-
-**Evaluator**:
-- Evaluate condition.
-- If truthy → evaluate then-body, return its value.
-- If falsy → evaluate else-body if present, otherwise return nothing.
-- Only evaluate the taken branch (like short-circuit).
-
-**AST format**: `(if cond then-body else-body)` or `(if cond then-body)` when no else.
-
-**Tests to write first**:
-- `if true then 1 else 2 end` → 1
-- `if false then 1 else 2 end` → 2
-- `if false then 1 end` → nothing
-- `if 1 < 2 then "yes" else "no" end` → "yes"
-- `my x = if true then 42 else 0 end` then `x` → 42
-- Multi-line bodies: `"if true then\n  my x = 1\n  x + 1\nelse\n  0\nend"` → 2
-- Nested: `if true then if false then 1 else 2 end else 3 end` → 2
-- Missing `then` → parse error
-- Missing `end` → parse error
-- `if = 1` → error, `my then = 1` → error (reserved keywords)
-- AST output for if/else expressions
-- Side effects only in taken branch: `"if false then\n  my x = 1\nend\nx"` → error (x not defined)
+**Tests added**:
+- Parser: 13 success tests (basic if/else, no-else, comparisons, expressions, nested, else-if, multiline, in-assignment, in-expression, complex conditions)
+- Parser: 5 error tests (missing then/end/condition/bodies)
+- Parser: 5 reserved keyword tests (if/then/else/end as variables)
+- Eval: 20 tests (true/false branches, no-else returns nothing, comparisons, assignments, multiline bodies, nested, else-if chains, short-circuit behavior, truthiness)
 
 ### Required process (every step)
 

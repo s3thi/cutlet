@@ -587,6 +587,185 @@ TEST(test_block_single_expr_not_wrapped) {
 }
 
 /* ============================================================
+ * If/else expression evaluation (Step 3)
+ * ============================================================ */
+
+TEST(test_if_true_then_else) {
+    /* if true then 1 else 2 end → 1 */
+    assert_eval_number("if true then 1 else 2 end", 1.0, "if true");
+}
+
+TEST(test_if_false_then_else) {
+    /* if false then 1 else 2 end → 2 */
+    assert_eval_number("if false then 1 else 2 end", 2.0, "if false");
+}
+
+TEST(test_if_false_no_else) {
+    /* if false then 1 end → nothing */
+    assert_eval_nothing("if false then 1 end", "if false no else → nothing");
+}
+
+TEST(test_if_true_no_else) {
+    /* if true then 42 end → 42 */
+    assert_eval_number("if true then 42 end", 42.0, "if true no else");
+}
+
+TEST(test_if_comparison_cond) {
+    /* if 1 < 2 then "yes" else "no" end → "yes" */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if 1 < 2 then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "yes", "should be yes");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_comparison_cond_false) {
+    /* if 2 < 1 then "yes" else "no" end → "no" */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if 2 < 1 then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "no", "should be no");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_in_assignment) {
+    /* my x = if true then 42 else 0 end
+       x → 42 */
+    assert_eval_number("my x_if = if true then 42 else 0 end\nx_if", 42.0, "if in assignment");
+}
+
+TEST(test_if_multiline_body) {
+    /* if true then
+         my x = 1
+         x + 1
+       else
+         0
+       end → 2 */
+    assert_eval_number("if true then\nmy x_ml = 1\nx_ml + 1\nelse\n0\nend", 2.0, "multiline body");
+}
+
+TEST(test_if_nested_inner_taken) {
+    /* if true then if false then 1 else 2 end else 3 end → 2 */
+    assert_eval_number("if true then if false then 1 else 2 end else 3 end", 2.0, "nested if");
+}
+
+TEST(test_if_nested_outer_false) {
+    /* if false then if true then 1 else 2 end else 3 end → 3 */
+    assert_eval_number("if false then if true then 1 else 2 end else 3 end", 3.0,
+                       "nested if outer false");
+}
+
+TEST(test_if_else_if) {
+    /* if false then 1 else if true then 2 else 3 end → 2 */
+    assert_eval_number("if false then 1 else if true then 2 else 3 end", 2.0, "else if");
+}
+
+TEST(test_if_else_if_chain) {
+    /* if false then 1 else if false then 2 else 3 end → 3 */
+    assert_eval_number("if false then 1 else if false then 2 else 3 end", 3.0, "else if chain");
+}
+
+TEST(test_if_short_circuit_then) {
+    /* Side effects only in taken branch:
+       if false then my x_sc_then = 1 end
+       x_sc_then → error (not defined) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if false then\nmy x_sc_then = 1\nend\nx_sc_then", &node, &perr),
+           "parse short-circuit if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "x_sc_then should not be defined");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_short_circuit_else) {
+    /* Side effects only in taken branch:
+       if true then 1 else my y_sc_else = 2 end
+       y_sc_else → error (not defined) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if true then 1 else my y_sc_else = 2 end\ny_sc_else", &node, &perr),
+           "parse short-circuit else");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "y_sc_else should not be defined");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_truthy_number) {
+    /* if 1 then "yes" else "no" end → "yes" (1 is truthy) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if 1 then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "yes", "1 is truthy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_falsy_zero) {
+    /* if 0 then "yes" else "no" end → "no" (0 is falsy) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if 0 then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "no", "0 is falsy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_falsy_empty_string) {
+    /* if "" then "yes" else "no" end → "no" (empty string is falsy) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if \"\" then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "no", "empty string is falsy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_falsy_nothing) {
+    /* if nothing then "yes" else "no" end → "no" (nothing is falsy) */
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("if nothing then \"yes\" else \"no\" end", &node, &perr), "parse if");
+    Value v = eval(node);
+    ast_free(node);
+    ASSERT(v.type == VAL_STRING, "should be string");
+    ASSERT_STR_EQ(v.string, "no", "nothing is falsy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_if_in_expression) {
+    /* 1 + if true then 2 else 3 end → 3 */
+    assert_eval_number("1 + if true then 2 else 3 end", 3.0, "if in expression");
+}
+
+TEST(test_if_complex_condition) {
+    /* if 1 < 2 and 3 > 0 then 100 else 0 end → 100 */
+    assert_eval_number("if 1 < 2 and 3 > 0 then 100 else 0 end", 100.0, "complex condition");
+}
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -739,6 +918,28 @@ int main(void) {
     RUN_TEST(test_block_with_comparison);
     RUN_TEST(test_block_with_logic);
     RUN_TEST(test_block_single_expr_not_wrapped);
+
+    printf("\nIf/else expressions:\n");
+    RUN_TEST(test_if_true_then_else);
+    RUN_TEST(test_if_false_then_else);
+    RUN_TEST(test_if_false_no_else);
+    RUN_TEST(test_if_true_no_else);
+    RUN_TEST(test_if_comparison_cond);
+    RUN_TEST(test_if_comparison_cond_false);
+    RUN_TEST(test_if_in_assignment);
+    RUN_TEST(test_if_multiline_body);
+    RUN_TEST(test_if_nested_inner_taken);
+    RUN_TEST(test_if_nested_outer_false);
+    RUN_TEST(test_if_else_if);
+    RUN_TEST(test_if_else_if_chain);
+    RUN_TEST(test_if_short_circuit_then);
+    RUN_TEST(test_if_short_circuit_else);
+    RUN_TEST(test_if_truthy_number);
+    RUN_TEST(test_if_falsy_zero);
+    RUN_TEST(test_if_falsy_empty_string);
+    RUN_TEST(test_if_falsy_nothing);
+    RUN_TEST(test_if_in_expression);
+    RUN_TEST(test_if_complex_condition);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);
