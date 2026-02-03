@@ -953,6 +953,7 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
         /* Parse next expression */
         expr = parse_assignment(&p);
         if (p.has_error || !expr) {
+            ast_free(expr); /* Free expr if it was partially allocated before error */
             free_expr_array(&exprs);
             tokenizer_destroy(tok);
             return false;
@@ -1261,4 +1262,117 @@ char *ast_format(const AstNode *node) {
     snprintf(buf, len, "AST %s", node_str);
     free(node_str);
     return buf;
+}
+
+/*
+ * Check if input is a complete expression (for REPL multiline support).
+ *
+ * Returns true if input parses successfully or has a "real" syntax error.
+ * Returns false if input is incomplete and could be completed by adding more.
+ *
+ * Incomplete patterns detected:
+ *   - Unterminated string (tokenizer error)
+ *   - Expected expression at EOF (trailing operator, empty after keyword)
+ *   - Expected ')' (unclosed parenthesis)
+ *   - Expected 'then', 'end', 'else' (unclosed if/then/else)
+ */
+/*
+ * Helper: check if string contains only whitespace (spaces, tabs, newlines).
+ */
+static bool is_whitespace_only(const char *s) {
+    while (*s) {
+        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r') {
+            return false;
+        }
+        s++;
+    }
+    return true;
+}
+
+bool parser_is_complete(const char *input) {
+    /* NULL or empty input is considered complete (empty is an error, but not incomplete) */
+    if (!input || *input == '\0') {
+        return true;
+    }
+
+    /* Whitespace-only input is also complete (empty error, not incomplete) */
+    if (is_whitespace_only(input)) {
+        return true;
+    }
+
+    /* Try to parse the input */
+    AstNode *node = NULL;
+    ParseError err = {0};
+    bool parsed = parser_parse(input, &node, &err);
+
+    if (parsed) {
+        /* Parsed successfully - complete */
+        ast_free(node);
+        return true;
+    }
+
+    /* Parse failed - check if it's an incomplete input or a real error.
+     *
+     * Incomplete indicators (could be fixed by adding more input):
+     * - "unterminated string" - needs closing quote
+     * - "expected expression, got EOF" - needs more expression (trailing op)
+     * - "expected ')'" - needs closing paren
+     * - "expected 'then'" at EOF - needs then keyword
+     * - "expected 'end'" at EOF - needs end keyword
+     * - "expected 'else' or 'end'" - needs else/end
+     * - "expected expression in '...' body" at EOF - needs body
+     *
+     * Real errors (can't be fixed by adding more):
+     * - "unexpected extra token" - too much input
+     * - "expected condition after 'if'" - missing required part, not at EOF
+     * - Other structural errors
+     */
+
+    const char *msg = err.message;
+
+    /* Unterminated string is always incomplete */
+    if (strstr(msg, "unterminated string") != NULL) {
+        return false;
+    }
+
+    /* "expected expression, got EOF" means we need more input */
+    if (strcmp(msg, "expected expression, got EOF") == 0) {
+        return false;
+    }
+
+    /* "expected expression, got newline" at the end of input means incomplete */
+    if (strcmp(msg, "expected expression, got newline") == 0) {
+        return false;
+    }
+
+    /* Check for "expected '...'" patterns that indicate unclosed constructs.
+     * These are incomplete only if we're expecting something that can be added.
+     * We distinguish by checking if the message suggests EOF was reached. */
+    if (strstr(msg, "expected ')'") != NULL) {
+        /* Unclosed parenthesis - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'then'") != NULL) {
+        /* if without then - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'end'") != NULL) {
+        /* if/else without end - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'else' or 'end'") != NULL) {
+        /* if body without else/end - incomplete */
+        return false;
+    }
+
+    /* "expected expression in '...' body" means empty body - but we need to
+     * distinguish between "if true then else" (real error) and "if true then"
+     * followed by EOF (incomplete). The former produces this error when 'else'
+     * is the next token; the latter produces "expected expression, got EOF". */
+
+    /* Default: treat as complete (real syntax error) */
+    return true;
 }

@@ -73,4 +73,22 @@ const char *ast_node_type_str(AstNodeType type);
  */
 char *ast_format(const AstNode *node);
 
+/*
+ * Check if input is a complete expression (for REPL multiline support).
+ *
+ * Returns true if:
+ *   - Input parses successfully, OR
+ *   - Input has a syntax error that cannot be fixed by adding more input
+ *
+ * Returns false if input is incomplete:
+ *   - Unclosed if/end
+ *   - Unmatched parentheses
+ *   - Unterminated string
+ *   - Trailing operator expecting more input
+ *
+ * This is used by the REPL client to determine whether to continue reading
+ * input (incomplete) or send to the server (complete).
+ */
+bool parser_is_complete(const char *input);
+
 #endif /* CUTLET_PARSER_H */

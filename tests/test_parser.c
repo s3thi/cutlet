@@ -1087,6 +1087,164 @@ TEST(test_ast_free_null) {
 }
 
 /* ============================================================
+ * parser_is_complete() tests
+ *
+ * This function is used by the REPL to determine whether to
+ * continue reading input (incomplete) or send to server (complete).
+ *
+ * Returns true if:
+ *   - Input parses successfully, OR
+ *   - Input has a "real" syntax error that can't be fixed by adding more
+ *
+ * Returns false if:
+ *   - Input is incomplete and could be completed by adding more
+ *   - Examples: unclosed if/end, unmatched parens, unterminated string
+ * ============================================================ */
+
+/* Complete: parses successfully */
+TEST(test_is_complete_simple_expr) {
+    ASSERT(parser_is_complete("1 + 2"), "simple expression should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_declaration) {
+    ASSERT(parser_is_complete("my x = 5"), "declaration should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_if_with_end) {
+    ASSERT(parser_is_complete("if true then 1 end"), "if with end should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_if_else_with_end) {
+    ASSERT(parser_is_complete("if true then 1 else 2 end"), "if/else with end should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_multiline_if) {
+    ASSERT(parser_is_complete("if true then\n1\nend"), "multiline if should be complete");
+    PASS();
+}
+
+/* Complete: syntax errors that can't be fixed by adding more */
+TEST(test_is_complete_missing_condition) {
+    /* "if then end" is missing condition - can't fix by appending */
+    ASSERT(parser_is_complete("if then end"), "missing condition is a real error");
+    PASS();
+}
+
+TEST(test_is_complete_extra_tokens) {
+    /* "foo bar" has unexpected token - can't fix by appending */
+    ASSERT(parser_is_complete("foo bar"), "extra tokens is a real error");
+    PASS();
+}
+
+TEST(test_is_complete_empty_then_body) {
+    /* "if true then else 1 end" has empty then body - can't fix by appending */
+    ASSERT(parser_is_complete("if true then else 1 end"), "empty then body is a real error");
+    PASS();
+}
+
+TEST(test_is_complete_empty_input) {
+    /* Empty input is complete (error, but not incomplete) */
+    ASSERT(parser_is_complete(""), "empty input should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_whitespace_only) {
+    /* Whitespace-only is complete (error, but not incomplete) */
+    ASSERT(parser_is_complete("   "), "whitespace only should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_extra_close_paren) {
+    /* Extra close paren can't be fixed by adding more */
+    ASSERT(parser_is_complete("1 + 2)"), "extra close paren is a real error");
+    PASS();
+}
+
+/* Incomplete: could be completed by adding more input */
+TEST(test_is_incomplete_trailing_op) {
+    /* "1 +" needs more input to complete */
+    ASSERT(!parser_is_complete("1 +"), "trailing operator should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_if_no_then) {
+    /* "if true" needs "then body end" */
+    ASSERT(!parser_is_complete("if true"), "if without then should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_if_no_body) {
+    /* "if true then" needs body and end */
+    ASSERT(!parser_is_complete("if true then"), "if without body should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_if_no_end) {
+    /* "if true then 1" needs end */
+    ASSERT(!parser_is_complete("if true then 1"), "if without end should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_if_else_no_body) {
+    /* "if true then 1 else" needs else body and end */
+    ASSERT(!parser_is_complete("if true then 1 else"),
+           "if/else without else body should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_unclosed_paren) {
+    /* "(1 + 2" needs closing paren */
+    ASSERT(!parser_is_complete("(1 + 2"), "unclosed paren should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_unterminated_string) {
+    /* '"hello' needs closing quote */
+    ASSERT(!parser_is_complete("\"hello"), "unterminated string should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_decl_no_value) {
+    /* "my x =" needs value */
+    ASSERT(!parser_is_complete("my x ="), "declaration without value should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_just_if) {
+    /* "if" alone needs everything */
+    ASSERT(!parser_is_complete("if"), "just 'if' should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_trailing_and) {
+    /* "1 and" needs right operand */
+    ASSERT(!parser_is_complete("1 and"), "trailing 'and' should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_trailing_not) {
+    /* "not" alone needs operand */
+    ASSERT(!parser_is_complete("not"), "'not' alone should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_nested_unclosed_parens) {
+    /* "((1 + 2)" needs another closing paren */
+    ASSERT(!parser_is_complete("((1 + 2)"), "nested unclosed parens should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_multiline_unclosed_if) {
+    /* Multiline if without end */
+    ASSERT(!parser_is_complete("if true then\n1"), "multiline if without end should be incomplete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1249,6 +1407,34 @@ int main(void) {
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);
+
+    printf("\nparser_is_complete() - complete inputs:\n");
+    RUN_TEST(test_is_complete_simple_expr);
+    RUN_TEST(test_is_complete_declaration);
+    RUN_TEST(test_is_complete_if_with_end);
+    RUN_TEST(test_is_complete_if_else_with_end);
+    RUN_TEST(test_is_complete_multiline_if);
+    RUN_TEST(test_is_complete_missing_condition);
+    RUN_TEST(test_is_complete_extra_tokens);
+    RUN_TEST(test_is_complete_empty_then_body);
+    RUN_TEST(test_is_complete_empty_input);
+    RUN_TEST(test_is_complete_whitespace_only);
+    RUN_TEST(test_is_complete_extra_close_paren);
+
+    printf("\nparser_is_complete() - incomplete inputs:\n");
+    RUN_TEST(test_is_incomplete_trailing_op);
+    RUN_TEST(test_is_incomplete_if_no_then);
+    RUN_TEST(test_is_incomplete_if_no_body);
+    RUN_TEST(test_is_incomplete_if_no_end);
+    RUN_TEST(test_is_incomplete_if_else_no_body);
+    RUN_TEST(test_is_incomplete_unclosed_paren);
+    RUN_TEST(test_is_incomplete_unterminated_string);
+    RUN_TEST(test_is_incomplete_decl_no_value);
+    RUN_TEST(test_is_incomplete_just_if);
+    RUN_TEST(test_is_incomplete_trailing_and);
+    RUN_TEST(test_is_incomplete_trailing_not);
+    RUN_TEST(test_is_incomplete_nested_unclosed_parens);
+    RUN_TEST(test_is_incomplete_multiline_unclosed_if);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

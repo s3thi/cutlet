@@ -11,6 +11,13 @@ LDFLAGS =
 SRC_DIR = src
 TEST_DIR = tests
 BUILD_DIR = build
+VENDOR_DIR = vendor
+
+# Vendor source files (isocline for multiline REPL input)
+# Isocline expects: include/ for public header, src/ for implementation
+ISOCLINE_DIR = $(VENDOR_DIR)/isocline
+ISOCLINE_SRC = $(ISOCLINE_DIR)/src/isocline.c
+ISOCLINE_CFLAGS = -I$(ISOCLINE_DIR)/include -I$(ISOCLINE_DIR)/src
 
 # Library source files (everything except main.c)
 LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/eval.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c
@@ -54,9 +61,9 @@ $(BUILD_DIR):
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Build the main cutlet binary
-$(BIN): $(MAIN_SRC) $(LIB_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
+# Build the main cutlet binary (includes isocline for REPL multiline support)
+$(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(ISOCLINE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) $(LDFLAGS) -pthread -lm
 
 # Build and run all tests
 .PHONY: test
@@ -132,8 +139,8 @@ $(TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $(BUILD_DI
 
 # ---------- Formatting (clang-format) ----------
 
-# All tracked C source and header files.
-FORMAT_FILES = $(shell git ls-files '*.c' '*.h')
+# All tracked C source and header files, excluding vendor/ (third-party code).
+FORMAT_FILES = $(shell git ls-files '*.c' '*.h' | grep -v '^vendor/')
 
 # Apply formatting in-place.
 .PHONY: format
@@ -165,7 +172,8 @@ compile-db: compile_commands.json
 CLANG_TIDY ?= $(shell command -v /opt/homebrew/opt/llvm/bin/clang-tidy 2>/dev/null || echo clang-tidy)
 
 # Only lint .c translation units; headers are checked indirectly via includes.
-LINT_FILES = $(shell git ls-files '*.c')
+# Excludes vendor/ directory (third-party code like isocline).
+LINT_FILES = $(shell git ls-files '*.c' | grep -v '^vendor/')
 
 # Lint depends on the compile database, which is rebuilt automatically if needed.
 .PHONY: lint
@@ -195,8 +203,8 @@ $(SANITIZE_BUILD_DIR):
 	mkdir -p $(SANITIZE_BUILD_DIR)
 
 # Build sanitizer-instrumented binaries.
-$(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
+$(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) $(ISOCLINE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)

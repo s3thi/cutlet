@@ -27,7 +27,7 @@
  */
 typedef struct {
     unsigned long id;
-    char *expr; /* owned, caller must free */
+    char *expr; /* owned when parsed, NULL to free; borrowed when encoding */
     bool want_tokens;
     bool want_ast;
 } JsonRequest;

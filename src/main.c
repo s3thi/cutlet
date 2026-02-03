@@ -19,21 +19,34 @@
  */
 
 #include "json.h"
+#include "parser.h"
 #include "repl.h"
 #include "repl_server.h"
 #include "runtime.h"
 
+#include <isocline.h>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* Maximum line length for input. */
 #define MAX_LINE_LEN 4096
+
+/* Maximum buffer size for accumulated multiline input.
+ * Cast to size_t to avoid implicit widening conversion warnings. */
+#define MAX_INPUT_BUF ((size_t)MAX_LINE_LEN * 64)
+
+/* History file location: ~/.cutlet/history */
+#define CUTLET_DIR ".cutlet"
+#define HISTORY_FILE "history"
 
 /* Default host and port for --listen / --connect. */
 #define DEFAULT_HOST "127.0.0.1"
@@ -108,6 +121,56 @@ static bool parse_host_port(const char *arg, char *host_buf, size_t host_buf_len
     return true;
 }
 
+/*
+ * Get the path to the history file (~/.cutlet/history).
+ * Creates the ~/.cutlet directory if it doesn't exist.
+ * Returns a heap-allocated string on success, NULL on failure.
+ */
+static char *get_history_path(void) {
+    /* Get home directory */
+    const char *home = getenv("HOME");
+    if (!home) {
+        struct passwd *pw = getpwuid(getuid());
+        if (pw) {
+            home = pw->pw_dir;
+        }
+    }
+    if (!home) {
+        return NULL;
+    }
+
+    /* Build path: $HOME/.cutlet/history */
+    size_t home_len = strlen(home);
+    size_t dir_len = home_len + 1 + strlen(CUTLET_DIR);
+    size_t path_len = dir_len + 1 + strlen(HISTORY_FILE) + 1;
+
+    char *dir_path = malloc(dir_len + 1);
+    if (!dir_path) {
+        return NULL;
+    }
+    snprintf(dir_path, dir_len + 1, "%s/%s", home, CUTLET_DIR);
+
+    /* Create directory if it doesn't exist */
+    struct stat st;
+    if (stat(dir_path, &st) != 0) {
+        if (mkdir(dir_path, 0755) != 0) {
+            free(dir_path);
+            return NULL;
+        }
+    }
+
+    /* Build full path */
+    char *path = malloc(path_len);
+    if (!path) {
+        free(dir_path);
+        return NULL;
+    }
+    snprintf(path, path_len, "%s/%s", dir_path, HISTORY_FILE);
+    free(dir_path);
+
+    return path;
+}
+
 /* Global server handle for signal-based shutdown. */
 static ReplServer *g_server = NULL;
 
@@ -153,11 +216,203 @@ static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
 }
 
 /*
+ * Helper: send an expression to the server and print the response.
+ * Returns true on success, false if connection is lost.
+ */
+static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool want_tokens,
+                           bool want_ast, bool *warned_extra_tokens, bool *warned_extra_ast) {
+    (*req_id)++;
+    /* Cast expr to char* for JsonRequest; we don't call json_request_free so it's safe */
+    JsonRequest req = {
+        .id = *req_id,
+        .expr = (char *)expr,
+        .want_tokens = want_tokens,
+        .want_ast = want_ast,
+    };
+    char *req_json = json_encode_request(&req);
+    if (!req_json) {
+        fprintf(stderr, "Error: failed to encode request\n");
+        return true; /* Not a connection error, continue */
+    }
+
+    if (!json_frame_write(fd, req_json, strlen(req_json))) {
+        free(req_json);
+        fprintf(stderr, "Error: connection lost\n");
+        return false;
+    }
+    free(req_json);
+
+    /* Read JSON response. */
+    size_t resp_len = 0;
+    char *resp_json = json_frame_read(fd, &resp_len, NULL);
+    if (!resp_json) {
+        fprintf(stderr, "Error: connection lost\n");
+        return false;
+    }
+
+    JsonResponse resp;
+    if (!json_parse_response(resp_json, resp_len, &resp)) {
+        fprintf(stderr, "Error: invalid response from server\n");
+        free(resp_json);
+        return false;
+    }
+    free(resp_json);
+
+    /* Warn once if server sends debug fields client didn't request. */
+    if (!want_tokens && resp.tokens && !*warned_extra_tokens) {
+        fprintf(stderr, "Warning: server sent token debug output (not requested)\n");
+        *warned_extra_tokens = true;
+    }
+    if (!want_ast && resp.ast && !*warned_extra_ast) {
+        fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
+        *warned_extra_ast = true;
+    }
+
+    /* Print output in order: tokens, ast, value/error. */
+    if (want_tokens && resp.tokens) {
+        puts(resp.tokens);
+    }
+    if (want_ast && resp.ast) {
+        puts(resp.ast);
+    }
+
+    if (resp.ok) {
+        if (resp.value) {
+            puts(resp.value);
+        }
+        /* value==NULL means blank input; print nothing. */
+    } else {
+        if (resp.error) {
+            printf("ERR %s\n", resp.error);
+        }
+    }
+    fflush(stdout);
+
+    json_response_free(&resp);
+    return true;
+}
+
+/*
+ * Run the REPL client in interactive mode (TTY) using isocline.
+ * Supports multiline input with continuation prompts.
+ */
+static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
+    unsigned long req_id = 0;
+    bool warned_extra_tokens = false;
+    bool warned_extra_ast = false;
+
+    /* Initialize isocline */
+    char *history_path = get_history_path();
+    if (history_path) {
+        ic_set_history(history_path, 200);
+        free(history_path);
+    }
+
+    /* Disable isocline's built-in multiline mode; we handle continuation ourselves */
+    ic_enable_multiline(false);
+
+    /* Buffer for accumulating multiline input */
+    char *input_buf = malloc(MAX_INPUT_BUF);
+    if (!input_buf) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        return 1;
+    }
+    input_buf[0] = '\0';
+    size_t input_len = 0;
+    bool continuing = false;
+
+    while (1) {
+        /* Choose prompt based on whether we're continuing a multiline expression */
+        const char *prompt = continuing ? "    ... " : "cutlet> ";
+        char *line = ic_readline(prompt);
+
+        if (!line) {
+            /* EOF (Ctrl+D) or error */
+            if (input_len > 0) {
+                /* Send any accumulated incomplete input to get error message */
+                if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast,
+                                    &warned_extra_tokens, &warned_extra_ast)) {
+                    free(input_buf);
+                    return 1;
+                }
+            }
+            break;
+        }
+
+        /* Append line to input buffer, adding newline if continuing */
+        size_t line_len = strlen(line);
+        if (input_len + line_len + 2 >= MAX_INPUT_BUF) {
+            fprintf(stderr, "Error: input too long\n");
+            ic_free(line);
+            input_buf[0] = '\0';
+            input_len = 0;
+            continuing = false;
+            continue;
+        }
+
+        if (continuing && input_len > 0) {
+            /* Add newline separator between lines */
+            input_buf[input_len++] = '\n';
+        }
+        memcpy(input_buf + input_len, line, line_len);
+        input_len += line_len;
+        input_buf[input_len] = '\0';
+        ic_free(line);
+
+        /* Check if input is complete */
+        if (parser_is_complete(input_buf)) {
+            /* Input is complete (or has a real error), send to server */
+            if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast, &warned_extra_tokens,
+                                &warned_extra_ast)) {
+                free(input_buf);
+                return 1;
+            }
+            /* Reset buffer for next expression */
+            input_buf[0] = '\0';
+            input_len = 0;
+            continuing = false;
+        } else {
+            /* Input is incomplete, continue reading */
+            continuing = true;
+        }
+    }
+
+    free(input_buf);
+    return 0;
+}
+
+/*
+ * Run the REPL client in non-interactive mode (pipe/file).
+ * Reads line by line without accumulation (original behavior).
+ */
+static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
+    char line[MAX_LINE_LEN];
+    unsigned long req_id = 0;
+    bool warned_extra_tokens = false;
+    bool warned_extra_ast = false;
+
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        /* Strip trailing newline/CRLF. */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        if (!send_and_print(fd, line, &req_id, want_tokens, want_ast, &warned_extra_tokens,
+                            &warned_extra_ast)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/*
  * Run the REPL client.
  * Connects to a running TCP REPL server, reads expressions from stdin,
  * sends JSON-framed requests, and prints results.
  *
- * Shows a "cutlet> " prompt when stdin is a TTY.
+ * Uses isocline for interactive input with multiline support when stdin is a TTY.
  */
 static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
     char host[256];
@@ -190,102 +445,15 @@ static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
         return 1;
     }
 
-    int is_tty = isatty(fileno(stdin));
-    char line[MAX_LINE_LEN];
-    unsigned long req_id = 0;
-    bool warned_extra_tokens = false;
-    bool warned_extra_ast = false;
-
-    while (1) {
-        if (is_tty) {
-            printf("cutlet> ");
-            fflush(stdout);
-        }
-
-        if (fgets(line, sizeof(line), stdin) == NULL)
-            break;
-
-        /* Strip trailing newline/CRLF. */
-        size_t len = strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-            line[--len] = '\0';
-        }
-
-        /* Build and send JSON request. */
-        req_id++;
-        JsonRequest req = {
-            .id = req_id,
-            .expr = line,
-            .want_tokens = want_tokens,
-            .want_ast = want_ast,
-        };
-        char *req_json = json_encode_request(&req);
-        if (!req_json) {
-            fprintf(stderr, "Error: failed to encode request\n");
-            continue;
-        }
-
-        if (!json_frame_write(fd, req_json, strlen(req_json))) {
-            free(req_json);
-            fprintf(stderr, "Error: connection lost\n");
-            close(fd);
-            return 1;
-        }
-        free(req_json);
-
-        /* Read JSON response. */
-        size_t resp_len = 0;
-        char *resp_json = json_frame_read(fd, &resp_len, NULL);
-        if (!resp_json) {
-            fprintf(stderr, "Error: connection lost\n");
-            close(fd);
-            return 1;
-        }
-
-        JsonResponse resp;
-        if (!json_parse_response(resp_json, resp_len, &resp)) {
-            fprintf(stderr, "Error: invalid response from server\n");
-            free(resp_json);
-            close(fd);
-            return 1;
-        }
-        free(resp_json);
-
-        /* Warn once if server sends debug fields client didn't request. */
-        if (!want_tokens && resp.tokens && !warned_extra_tokens) {
-            fprintf(stderr, "Warning: server sent token debug output (not requested)\n");
-            warned_extra_tokens = true;
-        }
-        if (!want_ast && resp.ast && !warned_extra_ast) {
-            fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
-            warned_extra_ast = true;
-        }
-
-        /* Print output in order: tokens, ast, value/error. */
-        if (want_tokens && resp.tokens) {
-            puts(resp.tokens);
-        }
-        if (want_ast && resp.ast) {
-            puts(resp.ast);
-        }
-
-        if (resp.ok) {
-            if (resp.value) {
-                puts(resp.value);
-            }
-            /* value==NULL means blank input; print nothing. */
-        } else {
-            if (resp.error) {
-                printf("ERR %s\n", resp.error);
-            }
-        }
-        fflush(stdout);
-
-        json_response_free(&resp);
+    int result;
+    if (isatty(fileno(stdin))) {
+        result = run_connect_interactive(fd, want_tokens, want_ast);
+    } else {
+        result = run_connect_pipe(fd, want_tokens, want_ast);
     }
 
     close(fd);
-    return 0;
+    return result;
 }
 
 int main(int argc, char *argv[]) {
