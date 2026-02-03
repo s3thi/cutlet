@@ -794,6 +794,86 @@ TEST(test_nothing_decl_error) {
 }
 
 /* ============================================================
+ * Multi-line input / AST_BLOCK tests (Step 2)
+ * ============================================================ */
+
+TEST(test_block_two_stmts) {
+    /* Two statements separated by newline → AST_BLOCK */
+    ASSERT(ast_matches("1\n2", "AST [BLOCK [NUMBER 1] [NUMBER 2]]"), "two statements");
+    PASS();
+}
+
+TEST(test_block_three_stmts) {
+    /* Three statements */
+    ASSERT(ast_matches("1\n2\n3", "AST [BLOCK [NUMBER 1] [NUMBER 2] [NUMBER 3]]"), "three stmts");
+    PASS();
+}
+
+TEST(test_block_single_no_wrap) {
+    /* Single expression (no newlines) should NOT be wrapped in block */
+    ASSERT(ast_matches("42", "AST [NUMBER 42]"), "single expr no wrap");
+    PASS();
+}
+
+TEST(test_block_single_trailing_newline) {
+    /* Single expression with trailing newline should NOT be wrapped */
+    ASSERT(ast_matches("42\n", "AST [NUMBER 42]"), "trailing newline no wrap");
+    PASS();
+}
+
+TEST(test_block_single_leading_newline) {
+    /* Single expression with leading newline should NOT be wrapped */
+    ASSERT(ast_matches("\n42", "AST [NUMBER 42]"), "leading newline no wrap");
+    PASS();
+}
+
+TEST(test_block_blank_lines_ignored) {
+    /* Blank lines between expressions are ignored */
+    ASSERT(ast_matches("1\n\n\n2", "AST [BLOCK [NUMBER 1] [NUMBER 2]]"), "blank lines ignored");
+    PASS();
+}
+
+TEST(test_block_only_blank_lines) {
+    /* Only blank lines → parse error (no expression) */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("\n\n\n", &node, &err), "only blank lines should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_block_with_decl) {
+    /* Declaration followed by expression */
+    ASSERT(ast_matches("my x = 1\nx + 2",
+                       "AST [BLOCK [DECL x [NUMBER 1]] [BINOP + [IDENT x] [NUMBER 2]]]"),
+           "decl then expr");
+    PASS();
+}
+
+TEST(test_block_with_assign) {
+    /* Multiple declarations */
+    ASSERT(ast_matches("my x = 1\nmy y = 2\nx + y",
+                       "AST [BLOCK [DECL x [NUMBER 1]] [DECL y [NUMBER 2]] "
+                       "[BINOP + [IDENT x] [IDENT y]]]"),
+           "multiple decls");
+    PASS();
+}
+
+TEST(test_block_complex_exprs) {
+    /* Complex expressions on multiple lines */
+    ASSERT(ast_matches("1 + 2\n3 * 4", "AST [BLOCK [BINOP + [NUMBER 1] [NUMBER 2]] "
+                                       "[BINOP * [NUMBER 3] [NUMBER 4]]]"),
+           "complex exprs");
+    PASS();
+}
+
+TEST(test_block_mixed_whitespace) {
+    /* Spaces and tabs on lines, newlines between */
+    ASSERT(ast_matches("  1  \n  2  ", "AST [BLOCK [NUMBER 1] [NUMBER 2]]"), "mixed whitespace");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -920,6 +1000,19 @@ int main(void) {
     RUN_TEST(test_nothing_ast_format);
     RUN_TEST(test_nothing_assign_error);
     RUN_TEST(test_nothing_decl_error);
+
+    printf("\nMulti-line input / AST_BLOCK:\n");
+    RUN_TEST(test_block_two_stmts);
+    RUN_TEST(test_block_three_stmts);
+    RUN_TEST(test_block_single_no_wrap);
+    RUN_TEST(test_block_single_trailing_newline);
+    RUN_TEST(test_block_single_leading_newline);
+    RUN_TEST(test_block_blank_lines_ignored);
+    RUN_TEST(test_block_only_blank_lines);
+    RUN_TEST(test_block_with_decl);
+    RUN_TEST(test_block_with_assign);
+    RUN_TEST(test_block_complex_exprs);
+    RUN_TEST(test_block_mixed_whitespace);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

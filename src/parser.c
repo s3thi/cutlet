@@ -93,6 +93,8 @@ static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len)
     node->left = NULL;
     node->right = NULL;
     node->grouped = false;
+    node->children = NULL;
+    node->child_count = 0;
     return node;
 }
 
@@ -114,6 +116,8 @@ static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode
     node->left = left;
     node->right = right;
     node->grouped = false;
+    node->children = NULL;
+    node->child_count = 0;
     return node;
 }
 
@@ -135,6 +139,8 @@ static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
     node->left = operand;
     node->right = NULL;
     node->grouped = false;
+    node->children = NULL;
+    node->child_count = 0;
     return node;
 }
 
@@ -156,6 +162,26 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
     node->left = expr;
     node->right = NULL;
     node->grouped = false;
+    node->children = NULL;
+    node->child_count = 0;
+    return node;
+}
+
+/*
+ * Create a block AST node containing an array of child expressions.
+ * Takes ownership of the children array and all nodes within it.
+ */
+static AstNode *make_block(AstNode **children, size_t count) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = AST_BLOCK;
+    node->value = NULL;
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->children = children;
+    node->child_count = count;
     return node;
 }
 
@@ -262,6 +288,12 @@ static AstNode *parse_atom(Parser *p) {
     /* Handle EOF */
     if (t.type == TOK_EOF) {
         parser_error(p, t.line, t.col, "expected expression, got EOF");
+        return NULL;
+    }
+
+    /* Handle unexpected newline in expression position */
+    if (t.type == TOK_NEWLINE) {
+        parser_error(p, t.line, t.col, "expected expression, got newline");
         return NULL;
     }
 
@@ -545,6 +577,25 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
  * Public API
  * ============================================================ */
 
+/*
+ * Helper: skip any consecutive newline tokens.
+ */
+static void skip_newlines(Parser *p) {
+    while (p->current.type == TOK_NEWLINE) {
+        advance(p);
+    }
+}
+
+/*
+ * Helper: free an array of expressions (used during cleanup on error).
+ */
+static void free_expr_array(AstNode **exprs, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        ast_free(exprs[i]);
+    }
+    free((void *)exprs); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+}
+
 bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     if (!out) {
         if (err) {
@@ -581,34 +632,128 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     /* Prime the lookahead */
     advance(&p);
 
-    /* Parse the full expression */
-    AstNode *result = parse_assignment(&p);
+    /* Skip leading newlines */
+    skip_newlines(&p);
 
-    if (p.has_error) {
-        ast_free(result);
+    /* Check for empty input (only newlines/whitespace) */
+    if (p.current.type == TOK_EOF) {
+        parser_error(&p, p.current.line, p.current.col, "expected expression, got EOF");
         tokenizer_destroy(tok);
         return false;
     }
 
-    /* Check for trailing tokens */
+    /* Parse newline-separated expressions into a dynamic array */
+    size_t capacity = 4;
+    size_t count = 0;
+    // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+    AstNode **exprs = (AstNode **)malloc(capacity * sizeof(AstNode *));
+    if (!exprs) {
+        parser_error(&p, 1, 1, "memory allocation failed");
+        tokenizer_destroy(tok);
+        return false;
+    }
+
+    /* Parse first expression */
+    AstNode *expr = parse_assignment(&p);
+    if (p.has_error || !expr) {
+        ast_free(expr); /* Free expr if it was allocated before error */
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        free((void *)exprs);
+        tokenizer_destroy(tok);
+        return false;
+    }
+    exprs[count++] = expr;
+
+    /* Parse additional newline-separated expressions */
+    while (!p.has_error && p.current.type == TOK_NEWLINE) {
+        /* Skip consecutive newlines (blank lines) */
+        skip_newlines(&p);
+
+        /* Check if we've reached EOF after newlines */
+        if (p.current.type == TOK_EOF) {
+            break;
+        }
+
+        /* Check for tokenizer error */
+        if (p.current.type == TOK_ERROR) {
+            parser_error(&p, p.current.line, p.current.col, "%.*s", (int)p.current.value_len,
+                         p.current.value);
+            free_expr_array(exprs, count);
+            tokenizer_destroy(tok);
+            return false;
+        }
+
+        /* Parse next expression */
+        expr = parse_assignment(&p);
+        if (p.has_error || !expr) {
+            free_expr_array(exprs, count);
+            tokenizer_destroy(tok);
+            return false;
+        }
+
+        /* Grow array if needed */
+        if (count >= capacity) {
+            capacity *= 2;
+            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+            AstNode **new_exprs = (AstNode **)realloc((void *)exprs, capacity * sizeof(AstNode *));
+            if (!new_exprs) {
+                ast_free(expr);
+                free_expr_array(exprs, count);
+                parser_error(&p, 1, 1, "memory allocation failed");
+                tokenizer_destroy(tok);
+                return false;
+            }
+            exprs = new_exprs;
+        }
+        exprs[count++] = expr;
+    }
+
+    if (p.has_error) {
+        free_expr_array(exprs, count);
+        tokenizer_destroy(tok);
+        return false;
+    }
+
+    /* Check for trailing tokens (not newline, not EOF) */
     if (p.current.type == TOK_ERROR) {
         parser_error(&p, p.current.line, p.current.col, "%.*s", (int)p.current.value_len,
                      p.current.value);
-        ast_free(result);
+        free_expr_array(exprs, count);
         tokenizer_destroy(tok);
         return false;
     }
 
-    if (p.current.type != TOK_EOF) {
+    if (p.current.type != TOK_EOF && p.current.type != TOK_NEWLINE) {
         parser_error(&p, p.current.line, p.current.col, "unexpected extra token '%.*s'",
                      (int)p.current.value_len, p.current.value);
-        ast_free(result);
+        free_expr_array(exprs, count);
         tokenizer_destroy(tok);
         return false;
     }
 
     tokenizer_destroy(tok);
-    *out = result;
+
+    /* If only one expression, return it directly (no block wrapper) */
+    if (count == 1) {
+        *out = exprs[0];
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        free((void *)exprs);
+        return true;
+    }
+
+    /* Multiple expressions: wrap in AST_BLOCK */
+    AstNode *block = make_block(exprs, count);
+    if (!block) {
+        free_expr_array(exprs, count);
+        if (err) {
+            err->line = 1;
+            err->col = 1;
+            snprintf(err->message, sizeof(err->message), "memory allocation failed");
+        }
+        return false;
+    }
+
+    *out = block;
     return true;
 }
 
@@ -617,6 +762,14 @@ void ast_free(AstNode *node) {
         return;
     ast_free(node->left);
     ast_free(node->right);
+    /* Free children array for AST_BLOCK nodes */
+    if (node->children) {
+        for (size_t i = 0; i < node->child_count; i++) {
+            ast_free(node->children[i]);
+        }
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        free((void *)node->children);
+    }
     free(node->value);
     free(node);
 }
@@ -641,6 +794,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "DECL";
     case AST_ASSIGN:
         return "ASSIGN";
+    case AST_BLOCK:
+        return "BLOCK";
     default:
         return "UNKNOWN";
     }
@@ -720,6 +875,53 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf, len, "[%s %s %s]", type_str, node->value, expr_str);
         free(expr_str);
+        return buf;
+    }
+
+    if (node->type == AST_BLOCK) {
+        /* Block: [BLOCK child1 child2 ...] */
+        /* First, format all children and calculate total length */
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        char **child_strs = (char **)malloc(node->child_count * sizeof(char *));
+        if (!child_strs)
+            return NULL;
+
+        size_t total_len = 1 + strlen(type_str); /* "[BLOCK" */
+        for (size_t i = 0; i < node->child_count; i++) {
+            child_strs[i] = ast_format_node(node->children[i]);
+            if (!child_strs[i]) {
+                /* Free already-allocated strings */
+                for (size_t j = 0; j < i; j++) {
+                    free(child_strs[j]);
+                }
+                // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+                free((void *)child_strs);
+                return NULL;
+            }
+            total_len += 1 + strlen(child_strs[i]); /* " child" */
+        }
+        total_len += 1 + 1; /* "]" + null terminator */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < node->child_count; i++) {
+                free(child_strs[i]);
+            }
+            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+            free((void *)child_strs);
+            return NULL;
+        }
+
+        /* Build the string */
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s", type_str);
+        for (size_t i = 0; i < node->child_count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", child_strs[i]);
+            free(child_strs[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        free((void *)child_strs);
         return buf;
     }
 

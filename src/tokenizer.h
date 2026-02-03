@@ -26,6 +26,7 @@ typedef enum {
     TOK_STRING,   /* Double-quoted string */
     TOK_IDENT,    /* Identifier (ASCII letters, digits, symbol sandwiches) */
     TOK_OPERATOR, /* Operator (symbol chars delimited by whitespace) */
+    TOK_NEWLINE,  /* Newline (\n, \r, or \r\n treated as single token) */
     TOK_EOF,      /* End of input */
     TOK_ERROR     /* Tokenization error */
 } TokenType;

@@ -330,6 +330,25 @@ Value eval(const AstNode *node) {
         return rhs;
     }
 
+    case AST_BLOCK: {
+        /* Evaluate each child expression in order, return value of last.
+         * Variables defined in earlier expressions are visible in later ones
+         * (blocks don't introduce a new scope). */
+        if (node->child_count == 0) {
+            return make_nothing();
+        }
+
+        Value result = make_nothing();
+        for (size_t i = 0; i < node->child_count; i++) {
+            value_free(&result);
+            result = eval(node->children[i]);
+            if (result.type == VAL_ERROR) {
+                return result; /* Stop on first error */
+            }
+        }
+        return result;
+    }
+
     default:
         return make_error("unknown AST node type");
     }

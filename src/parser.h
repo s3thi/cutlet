@@ -23,6 +23,7 @@ typedef enum {
     AST_UNARY,   /* unary: - (minus), not */
     AST_DECL,    /* declaration: my name = expr */
     AST_ASSIGN,  /* assignment: name = expr */
+    AST_BLOCK,   /* block: sequence of newline-separated expressions */
 } AstNodeType;
 
 typedef struct AstNode {
@@ -31,6 +32,10 @@ typedef struct AstNode {
     struct AstNode *left;  /* left operand (or sole operand for unary) */
     struct AstNode *right; /* right operand (NULL for unary/leaf) */
     bool grouped;          /* true if the node originated from parentheses */
+
+    /* For AST_BLOCK only: array of child expressions */
+    struct AstNode **children; /* owned array of owned nodes */
+    size_t child_count;        /* number of children */
 } AstNode;
 
 typedef struct {

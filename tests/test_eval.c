@@ -543,6 +543,50 @@ TEST(test_nothing_assign_error) { assert_eval_error("nothing = 1", "cannot assig
 TEST(test_nothing_decl_error) { assert_eval_error("my nothing = 1", "cannot declare nothing"); }
 
 /* ============================================================
+ * Multi-line input / AST_BLOCK evaluation (Step 2)
+ * ============================================================ */
+
+TEST(test_block_returns_last) {
+    /* Block returns value of last expression */
+    assert_eval_number("1\n2\n3", 3.0, "block returns last");
+}
+
+TEST(test_block_decl_then_use) {
+    /* Variable defined in first statement, used in second */
+    assert_eval_number("my x = 1\nx + 2", 3.0, "decl then use");
+}
+
+TEST(test_block_multiple_decls) {
+    /* Multiple declarations, then use */
+    assert_eval_number("my x = 1\nmy y = 2\nx + y", 3.0, "multiple decls");
+}
+
+TEST(test_block_reassign) {
+    /* Reassignment in block */
+    assert_eval_number("my x = 1\nx = 5\nx", 5.0, "reassign in block");
+}
+
+TEST(test_block_blank_lines) {
+    /* Blank lines don't affect result */
+    assert_eval_number("\n\n1 + 2\n\n", 3.0, "blank lines");
+}
+
+TEST(test_block_with_comparison) {
+    /* Block with comparison */
+    assert_eval_bool("my x = 10\nx > 5", true, "block with comparison");
+}
+
+TEST(test_block_with_logic) {
+    /* Block with logical operators */
+    assert_eval_bool("my x = true\nmy y = false\nx and not y", true, "block with logic");
+}
+
+TEST(test_block_single_expr_not_wrapped) {
+    /* Single expression should behave identically */
+    assert_eval_number("42", 42.0, "single expr");
+}
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -685,6 +729,16 @@ int main(void) {
     RUN_TEST(test_nothing_format);
     RUN_TEST(test_nothing_assign_error);
     RUN_TEST(test_nothing_decl_error);
+
+    printf("\nMulti-line input / AST_BLOCK:\n");
+    RUN_TEST(test_block_returns_last);
+    RUN_TEST(test_block_decl_then_use);
+    RUN_TEST(test_block_multiple_decls);
+    RUN_TEST(test_block_reassign);
+    RUN_TEST(test_block_blank_lines);
+    RUN_TEST(test_block_with_comparison);
+    RUN_TEST(test_block_with_logic);
+    RUN_TEST(test_block_single_expr_not_wrapped);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

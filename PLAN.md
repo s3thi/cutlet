@@ -62,34 +62,19 @@ Added `nothing` keyword, `AST_NOTHING` node type, and `VAL_NOTHING` value type. 
 - REPL output format: `OK nothing`
 - AST output: `AST [NOTHING nothing]`
 
-### Step 2: Multi-line input (newlines as statement separators)
+### Step 2: Multi-line input (newlines as statement separators) ✓ COMPLETE
 
-Currently each REPL line / input is parsed as a single expression. Add support for newline-separated sequences of expressions.
+**Implementation summary**:
+- **Tokenizer**: Added `TOK_NEWLINE` token type. `\n`, `\r`, and `\r\n` each emit a single `TOK_NEWLINE` token. Spaces and tabs remain whitespace (skipped).
+- **Parser**: Added `AST_BLOCK` node type with `children` array and `child_count`. `parser_parse()` collects newline-separated expressions. Single expressions are unwrapped (no block). Leading/trailing/consecutive newlines are skipped.
+- **Evaluator**: `AST_BLOCK` evaluates each child in order, returns value of last. Variables from earlier statements visible in later ones (no new scope).
+- **AST format**: `AST [BLOCK [child1] [child2] ...]`
 
-**Tokenizer**:
-- Add `TOK_NEWLINE` token type.
-- Emit `TOK_NEWLINE` when encountering `\n` (instead of treating it as whitespace).
-- Keep `\r`, `\t`, space as whitespace.
-
-**Parser**:
-- Add `AST_BLOCK` node type that holds an array of child expressions.
-- `parser_parse()` now parses a sequence of newline-separated expressions into `AST_BLOCK`.
-- A block with exactly one expression is unwrapped (no wrapper node) — so all existing single-expression tests pass unchanged.
-- Skip leading/trailing/consecutive newlines (blank lines are harmless).
-
-**Evaluator**:
-- `AST_BLOCK`: evaluate each child in order, return value of last child.
-- Empty block (all blank lines) returns nothing.
-
-**AST format**: `(block expr1 expr2 ...)` — only emitted when >1 expression.
-
-**Tests to write first**:
-- `"my x = 1\nx + 2"` → 3
-- `"my x = 1\nmy y = 2\nx + y"` → 3
-- `"\n\n1 + 2\n\n"` → 3 (blank lines ignored)
-- Single expression (no newlines) → same behavior as before, no block wrapper
-- All existing tests still pass
-- AST output for multi-line input
+**Tests added**:
+- Tokenizer: 9 new tests for TOK_NEWLINE (LF, CR, CRLF, multiple, leading, trailing, etc.)
+- Parser: 11 new tests for AST_BLOCK (two/three statements, single unwrap, blank lines, declarations, etc.)
+- Eval: 8 new tests for block evaluation (returns last, decl-then-use, reassign, comparisons, etc.)
+- Updated 4 existing tokenizer tests that assumed newlines were whitespace
 
 ### Step 3: If/else expressions
 

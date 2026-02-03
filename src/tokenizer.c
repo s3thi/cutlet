@@ -58,7 +58,15 @@ static bool is_ascii_digit(char c) { return c >= '0' && c <= '9'; }
 
 static bool is_ascii_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
-static bool is_whitespace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+/*
+ * Whitespace is space and tab only. Newlines are NOT whitespace — they are
+ * emitted as TOK_NEWLINE tokens so the parser can use them as statement
+ * separators.
+ */
+static bool is_whitespace(char c) { return c == ' ' || c == '\t'; }
+
+/* Check if character is a newline start (\n or \r) */
+static bool is_newline_char(char c) { return c == '\n' || c == '\r'; }
 
 /* Ident start: ASCII letter or underscore */
 static bool is_ident_start(char c) { return is_ascii_letter(c) || c == '_'; }
@@ -152,7 +160,8 @@ void tokenizer_destroy(Tokenizer *tok) {
 }
 
 /*
- * Skip whitespace and update position tracking.
+ * Skip whitespace (spaces and tabs only) and update position tracking.
+ * Newlines are NOT skipped — they are emitted as TOK_NEWLINE tokens.
  * Returns the number of whitespace characters skipped.
  */
 static size_t skip_whitespace(Tokenizer *tok) {
@@ -163,24 +172,46 @@ static size_t skip_whitespace(Tokenizer *tok) {
         if (c == ' ' || c == '\t') {
             tok->pos++;
             tok->col++;
-        } else if (c == '\n') {
-            tok->pos++;
-            tok->line++;
-            tok->col = 1;
-        } else if (c == '\r') {
-            tok->pos++;
-            /* Handle CRLF as single newline */
-            if (tok->pos < tok->input_len && tok->input[tok->pos] == '\n') {
-                tok->pos++;
-            }
-            tok->line++;
-            tok->col = 1;
         } else {
             break;
         }
     }
 
     return tok->pos - start_pos;
+}
+
+/*
+ * Read a newline token (\n, \r, or \r\n as a single token).
+ * Called when current char is \n or \r.
+ */
+static bool read_newline(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                         size_t start_col) {
+    char c = tok->input[tok->pos];
+
+    if (c == '\n') {
+        /* Unix-style LF */
+        tok->pos++;
+        tok->line++;
+        tok->col = 1;
+    } else if (c == '\r') {
+        /* CR or CRLF */
+        tok->pos++;
+        /* Handle CRLF as single newline token */
+        if (tok->pos < tok->input_len && tok->input[tok->pos] == '\n') {
+            tok->pos++;
+        }
+        tok->line++;
+        tok->col = 1;
+    }
+
+    out->type = TOK_NEWLINE;
+    out->value = "\n"; /* Canonical representation */
+    out->value_len = 1;
+    out->pos = start_pos;
+    out->line = start_line;
+    out->col = start_col;
+
+    return true;
 }
 
 /*
@@ -443,7 +474,7 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
         return true;
     }
 
-    /* Skip whitespace */
+    /* Skip whitespace (spaces and tabs only, not newlines) */
     skip_whitespace(tok);
 
     /* Check for EOF */
@@ -464,6 +495,11 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
     size_t token_start_col = tok->col;
 
     char c = tok->input[tok->pos];
+
+    /* Newline — emit TOK_NEWLINE token */
+    if (is_newline_char(c)) {
+        return read_newline(tok, out, token_start_pos, token_start_line, token_start_col);
+    }
 
     /* String */
     if (c == '"') {
@@ -516,6 +552,8 @@ const char *token_type_str(TokenType type) {
         return "IDENT";
     case TOK_OPERATOR:
         return "OPERATOR";
+    case TOK_NEWLINE:
+        return "NEWLINE";
     case TOK_EOF:
         return "EOF";
     case TOK_ERROR:

@@ -987,36 +987,62 @@ TEST(test_whitespace_tabs) {
 }
 
 TEST(test_whitespace_newlines) {
+    /* With TOK_NEWLINE, newlines are tokens, not whitespace.
+     * "\nfoo\n" produces: NEWLINE, IDENT, NEWLINE, EOF */
     Tokenizer *tok = tokenizer_create("\nfoo\n");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected leading NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected trailing NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_whitespace_mixed) {
+    /* With TOK_NEWLINE, newlines are tokens. Spaces/tabs are still skipped.
+     * "  \t\n  foo  \n\t  " produces: NEWLINE, IDENT, NEWLINE, EOF */
     Tokenizer *tok = tokenizer_create("  \t\n  foo  \n\t  ");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected leading NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected trailing NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_whitespace_only) {
+    /* With TOK_NEWLINE, newlines are tokens. "   \t\n   " produces: NEWLINE, EOF */
     Tokenizer *tok = tokenizer_create("   \t\n   ");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_EQ(t.type, TOK_EOF, "expected EOF for whitespace-only input");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
@@ -1128,6 +1154,7 @@ TEST(test_position_with_leading_space) {
 }
 
 TEST(test_position_multiline) {
+    /* With TOK_NEWLINE: "foo\nbar" → IDENT(foo), NEWLINE, IDENT(bar), EOF */
     Tokenizer *tok = tokenizer_create("foo\nbar");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
@@ -1136,6 +1163,11 @@ TEST(test_position_multiline) {
     ASSERT_EQ(t.pos, 0, "expected pos 0 for foo");
     ASSERT_EQ(t.line, 1, "expected line 1 for foo");
     ASSERT_EQ(t.col, 1, "expected col 1 for foo");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE");
+    ASSERT_EQ(t.pos, 3, "expected pos 3 for newline");
+    ASSERT_EQ(t.line, 1, "expected line 1 for newline");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.pos, 4, "expected pos 4 for bar");
@@ -1483,6 +1515,181 @@ TEST(test_null_token_output) {
 }
 
 /* ============================================================
+ * NEWLINE token tests (Step 2: multi-line input)
+ * ============================================================ */
+
+TEST(test_newline_single_lf) {
+    /* \n emits TOK_NEWLINE */
+    Tokenizer *tok = tokenizer_create("a\nb");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE after 'a'");
+    ASSERT_EQ(t.line, 1, "newline should be on line 1");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+    ASSERT_EQ(t.line, 2, "'b' should be on line 2");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_single_cr) {
+    /* \r emits TOK_NEWLINE (old Mac style) */
+    Tokenizer *tok = tokenizer_create("a\rb");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE after 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+    ASSERT_EQ(t.line, 2, "'b' should be on line 2");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_crlf) {
+    /* \r\n emits single TOK_NEWLINE (Windows style) */
+    Tokenizer *tok = tokenizer_create("a\r\nb");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected single NEWLINE for CRLF");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+    ASSERT_EQ(t.line, 2, "'b' should be on line 2");
+
+    /* Should NOT get another newline token - CRLF is a single newline */
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF, not another NEWLINE");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_multiple) {
+    /* Multiple newlines emit multiple TOK_NEWLINE tokens */
+    Tokenizer *tok = tokenizer_create("a\n\nb");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected first NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected second NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+    ASSERT_EQ(t.line, 3, "'b' should be on line 3");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_leading) {
+    /* Leading newlines are emitted */
+    Tokenizer *tok = tokenizer_create("\na");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected leading NEWLINE");
+    ASSERT_EQ(t.line, 1, "newline on line 1");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+    ASSERT_EQ(t.line, 2, "'a' should be on line 2");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_trailing) {
+    /* Trailing newlines are emitted */
+    Tokenizer *tok = tokenizer_create("a\n");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected trailing NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_only) {
+    /* Input with only newlines */
+    Tokenizer *tok = tokenizer_create("\n\n");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected first NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected second NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_with_spaces) {
+    /* Spaces around newlines - spaces are skipped, newlines are tokens */
+    Tokenizer *tok = tokenizer_create("a  \n  b");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_newline_type_str) {
+    ASSERT_STR_EQ(token_type_str(TOK_NEWLINE), "NEWLINE", "NEWLINE string");
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -1606,6 +1813,17 @@ int main(void) {
     printf("\nNull input handling:\n");
     RUN_TEST(test_null_tokenizer_next);
     RUN_TEST(test_null_token_output);
+
+    printf("\nNEWLINE tokens:\n");
+    RUN_TEST(test_newline_single_lf);
+    RUN_TEST(test_newline_single_cr);
+    RUN_TEST(test_newline_crlf);
+    RUN_TEST(test_newline_multiple);
+    RUN_TEST(test_newline_leading);
+    RUN_TEST(test_newline_trailing);
+    RUN_TEST(test_newline_only);
+    RUN_TEST(test_newline_with_spaces);
+    RUN_TEST(test_newline_type_str);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);
