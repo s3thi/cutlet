@@ -37,11 +37,19 @@ static Value make_bool(bool b) {
 }
 
 /*
+ * Helper: create a nothing Value.
+ */
+static Value make_nothing(void) {
+    return (Value){.type = VAL_NOTHING, .boolean = false, .number = 0, .string = NULL};
+}
+
+/*
  * Helper: determine if a Value is truthy.
  * Truthiness rules:
  * - false is falsy, true is truthy
  * - 0 is falsy, all other numbers are truthy
  * - empty string "" is falsy, all other strings are truthy
+ * - nothing is falsy
  * - errors are falsy
  */
 static bool is_truthy(const Value *v) {
@@ -52,6 +60,8 @@ static bool is_truthy(const Value *v) {
         return v->number != 0;
     case VAL_STRING:
         return v->string != NULL && v->string[0] != '\0';
+    case VAL_NOTHING: // NOLINT(bugprone-branch-clone)
+        return false;
     case VAL_ERROR: // NOLINT(bugprone-branch-clone)
         return false;
     default:
@@ -88,6 +98,11 @@ Value eval(const AstNode *node) {
     case AST_BOOL: {
         /* Boolean literal: "true" or "false" */
         return make_bool(strcmp(node->value, "true") == 0);
+    }
+
+    case AST_NOTHING: {
+        /* Nothing literal */
+        return make_nothing();
     }
 
     case AST_IDENT: {
@@ -148,6 +163,9 @@ Value eval(const AstNode *node) {
                     equal = strcmp(left.string, right.string) == 0;
                 } else if (left.type == VAL_BOOL) {
                     equal = left.boolean == right.boolean;
+                } else if (left.type == VAL_NOTHING) {
+                    /* nothing == nothing is always true */
+                    equal = true;
                 }
                 /* VAL_ERROR and unknown types: equal stays false */
             }
@@ -159,6 +177,25 @@ Value eval(const AstNode *node) {
         /* Ordered comparisons: <, >, <=, >= */
         if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0 || strcmp(op, "<=") == 0 ||
             strcmp(op, ">=") == 0) {
+            /* Ordered comparisons with nothing are not allowed */
+            if (left.type == VAL_NOTHING || right.type == VAL_NOTHING) {
+                const char *other_type = "nothing";
+                if (left.type != VAL_NOTHING) {
+                    other_type = left.type == VAL_NUMBER   ? "number"
+                                 : left.type == VAL_STRING ? "string"
+                                 : left.type == VAL_BOOL   ? "boolean"
+                                                           : "value";
+                } else if (right.type != VAL_NOTHING) {
+                    other_type = right.type == VAL_NUMBER   ? "number"
+                                 : right.type == VAL_STRING ? "string"
+                                 : right.type == VAL_BOOL   ? "boolean"
+                                                            : "value";
+                }
+                value_free(&left);
+                value_free(&right);
+                return make_error("cannot compare nothing with %s", other_type);
+            }
+
             /* Ordered comparisons require same type, and not bools */
             if (left.type != right.type) {
                 value_free(&left);
@@ -330,6 +367,9 @@ char *value_format(const Value *v) {
 
     case VAL_BOOL:
         return strdup(v->boolean ? "true" : "false");
+
+    case VAL_NOTHING:
+        return strdup("nothing");
 
     case VAL_STRING:
         return strdup(v->string ? v->string : "");

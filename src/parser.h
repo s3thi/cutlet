@@ -14,14 +14,15 @@
 #include <stddef.h>
 
 typedef enum {
-    AST_NUMBER, /* numeric literal */
-    AST_STRING, /* string literal */
-    AST_IDENT,  /* identifier */
-    AST_BOOL,   /* boolean literal: true, false */
-    AST_BINOP,  /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >=, and, or */
-    AST_UNARY,  /* unary: - (minus), not */
-    AST_DECL,   /* declaration: my name = expr */
-    AST_ASSIGN, /* assignment: name = expr */
+    AST_NUMBER,  /* numeric literal */
+    AST_STRING,  /* string literal */
+    AST_IDENT,   /* identifier */
+    AST_BOOL,    /* boolean literal: true, false */
+    AST_NOTHING, /* nothing literal (like nil/null in other languages) */
+    AST_BINOP,   /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >=, and, or */
+    AST_UNARY,   /* unary: - (minus), not */
+    AST_DECL,    /* declaration: my name = expr */
+    AST_ASSIGN,  /* assignment: name = expr */
 } AstNodeType;
 
 typedef struct AstNode {

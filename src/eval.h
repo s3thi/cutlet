@@ -12,7 +12,7 @@
 #include "parser.h"
 #include <stdbool.h>
 
-typedef enum { VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_ERROR } ValueType;
+typedef enum { VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, VAL_ERROR } ValueType;
 
 typedef struct {
     ValueType type;

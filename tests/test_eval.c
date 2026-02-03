@@ -461,6 +461,88 @@ TEST(test_logic_or_decl_error) { assert_eval_error("my or = 1", "my or"); }
 TEST(test_logic_not_decl_error) { assert_eval_error("my not = 1", "my not"); }
 
 /* ============================================================
+ * Nothing literal
+ * ============================================================ */
+
+/*
+ * Helper: parse input, eval, check result is nothing.
+ */
+static void assert_eval_nothing(const char *input, const char *label) {
+    AstNode *node = NULL;
+    ParseError perr;
+    if (!parser_parse(input, &node, &perr)) {
+        printf("FAIL\n    parse failed for '%s': %s\n", input, perr.message);
+        tests_failed++;
+        return;
+    }
+    Value v = eval(node);
+    ast_free(node);
+
+    if (v.type != VAL_NOTHING) {
+        char *s = value_format(&v);
+        printf("FAIL\n    expected nothing for '%s', got: %s\n", input, s ? s : "(null)");
+        free(s);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+
+    value_free(&v);
+    printf("PASS\n");
+    tests_passed++;
+    (void)label;
+}
+
+TEST(test_nothing_eval) { assert_eval_nothing("nothing", "nothing literal"); }
+
+TEST(test_nothing_eq_nothing) {
+    assert_eval_bool("nothing == nothing", true, "nothing == nothing");
+}
+
+TEST(test_nothing_eq_false) { assert_eval_bool("nothing == false", false, "nothing == false"); }
+
+TEST(test_nothing_eq_zero) { assert_eval_bool("nothing == 0", false, "nothing == 0"); }
+
+TEST(test_nothing_eq_empty_str) {
+    assert_eval_bool("nothing == \"\"", false, "nothing == empty string");
+}
+
+TEST(test_nothing_neq_one) { assert_eval_bool("nothing != 1", true, "nothing != 1"); }
+
+TEST(test_nothing_lt_error) { assert_eval_error("nothing < 1", "nothing ordered cmp"); }
+
+TEST(test_nothing_gt_error) { assert_eval_error("nothing > 1", "nothing ordered cmp"); }
+
+TEST(test_nothing_lte_error) { assert_eval_error("nothing <= 1", "nothing ordered cmp"); }
+
+TEST(test_nothing_gte_error) { assert_eval_error("nothing >= 1", "nothing ordered cmp"); }
+
+TEST(test_not_nothing) { assert_eval_bool("not nothing", true, "not nothing"); }
+
+TEST(test_nothing_and_one) {
+    /* nothing and 1 → nothing (short-circuit, returns falsy operand) */
+    assert_eval_nothing("nothing and 1", "nothing and 1");
+}
+
+TEST(test_nothing_or_one) {
+    /* nothing or 1 → 1 (returns first truthy operand) */
+    assert_eval_number("nothing or 1", 1.0, "nothing or 1");
+}
+
+TEST(test_nothing_format) {
+    Value v = {.type = VAL_NOTHING, .number = 0, .string = NULL};
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "nothing", "nothing formats as 'nothing'");
+    free(s);
+    PASS();
+}
+
+TEST(test_nothing_assign_error) { assert_eval_error("nothing = 1", "cannot assign to nothing"); }
+
+TEST(test_nothing_decl_error) { assert_eval_error("my nothing = 1", "cannot declare nothing"); }
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -585,6 +667,24 @@ int main(void) {
     RUN_TEST(test_logic_and_decl_error);
     RUN_TEST(test_logic_or_decl_error);
     RUN_TEST(test_logic_not_decl_error);
+
+    printf("\nNothing literal:\n");
+    RUN_TEST(test_nothing_eval);
+    RUN_TEST(test_nothing_eq_nothing);
+    RUN_TEST(test_nothing_eq_false);
+    RUN_TEST(test_nothing_eq_zero);
+    RUN_TEST(test_nothing_eq_empty_str);
+    RUN_TEST(test_nothing_neq_one);
+    RUN_TEST(test_nothing_lt_error);
+    RUN_TEST(test_nothing_gt_error);
+    RUN_TEST(test_nothing_lte_error);
+    RUN_TEST(test_nothing_gte_error);
+    RUN_TEST(test_not_nothing);
+    RUN_TEST(test_nothing_and_one);
+    RUN_TEST(test_nothing_or_one);
+    RUN_TEST(test_nothing_format);
+    RUN_TEST(test_nothing_assign_error);
+    RUN_TEST(test_nothing_decl_error);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

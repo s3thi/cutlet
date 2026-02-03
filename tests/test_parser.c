@@ -757,6 +757,43 @@ TEST(test_logic_and_with_comparison) {
 }
 
 /* ============================================================
+ * Nothing literal parsing tests
+ * ============================================================ */
+
+TEST(test_nothing_parse) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("nothing", &node, &err), "should parse nothing");
+    ASSERT(node->type == AST_NOTHING, "type should be NOTHING");
+    ASSERT_STR_EQ(node->value, "nothing", "value should be nothing");
+    ast_free(node);
+    PASS();
+}
+
+TEST(test_nothing_ast_format) {
+    ASSERT(ast_matches("nothing", "AST [NOTHING nothing]"), "AST format for nothing");
+    PASS();
+}
+
+TEST(test_nothing_assign_error) {
+    /* nothing = 1 → error: cannot assign to keyword */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("nothing = 1", &node, &err), "nothing assign should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+TEST(test_nothing_decl_error) {
+    /* my nothing = 1 → error: cannot declare keyword as variable */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my nothing = 1", &node, &err), "my nothing should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -877,6 +914,12 @@ int main(void) {
     RUN_TEST(test_logic_or_decl_error);
     RUN_TEST(test_logic_not_decl_error);
     RUN_TEST(test_logic_and_with_comparison);
+
+    printf("\nNothing literal:\n");
+    RUN_TEST(test_nothing_parse);
+    RUN_TEST(test_nothing_ast_format);
+    RUN_TEST(test_nothing_assign_error);
+    RUN_TEST(test_nothing_decl_error);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);

@@ -227,11 +227,12 @@ static bool is_right_assoc(const char *op, size_t len) {
 
 /*
  * Check if a keyword is reserved and cannot be used as a variable name.
- * This includes true, false, and, or, not.
+ * This includes true, false, nothing, and, or, not.
  */
 static bool is_reserved_keyword(const Token *t) {
     return token_is_keyword(t, "true") || token_is_keyword(t, "false") ||
-           token_is_keyword(t, "and") || token_is_keyword(t, "or") || token_is_keyword(t, "not");
+           token_is_keyword(t, "nothing") || token_is_keyword(t, "and") ||
+           token_is_keyword(t, "or") || token_is_keyword(t, "not");
 }
 
 /* ============================================================
@@ -289,6 +290,17 @@ static AstNode *parse_atom(Parser *p) {
     /* Boolean literals: true, false */
     if (token_is_keyword(&t, "true") || token_is_keyword(&t, "false")) {
         AstNode *node = make_leaf(AST_BOOL, t.value, t.value_len);
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        advance(p);
+        return node;
+    }
+
+    /* Nothing literal */
+    if (token_is_keyword(&t, "nothing")) {
+        AstNode *node = make_leaf(AST_NOTHING, t.value, t.value_len);
         if (!node) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
@@ -617,6 +629,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "STRING";
     case AST_BOOL:
         return "BOOL";
+    case AST_NOTHING:
+        return "NOTHING";
     case AST_IDENT:
         return "IDENT";
     case AST_BINOP:
@@ -643,7 +657,7 @@ static char *ast_format_node(const AstNode *node) {
     const char *type_str = ast_node_type_str(node->type);
 
     if (node->type == AST_NUMBER || node->type == AST_STRING || node->type == AST_IDENT ||
-        node->type == AST_BOOL) {
+        node->type == AST_BOOL || node->type == AST_NOTHING) {
         /* Leaf node: [TYPE value] */
         size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + 1;
         char *buf = malloc(len);

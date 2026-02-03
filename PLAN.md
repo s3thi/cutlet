@@ -7,15 +7,17 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 ## What exists today (all complete + tested)
 
-- **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char. Adjacent tokens without whitespace allowed.
-- **Pratt parser**: Precedence climbing. `or` (prec 1, left), `and` (prec 2, left), `not` (prec 3, prefix), comparison (prec 4, non-assoc), `+ -` (prec 5, left), `* /` (prec 6, left), unary minus (prec 7, prefix), `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
-- **AST nodes**: NUMBER, STRING, IDENT, BOOL, BINOP, UNARY, DECL, ASSIGN. S-expr format output. BINOP includes `and`/`or` keyword operators. UNARY includes `not`.
-- **Evaluator**: Walks AST, produces VAL_NUMBER, VAL_STRING, VAL_BOOL, or VAL_ERROR. All arithmetic in double precision. Division always float. Integers format without decimal.
-- **Booleans**: `true` and `false` are keywords that produce `AST_BOOL` nodes and evaluate to `VAL_BOOL`. Cannot be used as variable names. REPL output: `OK [BOOL true]` / `OK [BOOL false]`.
-- **Logical operators**: `and`, `or` (keyword infix), `not` (keyword prefix). Short-circuit evaluation with Python semantics: `and`/`or` return operand values. `not` always returns `VAL_BOOL`. Truthiness: `false`, `0`, `""`, errors are falsy; everything else truthy. `and`/`or`/`not` are reserved keywords.
+- **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char.
+- **Pratt parser**: Precedence climbing. `or` (prec 1) → `and` (prec 2) → `not` (prec 3, prefix) → comparison (prec 4, non-assoc) → `+ -` (prec 5) → `* /` (prec 6) → unary minus (prec 7) → `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
+- **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN. S-expr format output.
+- **Evaluator**: Tree-walking. Produces VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, or VAL_ERROR. All arithmetic in double precision.
+- **Booleans**: `true`/`false` keywords → `AST_BOOL` → `VAL_BOOL`.
+- **Nothing**: `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true; `nothing == anything_else` is false. Ordered comparisons with nothing produce errors.
+- **Comparison operators**: `==`, `!=`, `<`, `>`, `<=`, `>=`. All return VAL_BOOL. Non-associative (no chaining). Mixed-type equality allowed; mixed-type ordering is an error.
+- **Logical operators**: `and`, `or` (keyword infix, short-circuit, Python semantics — return operand values), `not` (keyword prefix, returns VAL_BOOL). Truthiness: `false`, `nothing`, `0`, `""`, errors are falsy.
 - **Runtime**: Global pthread rwlock serializes eval. Linked-list variable environment with thread-safe get/define/assign.
 - **REPL/CLI**: TCP server (thread-per-client), TCP client. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs.
-- **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server (protocol + concurrency). Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
+- **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server. Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
 
 ## Key files
 
@@ -23,7 +25,7 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 |------|---------|
 | `src/tokenizer.c/h` | Lexer |
 | `src/parser.c/h` | Pratt parser, AST types |
-| `src/eval.c/h` | Evaluator, Value types (VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_ERROR) |
+| `src/eval.c/h` | Evaluator, Value types |
 | `src/runtime.c/h` | Global lock, variable environment |
 | `src/main.c` | CLI entry, TCP server/client |
 | `src/repl.c/h` | REPL client |
@@ -32,81 +34,101 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 | `tests/test_*.c` | Unit tests |
 | `tests/test_cli.sh` | Integration tests |
 
-## Next slice: Booleans, comparison operators, and logical operators
+## Next slice: Multi-line input and if/else expressions
 
 ### Goal
-Add boolean values, comparison operators, and logical operators to the language.
 
-### Step 1: Boolean literals and VAL_BOOL ✅
+Add newline-separated multi-statement input and if/else expressions. After this slice, the following should work:
 
-Implemented. `true`/`false` produce `AST_BOOL` nodes, evaluate to `VAL_BOOL`, and are rejected as assignment/declaration targets. REPL outputs `OK [BOOL true]` / `OK [BOOL false]`. 18 tests added across parser, eval, and REPL test suites.
+```
+my counter = 10
+my winner = if counter > 8 then
+  "me"
+else
+  "you"
+end
+```
 
-### Step 2: Comparison operators ✅
+### Step 1: Nothing literal and VAL_NOTHING ✓ COMPLETE
 
-Add `==`, `!=`, `<`, `>`, `<=`, `>=`. All return VAL_BOOL.
+Added `nothing` keyword, `AST_NOTHING` node type, and `VAL_NOTHING` value type. Nothing is needed because else-less `if` expressions must evaluate to something when the condition is false.
 
-**Tokenizer**: `==`, `!=`, `<=`, `>=` are two-char operators. The tokenizer currently groups symbol runs, so `==` should already tokenize as a single OPERATOR token. Verify this works and add tests. `<` and `>` are single-char — they need to be added to the solo-symbol list or handled correctly as operators.
+**Implementation summary**:
+- `nothing` tokenizes as `TOK_IDENT`, parser recognizes it as keyword
+- `AST_NOTHING` in parser.h, `VAL_NOTHING` in eval.h
+- `nothing` is falsy in `is_truthy()`
+- `nothing == nothing` → true; `nothing == anything_else` → false
+- Ordered comparisons with nothing produce error: "cannot compare nothing with <type>"
+- REPL output format: `OK nothing`
+- AST output: `AST [NOTHING nothing]`
 
-**Parser**: New precedence level below `+ -`. Suggested: prec 0.5 (or renumber). Comparison operators should be **non-associative** (i.e., `1 < 2 < 3` is a parse error, not silently wrong). This is a deliberate design choice — chained comparisons can be added later.
+### Step 2: Multi-line input (newlines as statement separators)
 
-**Evaluator**:
-- Number == Number: exact double comparison.
-- String == String: strcmp.
-- Mixed types: `==` returns false, `!=` returns true, ordered comparisons (`< > <= >=`) on mixed types are errors.
-- Bool == Bool: supported. Ordered comparisons on bools are errors.
+Currently each REPL line / input is parsed as a single expression. Add support for newline-separated sequences of expressions.
 
-**Tests to write first**:
-- `1 == 1` → true, `1 == 2` → false
-- `"a" == "a"` → true, `"a" == "b"` → false
-- `1 != 2` → true, `1 != 1` → false
-- `1 < 2` → true, `2 < 1` → false, `1 < 1` → false
-- `1 > 2` → false, `2 > 1` → true
-- `1 <= 1` → true, `1 <= 2` → true, `2 <= 1` → false
-- `1 >= 1` → true, `2 >= 1` → true, `1 >= 2` → false
-- `"a" < "b"` → true (lexicographic)
-- `1 == "1"` → false (mixed types)
-- `1 < "1"` → error (ordered comparison on mixed types)
-- `true == true` → true, `true == false` → false
-- `true < false` → error
-- `1 < 2 < 3` → parse error (non-associative)
-- Precedence: `1 + 2 == 3` → true (comparison binds looser than arithmetic)
-- AST output for comparison expressions
-
-### Step 3: Logical operators ✅
-
-Add `and`, `or`, `not`. These are keyword-based (not `&&`, `||`, `!`).
-
-**Tokenizer**: `and`, `or`, `not` tokenize as TOK_IDENT. The parser must recognize them as keywords.
+**Tokenizer**:
+- Add `TOK_NEWLINE` token type.
+- Emit `TOK_NEWLINE` when encountering `\n` (instead of treating it as whitespace).
+- Keep `\r`, `\t`, space as whitespace.
 
 **Parser**:
-- `not` is a unary prefix operator. Precedence: below comparisons, above `and`/`or`. Or bind tighter than comparisons — agent should follow Python's model where `not` binds looser than comparisons: `not 1 < 2` means `not (1 < 2)`.
-- `or` has lowest precedence (below `and`).
-- `and` has precedence above `or` but below `not`.
-- Suggested precedence order (low to high): assignment → `or` → `and` → `not` → comparison → `+ -` → `* /` → unary minus → `**`.
+- Add `AST_BLOCK` node type that holds an array of child expressions.
+- `parser_parse()` now parses a sequence of newline-separated expressions into `AST_BLOCK`.
+- A block with exactly one expression is unwrapped (no wrapper node) — so all existing single-expression tests pass unchanged.
+- Skip leading/trailing/consecutive newlines (blank lines are harmless).
 
 **Evaluator**:
-- `and` and `or` are **short-circuit**: `false and expr` does not evaluate `expr`.
-- Truthiness: `false` is falsy, `true` is truthy, `0` is falsy, all other numbers are truthy, all strings are truthy, errors are falsy.
-- `and` returns the first falsy operand or the last operand. `or` returns the first truthy operand or the last operand. (Python semantics — they return operand values, not necessarily bools.)
-- `not` always returns a VAL_BOOL.
+- `AST_BLOCK`: evaluate each child in order, return value of last child.
+- Empty block (all blank lines) returns nothing.
+
+**AST format**: `(block expr1 expr2 ...)` — only emitted when >1 expression.
 
 **Tests to write first**:
-- `true and true` → true, `true and false` → false
-- `false and true` → false (short-circuit: returns false without evaluating right)
-- `true or false` → true, `false or true` → true
-- `false or false` → false
-- `not true` → false, `not false` → true
-- `not 0` → true, `not 1` → false, `not ""` — decide truthiness of empty string
-- `1 and 2` → 2 (returns last truthy operand)
-- `0 and 2` → 0 (returns first falsy operand)
-- `0 or 2` → 2 (returns first truthy operand)
-- `0 or false` → false (returns last falsy operand)
-- Precedence: `true or true and false` → true (`and` binds tighter)
-- Precedence: `not true and false` → `false` (if Python model: `(not true) and false`)
-- `not 1 < 2` → false (`not (1 < 2)` in Python model)
-- Short-circuit with side effects: `false and (my x = 1)` — `x` should not be defined
-- AST output for logical expressions
-- `and`, `or`, `not` should not be assignable: `and = 1` → error
+- `"my x = 1\nx + 2"` → 3
+- `"my x = 1\nmy y = 2\nx + y"` → 3
+- `"\n\n1 + 2\n\n"` → 3 (blank lines ignored)
+- Single expression (no newlines) → same behavior as before, no block wrapper
+- All existing tests still pass
+- AST output for multi-line input
+
+### Step 3: If/else expressions
+
+If/else is an expression (it evaluates to a value). Syntax: `if condition then body else body end`. The `else` clause is optional; if omitted and condition is false, the expression evaluates to nothing.
+
+**Keywords**: `if`, `then`, `else`, `end` are all reserved (cannot be used as variable names).
+
+**Parser**:
+- Add `AST_IF` node type with three children: condition, then-body, else-body (nullable).
+- Parse in `parse_atom()` when current token is the `if` keyword:
+  1. Consume `if`.
+  2. Parse condition expression (stop before `then`).
+  3. Expect and consume `then`.
+  4. Parse body as a block of newline-separated expressions (stop at `else` or `end`).
+  5. If `else`, consume it and parse else-body as a block (stop at `end`).
+  6. Expect and consume `end`.
+- If no else clause, else-body child is NULL.
+
+**Evaluator**:
+- Evaluate condition.
+- If truthy → evaluate then-body, return its value.
+- If falsy → evaluate else-body if present, otherwise return nothing.
+- Only evaluate the taken branch (like short-circuit).
+
+**AST format**: `(if cond then-body else-body)` or `(if cond then-body)` when no else.
+
+**Tests to write first**:
+- `if true then 1 else 2 end` → 1
+- `if false then 1 else 2 end` → 2
+- `if false then 1 end` → nothing
+- `if 1 < 2 then "yes" else "no" end` → "yes"
+- `my x = if true then 42 else 0 end` then `x` → 42
+- Multi-line bodies: `"if true then\n  my x = 1\n  x + 1\nelse\n  0\nend"` → 2
+- Nested: `if true then if false then 1 else 2 end else 3 end` → 2
+- Missing `then` → parse error
+- Missing `end` → parse error
+- `if = 1` → error, `my then = 1` → error (reserved keywords)
+- AST output for if/else expressions
+- Side effects only in taken branch: `"if false then\n  my x = 1\nend\nx"` → error (x not defined)
 
 ### Required process (every step)
 
