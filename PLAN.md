@@ -107,7 +107,7 @@ Changes:
 - `json.c`: Implement output frame encode/decode.
 - **Tests**: Encode/decode round-trip tests for output frames.
 
-#### 2d: Wire output frames through REPL server
+#### 2d: Wire output frames through REPL server ✓
 
 Connect the `EvalContext` write callback to the JSON output frame in the server.
 

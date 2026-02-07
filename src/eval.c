@@ -372,15 +372,24 @@ Value eval(const AstNode *node, EvalContext *ctx) {
                 return make_error("no output writer available");
             }
 
-            /* Format the value and write it + newline */
+            /* Format the value and write it + newline as a single call.
+             * One write_fn call = one output frame in the server, so we
+             * combine value + "\n" to avoid a separate frame for the newline. */
             char *formatted = value_format(&arg);
             value_free(&arg);
             if (!formatted)
                 return make_error("memory allocation failed");
 
-            ctx->write_fn(ctx->userdata, formatted, strlen(formatted));
-            ctx->write_fn(ctx->userdata, "\n", 1);
-            free(formatted);
+            size_t flen = strlen(formatted);
+            char *with_newline = realloc(formatted, flen + 2);
+            if (!with_newline) {
+                free(formatted);
+                return make_error("memory allocation failed");
+            }
+            with_newline[flen] = '\n';
+            with_newline[flen + 1] = '\0';
+            ctx->write_fn(ctx->userdata, with_newline, flen + 1);
+            free(with_newline);
 
             return make_nothing();
         }

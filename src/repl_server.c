@@ -13,6 +13,7 @@
  */
 
 #include "repl_server.h"
+#include "eval.h"
 #include "json.h"
 #include "repl.h"
 
@@ -39,6 +40,47 @@ struct ReplServer {
     pthread_t accept_thread;
     volatile bool shutdown; /* Signals accept loop and client threads to stop. */
 };
+
+/* ============================================================
+ * say() output callback
+ * ============================================================ */
+
+/*
+ * Context passed as userdata to the EvalContext write callback.
+ * Holds the client's socket fd and the current request ID so the
+ * callback can build and send a JSON output frame.
+ */
+typedef struct {
+    int fd;
+    unsigned long request_id;
+} ServerOutputCtx;
+
+/*
+ * EvalWriteFn callback: encodes data as a JSON output frame and
+ * sends it to the client socket. Called by say() during eval.
+ *
+ * Runs under the global eval lock. The fd is owned exclusively
+ * by this client thread, so no contention on the socket write.
+ */
+static void server_output_write(void *userdata, const char *data, size_t len) {
+    ServerOutputCtx *ctx = userdata;
+
+    /* Build the output string (data may not be null-terminated at len). */
+    char *data_copy = malloc(len + 1);
+    if (!data_copy)
+        return; /* Best-effort: drop output on OOM. */
+    memcpy(data_copy, data, len);
+    data_copy[len] = '\0';
+
+    JsonOutputFrame frame = {.id = ctx->request_id, .data = data_copy};
+    char *json = json_encode_output(&frame);
+    free(data_copy);
+
+    if (json) {
+        json_frame_write(ctx->fd, json, strlen(json));
+        free(json);
+    }
+}
 
 /* ============================================================
  * Request handling
@@ -81,8 +123,13 @@ static int handle_json_request(int fd, ReplServer *srv) {
     bool want_tokens = req.want_tokens && srv->enable_tokens;
     bool want_ast = req.want_ast && srv->enable_ast;
 
-    /* Evaluate the expression. */
-    ReplResult rr = repl_eval_line(req.expr, want_tokens, want_ast);
+    /* Build an EvalContext that streams say() output as JSON output
+     * frames back to the client. The callback fires inside eval(),
+     * which runs under the global eval lock. Each client thread owns
+     * its fd exclusively, so no contention on the socket write. */
+    ServerOutputCtx out_ctx = {.fd = fd, .request_id = req.id};
+    EvalContext eval_ctx = {.write_fn = server_output_write, .userdata = &out_ctx};
+    ReplResult rr = repl_eval_line(req.expr, want_tokens, want_ast, &eval_ctx);
 
     /* Build the response. */
     JsonResponse resp = {0};

@@ -7,11 +7,15 @@
  * Uses the same simple test harness as test_tokenizer.c.
  */
 
+#include "../src/eval.h"
 #include "../src/repl.h"
 #include "../src/runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* No-op EvalContext for tests that don't need say() output. */
+static EvalContext noop_ctx = {.write_fn = NULL, .userdata = NULL};
 
 /* ============================================================
  * Simple test harness
@@ -437,7 +441,7 @@ TEST(test_result_is_heap_allocated) {
  * ============================================================ */
 
 TEST(test_eval_line_blank) {
-    ReplResult r = repl_eval_line("", false, false);
+    ReplResult r = repl_eval_line("", false, false, &noop_ctx);
     ASSERT(r.ok, "ok for blank");
     ASSERT(r.value == NULL, "no value for blank");
     ASSERT(r.error == NULL, "no error");
@@ -448,7 +452,7 @@ TEST(test_eval_line_blank) {
 }
 
 TEST(test_eval_line_null) {
-    ReplResult r = repl_eval_line(NULL, false, false);
+    ReplResult r = repl_eval_line(NULL, false, false, &noop_ctx);
     ASSERT(r.ok, "ok for null");
     ASSERT(r.value == NULL, "no value for null");
     repl_result_free(&r);
@@ -456,7 +460,7 @@ TEST(test_eval_line_null) {
 }
 
 TEST(test_eval_line_number) {
-    ReplResult r = repl_eval_line("42", false, false);
+    ReplResult r = repl_eval_line("42", false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value set");
     ASSERT_STR_EQ(r.value, "42", "plain number value");
@@ -466,7 +470,7 @@ TEST(test_eval_line_number) {
 }
 
 TEST(test_eval_line_string) {
-    ReplResult r = repl_eval_line("\"hello\"", false, false);
+    ReplResult r = repl_eval_line("\"hello\"", false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "hello", "plain string value");
     repl_result_free(&r);
@@ -474,7 +478,7 @@ TEST(test_eval_line_string) {
 }
 
 TEST(test_eval_line_expression) {
-    ReplResult r = repl_eval_line("1 + 2 * 3", false, false);
+    ReplResult r = repl_eval_line("1 + 2 * 3", false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "7", "expression eval");
     repl_result_free(&r);
@@ -482,7 +486,7 @@ TEST(test_eval_line_expression) {
 }
 
 TEST(test_eval_line_parse_error) {
-    ReplResult r = repl_eval_line("\"unterminated", false, false);
+    ReplResult r = repl_eval_line("\"unterminated", false, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT(r.value == NULL, "no value on error");
     ASSERT_NOT_NULL(r.error, "error set");
@@ -492,7 +496,7 @@ TEST(test_eval_line_parse_error) {
 }
 
 TEST(test_eval_line_eval_error) {
-    ReplResult r = repl_eval_line("1 / 0", false, false);
+    ReplResult r = repl_eval_line("1 / 0", false, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT_NOT_NULL(r.error, "error set");
     ASSERT(strstr(r.error, "division by zero") != NULL, "error message");
@@ -501,7 +505,7 @@ TEST(test_eval_line_eval_error) {
 }
 
 TEST(test_eval_line_with_tokens) {
-    ReplResult r = repl_eval_line("42", true, false);
+    ReplResult r = repl_eval_line("42", true, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "42", "value");
     ASSERT_NOT_NULL(r.tokens, "tokens present");
@@ -513,7 +517,7 @@ TEST(test_eval_line_with_tokens) {
 }
 
 TEST(test_eval_line_with_ast) {
-    ReplResult r = repl_eval_line("1 + 2", false, true);
+    ReplResult r = repl_eval_line("1 + 2", false, true, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "3", "value");
     ASSERT_NOT_NULL(r.ast, "ast present");
@@ -525,7 +529,7 @@ TEST(test_eval_line_with_ast) {
 }
 
 TEST(test_eval_line_with_both_debug) {
-    ReplResult r = repl_eval_line("42", true, true);
+    ReplResult r = repl_eval_line("42", true, true, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "42", "value");
     ASSERT_NOT_NULL(r.tokens, "tokens present");
@@ -536,7 +540,7 @@ TEST(test_eval_line_with_both_debug) {
 
 TEST(test_eval_line_tokens_on_error) {
     /* Best-effort: tokens should still be produced even on parse error. */
-    ReplResult r = repl_eval_line("42foo", true, false);
+    ReplResult r = repl_eval_line("42foo", true, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT_NOT_NULL(r.tokens, "tokens present despite error");
     ASSERT(strstr(r.tokens, "TOKENS") != NULL, "tokens prefix");
@@ -560,7 +564,7 @@ TEST(test_bool_false_repl_format) {
 }
 
 TEST(test_bool_true_eval_line) {
-    ReplResult r = repl_eval_line("true", false, false);
+    ReplResult r = repl_eval_line("true", false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value present");
     ASSERT_STR_EQ(r.value, "true", "value is true");
@@ -569,7 +573,7 @@ TEST(test_bool_true_eval_line) {
 }
 
 TEST(test_bool_false_eval_line) {
-    ReplResult r = repl_eval_line("false", false, false);
+    ReplResult r = repl_eval_line("false", false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value present");
     ASSERT_STR_EQ(r.value, "false", "value is false");

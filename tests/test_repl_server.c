@@ -95,12 +95,35 @@ static int connect_to(uint16_t port) {
 }
 
 /*
- * Send a JSON eval request and receive the response.
- * Helper that builds request, sends frame, reads frame, parses response.
- * Returns true on success, populating resp. Caller must json_response_free().
+ * Result of an eval request that may include output frames.
+ * output_buf holds concatenated data from all output frames (or NULL).
+ * output_count is the number of output frames received.
  */
-static bool send_eval(int fd, unsigned long id, const char *expr, bool want_tokens, bool want_ast,
-                      JsonResponse *resp) {
+typedef struct {
+    JsonResponse resp;
+    char *output_buf;  /* concatenated output frame data, heap-allocated */
+    size_t output_len; /* length of output_buf contents */
+    int output_count;  /* number of output frames received */
+} EvalWithOutput;
+
+static void eval_with_output_free(EvalWithOutput *e) {
+    json_response_free(&e->resp);
+    free(e->output_buf);
+    e->output_buf = NULL;
+    e->output_len = 0;
+    e->output_count = 0;
+}
+
+/*
+ * Send a JSON eval request and read all response frames.
+ * Consumes output frames and collects them in out->output_buf.
+ * Stops when it receives the terminal result frame.
+ * Returns true on success.
+ */
+static bool send_eval_full(int fd, unsigned long id, const char *expr, bool want_tokens,
+                           bool want_ast, EvalWithOutput *out) {
+    memset(out, 0, sizeof(*out));
+
     JsonRequest req = {
         .id = id, .expr = (char *)expr, .want_tokens = want_tokens, .want_ast = want_ast};
     char *req_json = json_encode_request(&req);
@@ -112,14 +135,74 @@ static bool send_eval(int fd, unsigned long id, const char *expr, bool want_toke
     if (!ok)
         return false;
 
-    size_t resp_len = 0;
-    char *resp_json = json_frame_read(fd, &resp_len, NULL);
-    if (!resp_json)
-        return false;
+    /* Read frames in a loop until we get a result frame. */
+    size_t output_cap = 0;
+    while (true) {
+        size_t frame_len = 0;
+        char *frame_json = json_frame_read(fd, &frame_len, NULL);
+        if (!frame_json)
+            return false;
 
-    ok = json_parse_response(resp_json, resp_len, resp);
-    free(resp_json);
-    return ok;
+        JsonFrameType ftype = json_frame_type(frame_json, frame_len);
+
+        if (ftype == JSON_FRAME_OUTPUT) {
+            /* Accumulate output data. */
+            JsonOutputFrame oframe;
+            if (json_parse_output(frame_json, frame_len, &oframe)) {
+                if (oframe.data) {
+                    size_t dlen = strlen(oframe.data);
+                    /* Grow output buffer if needed. */
+                    if (out->output_len + dlen + 1 > output_cap) {
+                        output_cap = (out->output_len + dlen + 1) * 2;
+                        char *tmp = realloc(out->output_buf, output_cap);
+                        if (!tmp) {
+                            json_output_frame_free(&oframe);
+                            free(frame_json);
+                            return false;
+                        }
+                        out->output_buf = tmp;
+                    }
+                    memcpy(out->output_buf + out->output_len, oframe.data, dlen);
+                    out->output_len += dlen;
+                    out->output_buf[out->output_len] = '\0';
+                }
+                out->output_count++;
+                json_output_frame_free(&oframe);
+            }
+            free(frame_json);
+            continue;
+        }
+
+        if (ftype == JSON_FRAME_RESULT) {
+            ok = json_parse_response(frame_json, frame_len, &out->resp);
+            free(frame_json);
+            return ok;
+        }
+
+        /* Unknown frame type — skip it. */
+        free(frame_json);
+    }
+}
+
+/*
+ * Send a JSON eval request and receive the result response.
+ * Forward-compatible: silently consumes any output frames before the result.
+ * Returns true on success, populating resp. Caller must json_response_free().
+ */
+static bool send_eval(int fd, unsigned long id, const char *expr, bool want_tokens, bool want_ast,
+                      JsonResponse *resp) {
+    EvalWithOutput full;
+    if (!send_eval_full(fd, id, expr, want_tokens, want_ast, &full)) {
+        eval_with_output_free(&full);
+        return false;
+    }
+    /* Copy the response out and discard output data. */
+    *resp = full.resp;
+    /* Zero out resp in full so eval_with_output_free doesn't free the strings
+     * we just handed to the caller. */
+    memset(&full.resp, 0, sizeof(full.resp));
+    eval_with_output_free(&full);
+    return true;
 }
 
 /* ============================================================
@@ -1253,6 +1336,148 @@ TEST(test_response_id_matches_request) {
 }
 
 /* ============================================================
+ * say() output frames through server
+ * ============================================================ */
+
+TEST(test_say_produces_output_frame) {
+    /* say("hello") should produce one output frame with "hello\n"
+     * followed by a result frame with ok=true, value="nothing". */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 1, "say(\"hello\")", false, false, &out), "send_eval_full");
+    ASSERT(out.resp.ok, "result should be ok");
+    ASSERT_NOT_NULL(out.resp.value, "result value set");
+    ASSERT_STR_EQ(out.resp.value, "nothing", "say() returns nothing");
+    ASSERT(out.output_count == 1, "exactly one output frame");
+    ASSERT_NOT_NULL(out.output_buf, "output data present");
+    ASSERT_STR_EQ(out.output_buf, "hello\n", "output data is hello\\n");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_say_multiple_calls) {
+    /* Two say() calls should produce two output frames before the result. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 1, "say(\"hello\")\nsay(\"world\")", false, false, &out),
+           "send_eval_full");
+    ASSERT(out.resp.ok, "result ok");
+    ASSERT_STR_EQ(out.resp.value, "nothing", "say() returns nothing");
+    ASSERT(out.output_count == 2, "two output frames");
+    ASSERT_NOT_NULL(out.output_buf, "output data present");
+    ASSERT_STR_EQ(out.output_buf, "hello\nworld\n", "concatenated output");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_say_output_id_matches_request) {
+    /* Output frame ID must match the request ID. We verify this indirectly
+     * by checking that send_eval_full correctly correlates frames. Also
+     * use a non-trivial request ID. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 42, "say(\"test\")", false, false, &out), "send_eval_full");
+    ASSERT(out.resp.ok, "result ok");
+    ASSERT(out.resp.id == 42, "result id matches");
+    ASSERT(out.output_count == 1, "one output frame");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_no_output_frames_for_regular_expr) {
+    /* A regular expression (no say()) should produce zero output frames. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 1, "1 + 2", false, false, &out), "send_eval_full");
+    ASSERT(out.resp.ok, "result ok");
+    ASSERT_STR_EQ(out.resp.value, "3", "value");
+    ASSERT(out.output_count == 0, "no output frames");
+    ASSERT(out.output_buf == NULL, "no output data");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_say_with_number) {
+    /* say() with a number argument should format the number. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 1, "say(42)", false, false, &out), "send_eval_full");
+    ASSERT(out.resp.ok, "result ok");
+    ASSERT(out.output_count == 1, "one output frame");
+    ASSERT_STR_EQ(out.output_buf, "42\n", "output is formatted number");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+TEST(test_say_followed_by_expression) {
+    /* say() followed by an expression: output frame from say,
+     * result frame from the last expression. */
+    const char *err = NULL;
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ASSERT_NOT_NULL(srv, "server start");
+
+    int fd = connect_to(repl_server_port(srv));
+    ASSERT(fd >= 0, "connect");
+
+    EvalWithOutput out;
+    ASSERT(send_eval_full(fd, 1, "say(\"hi\")\n1 + 2", false, false, &out), "send_eval_full");
+    ASSERT(out.resp.ok, "result ok");
+    ASSERT_STR_EQ(out.resp.value, "3", "last expr is result");
+    ASSERT(out.output_count == 1, "one output frame from say");
+    ASSERT_STR_EQ(out.output_buf, "hi\n", "output data");
+    eval_with_output_free(&out);
+
+    close(fd);
+    repl_server_stop(srv);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1329,6 +1554,14 @@ int main(void) {
 
     printf("\nRequest ID handling:\n");
     RUN_TEST(test_response_id_matches_request);
+
+    printf("\nsay() output frames:\n");
+    RUN_TEST(test_say_produces_output_frame);
+    RUN_TEST(test_say_multiple_calls);
+    RUN_TEST(test_say_output_id_matches_request);
+    RUN_TEST(test_no_output_frames_for_regular_expr);
+    RUN_TEST(test_say_with_number);
+    RUN_TEST(test_say_followed_by_expression);
 
     printf("\n=== Results: %d/%d passed ===\n", tests_passed, tests_run);
     if (tests_failed > 0) {

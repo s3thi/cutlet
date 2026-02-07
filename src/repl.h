@@ -15,6 +15,7 @@
 #ifndef CUTLET_REPL_H
 #define CUTLET_REPL_H
 
+#include "eval.h" /* for EvalContext */
 #include <stdbool.h>
 
 /*
@@ -42,13 +43,18 @@ typedef struct {
  * a structured result. Optionally includes token and/or AST
  * debug output.
  *
+ * ctx must be non-NULL. Built-in functions like say() use ctx
+ * to emit output. The caller is responsible for constructing an
+ * appropriate EvalContext (e.g. server output callback, or no-op
+ * for contexts where say() output is not needed).
+ *
  * Thread-safe: acquires the global eval lock internally.
  *
  * The caller must call repl_result_free() on the result.
  *
  * If input is NULL, treats it as empty string.
  */
-ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast);
+ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, EvalContext *ctx);
 
 /*
  * Free all heap-allocated fields in a ReplResult.
