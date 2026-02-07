@@ -13,6 +13,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * No-op write callback for tests that don't need output capture.
+ * A proper buffer-capturing context will be used in say() tests.
+ */
+static void test_write_noop(void *userdata, const char *data, size_t len) {
+    (void)userdata;
+    (void)data;
+    (void)len;
+}
+
+/* Shared EvalContext used by all eval test helpers. */
+static EvalContext test_ctx = {.write_fn = test_write_noop, .userdata = NULL};
+
 /* ============================================================
  * Simple test harness
  * ============================================================ */
@@ -61,7 +74,7 @@ static void assert_eval_number(const char *input, double expected, const char *l
         tests_failed++;
         return;
     }
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
 
     if (v.type != VAL_NUMBER) {
@@ -99,7 +112,7 @@ static void assert_eval_error(const char *input, const char *label) {
         (void)label;
         return;
     }
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
 
     if (v.type != VAL_ERROR) {
@@ -186,7 +199,7 @@ TEST(test_string_value) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("\"hello\"", &node, &perr), "parse string");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "hello", "string value");
@@ -260,7 +273,7 @@ static void assert_eval_bool(const char *input, bool expected, const char *label
         tests_failed++;
         return;
     }
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
 
     if (v.type != VAL_BOOL) {
@@ -416,7 +429,7 @@ TEST(test_logic_short_circuit_and) {
     ParseError perr;
     /* false and (my x = 1) — x should not be defined */
     ASSERT(parser_parse("false and (my x_sc = 1)", &node, &perr), "parse short-circuit and");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     /* Result should be false (the first falsy operand) */
     ASSERT(v.type == VAL_BOOL, "should be bool");
@@ -425,7 +438,7 @@ TEST(test_logic_short_circuit_and) {
 
     /* x_sc should not be defined */
     ASSERT(parser_parse("x_sc", &node, &perr), "parse x_sc");
-    v = eval(node);
+    v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_ERROR, "x_sc should not be defined");
     value_free(&v);
@@ -437,7 +450,7 @@ TEST(test_logic_short_circuit_or) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("true or (my y_sc = 1)", &node, &perr), "parse short-circuit or");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_BOOL, "should be bool");
     ASSERT(v.boolean == true, "should be true");
@@ -445,7 +458,7 @@ TEST(test_logic_short_circuit_or) {
 
     /* y_sc should not be defined */
     ASSERT(parser_parse("y_sc", &node, &perr), "parse y_sc");
-    v = eval(node);
+    v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_ERROR, "y_sc should not be defined");
     value_free(&v);
@@ -475,7 +488,7 @@ static void assert_eval_nothing(const char *input, const char *label) {
         tests_failed++;
         return;
     }
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
 
     if (v.type != VAL_NOTHING) {
@@ -615,7 +628,7 @@ TEST(test_if_comparison_cond) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if 1 < 2 then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "yes", "should be yes");
@@ -628,7 +641,7 @@ TEST(test_if_comparison_cond_false) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if 2 < 1 then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "no", "should be no");
@@ -681,7 +694,7 @@ TEST(test_if_short_circuit_then) {
     ParseError perr;
     ASSERT(parser_parse("if false then\nmy x_sc_then = 1\nend\nx_sc_then", &node, &perr),
            "parse short-circuit if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_ERROR, "x_sc_then should not be defined");
     value_free(&v);
@@ -696,7 +709,7 @@ TEST(test_if_short_circuit_else) {
     ParseError perr;
     ASSERT(parser_parse("if true then 1 else my y_sc_else = 2 end\ny_sc_else", &node, &perr),
            "parse short-circuit else");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_ERROR, "y_sc_else should not be defined");
     value_free(&v);
@@ -708,7 +721,7 @@ TEST(test_if_truthy_number) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if 1 then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "yes", "1 is truthy");
@@ -721,7 +734,7 @@ TEST(test_if_falsy_zero) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if 0 then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "no", "0 is falsy");
@@ -734,7 +747,7 @@ TEST(test_if_falsy_empty_string) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if \"\" then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "no", "empty string is falsy");
@@ -747,7 +760,7 @@ TEST(test_if_falsy_nothing) {
     AstNode *node = NULL;
     ParseError perr;
     ASSERT(parser_parse("if nothing then \"yes\" else \"no\" end", &node, &perr), "parse if");
-    Value v = eval(node);
+    Value v = eval(node, &test_ctx);
     ast_free(node);
     ASSERT(v.type == VAL_STRING, "should be string");
     ASSERT_STR_EQ(v.string, "no", "nothing is falsy");

@@ -78,7 +78,7 @@ static Value make_error(const char *fmt, ...) {
     return (Value){.type = VAL_ERROR, .number = 0, .string = strdup(buf)};
 }
 
-Value eval(const AstNode *node) {
+Value eval(const AstNode *node, EvalContext *ctx) {
     if (!node) {
         return make_error("null AST node");
     }
@@ -124,30 +124,30 @@ Value eval(const AstNode *node) {
          * "and" returns the first falsy operand, or the last operand.
          * "or" returns the first truthy operand, or the last operand. */
         if (strcmp(op, "and") == 0) {
-            Value left = eval(node->left);
+            Value left = eval(node->left, ctx);
             if (left.type == VAL_ERROR)
                 return left;
             if (!is_truthy(&left))
                 return left; /* short-circuit: return first falsy */
             value_free(&left);
-            return eval(node->right);
+            return eval(node->right, ctx);
         }
         if (strcmp(op, "or") == 0) {
-            Value left = eval(node->left);
+            Value left = eval(node->left, ctx);
             if (left.type == VAL_ERROR)
                 return left;
             if (is_truthy(&left))
                 return left; /* short-circuit: return first truthy */
             value_free(&left);
-            return eval(node->right);
+            return eval(node->right, ctx);
         }
 
         /* Non-short-circuit operators: evaluate both operands */
-        Value left = eval(node->left);
+        Value left = eval(node->left, ctx);
         if (left.type == VAL_ERROR) {
             return left;
         }
-        Value right = eval(node->right);
+        Value right = eval(node->right, ctx);
         if (right.type == VAL_ERROR) {
             value_free(&left);
             return right;
@@ -271,7 +271,7 @@ Value eval(const AstNode *node) {
 
     case AST_UNARY: {
         /* Evaluate the operand */
-        Value operand = eval(node->left);
+        Value operand = eval(node->left, ctx);
         if (operand.type == VAL_ERROR) {
             return operand;
         }
@@ -295,7 +295,7 @@ Value eval(const AstNode *node) {
 
     case AST_DECL: {
         /* Declare (or overwrite) a variable and return its value. */
-        Value rhs = eval(node->left);
+        Value rhs = eval(node->left, ctx);
         if (rhs.type == VAL_ERROR)
             return rhs;
         RuntimeVarStatus status = runtime_var_define(node->value, &rhs);
@@ -316,7 +316,7 @@ Value eval(const AstNode *node) {
             return make_error("memory allocation failed");
         value_free(&existing);
 
-        Value rhs = eval(node->left);
+        Value rhs = eval(node->left, ctx);
         if (rhs.type == VAL_ERROR)
             return rhs;
 
@@ -341,7 +341,7 @@ Value eval(const AstNode *node) {
         Value result = make_nothing();
         for (size_t i = 0; i < node->child_count; i++) {
             value_free(&result);
-            result = eval(node->children[i]);
+            result = eval(node->children[i], ctx);
             if (result.type == VAL_ERROR) {
                 return result; /* Stop on first error */
             }
@@ -359,7 +359,7 @@ Value eval(const AstNode *node) {
             return make_error("malformed if expression");
         }
 
-        Value cond = eval(node->children[0]);
+        Value cond = eval(node->children[0], ctx);
         if (cond.type == VAL_ERROR) {
             return cond;
         }
@@ -369,10 +369,10 @@ Value eval(const AstNode *node) {
 
         if (condition_true) {
             /* Evaluate then-body */
-            return eval(node->children[1]);
+            return eval(node->children[1], ctx);
         } else if (node->child_count >= 3) {
             /* Evaluate else-body */
-            return eval(node->children[2]);
+            return eval(node->children[2], ctx);
         } else {
             /* No else clause and condition is false → return nothing */
             return make_nothing();

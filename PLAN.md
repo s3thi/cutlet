@@ -50,15 +50,81 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 Added `AST_CALL` node type. Parsing in `parse_atom()` after identifier: if next token is `(`, parse comma-separated arguments until `)`. S-expr: `[CALL say [STRING hello]]`. 21 parser tests.
 
-### Step 2: `say()` built-in function
+### Step 2: `EvalContext` and `say()` with per-client output streaming
 
-Add `say()` as a built-in function that prints to stdout.
+Add an `EvalContext` that threads through evaluation, enabling `say()` to stream output back to each REPL client (or to stdout in file execution mode). Design follows the nREPL (Clojure) model: multiple response frames per request on the same connection, all tagged with the request ID. Client reads frames in a loop until it receives the terminal `result` frame.
 
-- Behavior: `say(expr)` evaluates `expr`, prints the formatted value to stdout followed by a newline. Returns `nothing`.
+#### 2a: `EvalContext` with write callback ✓
+
+Add an `EvalContext` struct that is threaded through all `eval()` calls:
+
+```c
+// eval.h
+typedef void (*EvalWriteFn)(void *userdata, const char *data, size_t len);
+
+typedef struct {
+    EvalWriteFn write_fn;   // called by say() to emit output
+    void *userdata;         // opaque context (fd+id for server, NULL for file mode)
+} EvalContext;
+
+Value eval(const AstNode *node, EvalContext *ctx);
+```
+
+Every recursive `eval()` call passes `ctx` through unchanged. Built-in functions like `say()` call `ctx->write_fn(ctx->userdata, text, len)` to emit output.
+
+Changes:
+- `eval.h`: Add `EvalWriteFn` typedef, `EvalContext` struct, change `eval()` signature.
+- `eval.c`: Add `EvalContext *ctx` parameter to `eval()`. Thread `ctx` through every recursive `eval()` call. No functional change yet — just plumbing.
+- `repl.c`: Update `repl_eval_line()` to create an `EvalContext` and pass it to `eval()`. For now, use a no-op write callback (or NULL check in `say()`).
+- All existing `eval()` call sites updated for new signature.
+- **Tests**: All existing eval tests updated to pass an `EvalContext` (can use a simple test context that appends to a buffer). No behavioral changes — all existing tests must still pass.
+
+#### 2b: `say()` built-in function
+
+Add `say()` as a built-in function that emits output through the `EvalContext` write callback.
+
+- Behavior: `say(expr)` evaluates `expr`, calls `ctx->write_fn` with the formatted value followed by a newline. Returns `nothing`.
 - Error handling: `say()` with 0 args or 2+ args produces a runtime error. If the argument evaluates to an error, the error propagates.
-- The evaluator needs to handle `AST_CALL` nodes. For now, the only recognized function name is `say`. Unknown function names produce a runtime error.
-- `say()` writes to stdout using `printf`/`puts`. In the REPL server context, this means output goes to the server's stdout, not back to the client. This is fine for file execution mode (Step 3). Document this REPL limitation.
-- **Tests**: Eval tests for `say("hello")` producing output and returning `nothing`. Error tests for wrong arity and unknown functions.
+- The evaluator handles `AST_CALL` nodes. For now, the only recognized function name is `say`. Unknown function names produce a runtime error.
+- `say()` calls `value_format()` on the argument, then passes the result + `"\n"` to `ctx->write_fn`. Zero buffering.
+- **Tests**: Eval tests using a buffer-capturing `EvalContext` to verify `say("hello")` writes `"hello\n"` to the output and returns `nothing`. Error tests for wrong arity and unknown functions.
+
+#### 2c: Output frame in JSON protocol
+
+Extend the JSON protocol to support incremental output frames (nREPL-style). The server can now send multiple frames per eval request:
+
+- **Output frame** (zero or more, sent as `say()` executes):
+  ```json
+  {"type": "output", "id": 1, "data": "hello\n"}
+  ```
+- **Result frame** (exactly one, terminal, sent when eval completes — same as today's response):
+  ```json
+  {"type": "result", "id": 1, "ok": true, "value": "nothing"}
+  ```
+
+Changes:
+- `json.h`: Add `JsonOutputFrame` struct (`id` + `data`), declare `json_encode_output()` and `json_parse_output()`.
+- `json.c`: Implement output frame encode/decode.
+- **Tests**: Encode/decode round-trip tests for output frames.
+
+#### 2d: Wire output frames through REPL server
+
+Connect the `EvalContext` write callback to the JSON output frame in the server.
+
+- `repl_server.c`: In `handle_json_request()`, create a `ServerOutputCtx` holding `{fd, request_id}`. Build an `EvalContext` with a callback that encodes and sends a JSON output frame via `json_frame_write()` to the client fd. Pass this context through `repl_eval_line()` into `eval()`.
+- `repl.c`: Update `repl_eval_line()` to accept an `EvalContext *` parameter and pass it to `eval()`.
+- Thread safety: The global eval lock ensures only one eval runs at a time. Each client thread owns its fd exclusively. No contention.
+- **Tests**: REPL server tests that verify output frames are sent before the result frame. A `say("hello")` eval should produce an output frame with `"hello\n"` followed by a result frame with `"nothing"`.
+
+#### 2e: Client-side output frame handling
+
+Update the client to read multiple frames per request.
+
+- Currently: send request → read one response → print.
+- New: send request → loop reading frames → print `output` frame data to stdout immediately → stop on `result` frame, print the value.
+- `main.c` (client side): Change `send_and_print()` to loop on `json_frame_read()`. Check `"type"` field: if `"output"`, print `data` to stdout; if `"result"`, handle as before and break.
+- `json.h`/`json.c`: Add a helper to peek at the `"type"` field of a frame (or parse into a tagged union).
+- **Tests**: Integration tests in `test_cli.sh` — pipe `say("hello")` to the client, verify `hello` appears in stdout before the result value.
 
 ### Step 3: `cutlet run <file>` — file execution
 
@@ -67,6 +133,7 @@ Add a `run` subcommand to execute a `.cutlet` file directly, without the TCP ser
 - Usage: `cutlet run <filename>`
 - Reads the entire file into memory, parses it as a block (multi-line), evaluates it directly using the existing evaluator. No TCP server involved.
 - The runtime environment is initialized and destroyed around the eval.
+- The `EvalContext` write callback writes directly to real stdout via `fwrite()`.
 - Exit code: 0 on success, 1 on parse/eval error. Errors are printed to stderr.
 - The final expression value is NOT printed (unlike the REPL). Output comes only from `say()` calls.
 - Update `print_usage()`, update README.
@@ -115,6 +182,10 @@ Add a test (in `tests/test_examples.sh` or as part of `test_cli.sh`) that:
 Add a reminder to `AGENTS.md` that says:
 - When a new language feature is added, remind the user to update `TUTORIAL.md` and add/update examples in `examples/`.
 - The agent should NOT do the update itself — just remind the user.
+
+### Step 8: Remove legacy REPL functions
+
+Remove `repl_format_line()` and `repl_format_line_ast()` from `repl.c` and `repl.h`. These legacy wrappers are only used by tests (`test_repl.c` and `test_runtime.c`) — no production code depends on them. Rewrite the ~25 test call sites in those files to use `repl_eval_line()` directly instead.
 
 ---
 

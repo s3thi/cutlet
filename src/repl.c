@@ -126,8 +126,11 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast) {
         r.ast = ast_format(node);
     }
 
-    /* Evaluate the expression. */
-    Value v = eval(node);
+    /* Evaluate the expression.
+     * Create an EvalContext with a no-op write callback. Output from say()
+     * will be wired through the REPL server's context in a later step. */
+    EvalContext ctx = {.write_fn = NULL, .userdata = NULL};
+    Value v = eval(node, &ctx);
     ast_free(node);
 
     if (v.type == VAL_ERROR) {
