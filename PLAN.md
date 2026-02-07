@@ -9,18 +9,19 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 - **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char.
 - **Pratt parser**: Precedence climbing. `or` (prec 1) → `and` (prec 2) → `not` (prec 3, prefix) → comparison (prec 4, non-assoc) → `+ -` (prec 5) → `* /` (prec 6) → unary minus (prec 7) → `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
-- **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN, BLOCK, IF. S-expr format output.
+- **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN, BLOCK, IF, CALL. S-expr format output.
 - **Evaluator**: Tree-walking. Produces VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, or VAL_ERROR. All arithmetic in double precision.
 - **Booleans**: `true`/`false` keywords → `AST_BOOL` → `VAL_BOOL`.
-- **Nothing**: `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true; `nothing == anything_else` is false. Ordered comparisons with nothing produce errors.
-- **Comparison operators**: `==`, `!=`, `<`, `>`, `<=`, `>=`. All return VAL_BOOL. Non-associative (no chaining). Mixed-type equality allowed; mixed-type ordering is an error.
+- **Nothing**: `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true; ordered comparisons with nothing produce errors.
+- **Comparison operators**: `==`, `!=`, `<`, `>`, `<=`, `>=`. Return VAL_BOOL. Non-associative. Mixed-type equality allowed; mixed-type ordering is an error.
 - **Logical operators**: `and`, `or` (keyword infix, short-circuit, Python semantics — return operand values), `not` (keyword prefix, returns VAL_BOOL). Truthiness: `false`, `nothing`, `0`, `""`, errors are falsy.
-- **Multi-line input**: `TOK_NEWLINE` token, `AST_BLOCK` for multiple statements, newlines as separators.
-- **If/else expressions**: `if cond then body [else body] end`. Expression form (returns value). `else if` special case (single `end`). Only taken branch evaluated.
-- **Runtime**: Global pthread rwlock serializes eval. Linked-list variable environment with thread-safe get/define/assign.
-- **REPL/CLI**: TCP server (thread-per-client), TCP client with isocline for rich line editing and multiline input. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs.
-- **Isocline integration**: REPL client uses isocline for interactive input with line editing, history persistence (`~/.cutlet/history`), and multiline expression accumulation. Uses `parser_is_complete()` to detect when to show continuation prompt (`"    ... "`).
-- **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server. Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
+- **Multi-line input**: `TOK_NEWLINE` token, `AST_BLOCK` for newline-separated statements. Evaluator runs children in order, returns last value.
+- **If/else expressions**: `if cond then body [else body] end`. Expression form (returns value). `else if` special case (single `end`). Only taken branch evaluated. No-else returns `nothing`.
+- **Variables**: `my x = expr` declares, `x = expr` assigns. Linked-list environment with thread-safe get/define/assign.
+- **Runtime**: Global pthread rwlock serializes eval.
+- **REPL/CLI**: TCP server (thread-per-client), TCP client with isocline for rich line editing and multiline input. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs. History persistence (`~/.cutlet/history`). `parser_is_complete()` drives continuation prompts.
+- **Function calls**: `name(arg1, arg2, ...)` syntax parsed as `AST_CALL`. Zero or more comma-separated arguments. Parsed as postfix after identifier.
+- **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server, ptr_array. Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`.
 
 ## Key files
 
@@ -34,47 +35,86 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 | `src/repl.c/h` | REPL client |
 | `src/repl_server.c/h` | REPL server |
 | `src/json.c/h` | JSON protocol framing |
+| `src/ptr_array.c/h` | Dynamic pointer array utility |
 | `vendor/isocline/` | Isocline library (v1.0.9) for line editing |
 | `tests/test_*.c` | Unit tests |
 | `tests/test_cli.sh` | Integration tests |
-
-## Completed: Multi-line input and if/else expressions ✓
-
-### Step 1: Nothing literal ✓
-Added `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true. Ordered comparisons with nothing produce errors.
-
-### Step 2: Multi-line input ✓
-Added `TOK_NEWLINE` token. Parser creates `AST_BLOCK` for newline-separated statements. Evaluator runs children in order, returns last value.
-
-### Step 3: If/else expressions ✓
-Syntax: `if cond then body [else body] end`. Expression form (returns value). `else if` requires single `end`. Only taken branch evaluated. No-else returns `nothing`.
+| `TUTORIAL.md` | Language tutorial (learnxinyminutes style) |
+| `examples/` | Example programs with `.expected` output files |
 
 ---
 
-## Completed: Isocline integration for multiline REPL input ✓
+## Next: Built-in function calls, say(), file execution, tutorial, and examples
 
-### What was implemented
+### Step 1: Function call parsing ✓
 
-- **Vendored isocline v1.0.9** in `vendor/isocline/` with original directory structure
-- **Added `parser_is_complete()` API** to detect incomplete expressions (unclosed if/end, unmatched parens, unterminated strings, trailing operators)
-- **Replaced `fgets()` with isocline** in the REPL client for interactive input
-- **Multiline expression accumulation**: Lines are accumulated until `parser_is_complete()` returns true
-- **Continuation prompt**: `"    ... "` shown for incomplete expressions
-- **History persistence**: Saved to `~/.cutlet/history` (directory created automatically)
-- **Pipe mode preserved**: Non-interactive input (pipes, files) still works line-by-line
+Added `AST_CALL` node type. Parsing in `parse_atom()` after identifier: if next token is `(`, parse comma-separated arguments until `)`. S-expr: `[CALL say [STRING hello]]`. 21 parser tests.
 
-### Example session
+### Step 2: `say()` built-in function
 
-```
-cutlet> my x = if true then
-    ...   "hello"
-    ... else
-    ...   "goodbye"
-    ... end
-hello
-cutlet> x
-hello
-```
+Add `say()` as a built-in function that prints to stdout.
+
+- Behavior: `say(expr)` evaluates `expr`, prints the formatted value to stdout followed by a newline. Returns `nothing`.
+- Error handling: `say()` with 0 args or 2+ args produces a runtime error. If the argument evaluates to an error, the error propagates.
+- The evaluator needs to handle `AST_CALL` nodes. For now, the only recognized function name is `say`. Unknown function names produce a runtime error.
+- `say()` writes to stdout using `printf`/`puts`. In the REPL server context, this means output goes to the server's stdout, not back to the client. This is fine for file execution mode (Step 3). Document this REPL limitation.
+- **Tests**: Eval tests for `say("hello")` producing output and returning `nothing`. Error tests for wrong arity and unknown functions.
+
+### Step 3: `cutlet run <file>` — file execution
+
+Add a `run` subcommand to execute a `.cutlet` file directly, without the TCP server.
+
+- Usage: `cutlet run <filename>`
+- Reads the entire file into memory, parses it as a block (multi-line), evaluates it directly using the existing evaluator. No TCP server involved.
+- The runtime environment is initialized and destroyed around the eval.
+- Exit code: 0 on success, 1 on parse/eval error. Errors are printed to stderr.
+- The final expression value is NOT printed (unlike the REPL). Output comes only from `say()` calls.
+- Update `print_usage()`, update README.
+- **Tests**: CLI integration tests in `test_cli.sh` — write a temp `.cutlet` file, run it with `cutlet run`, verify stdout output.
+
+### Step 4: Write `TUTORIAL.md`
+
+Write a language tutorial in the style of [learnxinyminutes.com](https://learnxinyminutes.com/go/). The tutorial is a single `.cutlet` file embedded in markdown with extensive inline comments (using `#` once we have comments, or just markdown prose around code blocks).
+
+Since Cutlet doesn't have comments yet, the tutorial will use markdown prose with code blocks showing REPL sessions and file examples. Cover all working features:
+
+- Numbers, strings, booleans, nothing
+- Arithmetic, exponentiation, unary minus
+- String values
+- Comparison operators
+- Logical operators (and, or, not) with short-circuit and truthiness rules
+- Variables (my, assignment)
+- If/else expressions
+- Multi-line blocks
+- `say()` for output
+- Running files with `cutlet run`
+- The REPL
+
+### Step 5: Example programs in `examples/`
+
+Create example `.cutlet` programs that exercise the language features and produce output via `say()`. Each example has a matching `.expected` file containing the expected stdout.
+
+Examples:
+- `examples/hello.cutlet` + `examples/hello.expected` — Hello World with `say()`
+- `examples/arithmetic.cutlet` + `examples/arithmetic.expected` — arithmetic and variables
+- `examples/fizzbuzz.cutlet` + `examples/fizzbuzz.expected` — if/else logic (simplified, since we don't have loops yet)
+- `examples/logic.cutlet` + `examples/logic.expected` — logical operators and truthiness
+
+### Step 6: Test that runs all examples
+
+Add a test (in `tests/test_examples.sh` or as part of `test_cli.sh`) that:
+
+1. Finds all `examples/*.cutlet` files.
+2. For each, runs `cutlet run <file>` and captures stdout.
+3. Compares stdout against the matching `examples/*.expected` file.
+4. Reports pass/fail per example.
+5. Integrated into `make test` so it runs with the rest of the suite.
+
+### Step 7: Update `AGENTS.md`
+
+Add a reminder to `AGENTS.md` that says:
+- When a new language feature is added, remind the user to update `TUTORIAL.md` and add/update examples in `examples/`.
+- The agent should NOT do the update itself — just remind the user.
 
 ---
 

@@ -308,8 +308,12 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
         free(history_path);
     }
 
-    /* Disable isocline's built-in multiline mode; we handle continuation ourselves */
+    /* Disable isocline's built-in multiline mode; we handle continuation ourselves
+     * using parser_is_complete() to auto-detect when an expression is finished. */
     ic_enable_multiline(false);
+
+    /* Disable default file completion — not useful for a language REPL */
+    ic_set_default_completer(NULL, NULL);
 
     /* Buffer for accumulating multiline input */
     char *input_buf = malloc(MAX_INPUT_BUF);
@@ -322,9 +326,11 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
     bool continuing = false;
 
     while (1) {
-        /* Choose prompt based on whether we're continuing a multiline expression */
-        const char *prompt = continuing ? "    ... " : "cutlet> ";
-        char *line = ic_readline(prompt);
+        /* Use isocline's prompt marker API for prompt display.
+         * Update the marker each iteration to switch between primary
+         * and continuation prompts. */
+        ic_set_prompt_marker(continuing ? "    ... " : "cutlet> ", NULL);
+        char *line = ic_readline(NULL);
 
         if (!line) {
             /* EOF (Ctrl+D) or error */
