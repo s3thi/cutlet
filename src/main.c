@@ -215,12 +215,29 @@ static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
     return 0;
 }
 
+/* ANSI escape codes for colored output (used only when stdout is a TTY). */
+#define ANSI_GREEN "\033[32m"
+#define ANSI_DIM "\033[2m"
+#define ANSI_RESET "\033[0m"
+
 /*
  * Helper: send an expression to the server and print the response.
+ * Reads frames in a loop (nREPL-style): output frames from say() are
+ * printed to stdout immediately, and the terminal result frame is
+ * printed with optional color/prefix formatting.
+ *
+ * When use_color is true (stdout is a TTY):
+ *   - Results: green "=> value"
+ *   - Debug:   dim "# TOKENS ..." / "# AST ..."
+ *   - say() output: raw (no prefix, no color)
+ * When use_color is false (pipe/redirect):
+ *   - All output is raw, no ANSI codes, no prefixes.
+ *
  * Returns true on success, false if connection is lost.
  */
 static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool want_tokens,
-                           bool want_ast, bool *warned_extra_tokens, bool *warned_extra_ast) {
+                           bool want_ast, bool *warned_extra_tokens, bool *warned_extra_ast,
+                           bool use_color) {
     (*req_id)++;
     /* Cast expr to char* for JsonRequest; we don't call json_request_free so it's safe */
     JsonRequest req = {
@@ -242,54 +259,88 @@ static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool
     }
     free(req_json);
 
-    /* Read JSON response. */
-    size_t resp_len = 0;
-    char *resp_json = json_frame_read(fd, &resp_len, NULL);
-    if (!resp_json) {
-        fprintf(stderr, "Error: connection lost\n");
-        return false;
-    }
-
-    JsonResponse resp;
-    if (!json_parse_response(resp_json, resp_len, &resp)) {
-        fprintf(stderr, "Error: invalid response from server\n");
-        free(resp_json);
-        return false;
-    }
-    free(resp_json);
-
-    /* Warn once if server sends debug fields client didn't request. */
-    if (!want_tokens && resp.tokens && !*warned_extra_tokens) {
-        fprintf(stderr, "Warning: server sent token debug output (not requested)\n");
-        *warned_extra_tokens = true;
-    }
-    if (!want_ast && resp.ast && !*warned_extra_ast) {
-        fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
-        *warned_extra_ast = true;
-    }
-
-    /* Print output in order: tokens, ast, value/error. */
-    if (want_tokens && resp.tokens) {
-        puts(resp.tokens);
-    }
-    if (want_ast && resp.ast) {
-        puts(resp.ast);
-    }
-
-    if (resp.ok) {
-        if (resp.value) {
-            puts(resp.value);
+    /* Read frames in a loop until we get the terminal result frame.
+     * Output frames (from say()) are printed immediately.
+     * The result frame is handled last. */
+    while (true) {
+        size_t frame_len = 0;
+        char *frame_json = json_frame_read(fd, &frame_len, NULL);
+        if (!frame_json) {
+            fprintf(stderr, "Error: connection lost\n");
+            return false;
         }
-        /* value==NULL means blank input; print nothing. */
-    } else {
-        if (resp.error) {
-            printf("ERR %s\n", resp.error);
-        }
-    }
-    fflush(stdout);
 
-    json_response_free(&resp);
-    return true;
+        JsonFrameType ftype = json_frame_type(frame_json, frame_len);
+
+        if (ftype == JSON_FRAME_OUTPUT) {
+            /* Print say() output immediately, raw (no prefix/color). */
+            JsonOutputFrame oframe;
+            if (json_parse_output(frame_json, frame_len, &oframe)) {
+                if (oframe.data) {
+                    fputs(oframe.data, stdout);
+                    fflush(stdout);
+                }
+                json_output_frame_free(&oframe);
+            }
+            free(frame_json);
+            continue;
+        }
+
+        if (ftype == JSON_FRAME_RESULT) {
+            JsonResponse resp;
+            if (!json_parse_response(frame_json, frame_len, &resp)) {
+                fprintf(stderr, "Error: invalid response from server\n");
+                free(frame_json);
+                return false;
+            }
+            free(frame_json);
+
+            /* Warn once if server sends debug fields client didn't request. */
+            if (!want_tokens && resp.tokens && !*warned_extra_tokens) {
+                fprintf(stderr, "Warning: server sent token debug output (not requested)\n");
+                *warned_extra_tokens = true;
+            }
+            if (!want_ast && resp.ast && !*warned_extra_ast) {
+                fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
+                *warned_extra_ast = true;
+            }
+
+            /* Print output in order: tokens, ast, value/error. */
+            if (want_tokens && resp.tokens) {
+                if (use_color)
+                    printf(ANSI_DIM "# %s" ANSI_RESET "\n", resp.tokens);
+                else
+                    puts(resp.tokens);
+            }
+            if (want_ast && resp.ast) {
+                if (use_color)
+                    printf(ANSI_DIM "# %s" ANSI_RESET "\n", resp.ast);
+                else
+                    puts(resp.ast);
+            }
+
+            if (resp.ok) {
+                if (resp.value) {
+                    if (use_color)
+                        printf(ANSI_GREEN "=> %s" ANSI_RESET "\n", resp.value);
+                    else
+                        puts(resp.value);
+                }
+                /* value==NULL means blank input; print nothing. */
+            } else {
+                if (resp.error) {
+                    printf("ERR %s\n", resp.error);
+                }
+            }
+            fflush(stdout);
+
+            json_response_free(&resp);
+            return true;
+        }
+
+        /* Unknown frame type — skip it. */
+        free(frame_json);
+    }
 }
 
 /*
@@ -300,6 +351,7 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
     unsigned long req_id = 0;
     bool warned_extra_tokens = false;
     bool warned_extra_ast = false;
+    bool use_color = isatty(fileno(stdout));
 
     /* Initialize isocline */
     char *history_path = get_history_path();
@@ -337,7 +389,7 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
             if (input_len > 0) {
                 /* Send any accumulated incomplete input to get error message */
                 if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast,
-                                    &warned_extra_tokens, &warned_extra_ast)) {
+                                    &warned_extra_tokens, &warned_extra_ast, use_color)) {
                     free(input_buf);
                     return 1;
                 }
@@ -369,7 +421,7 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
         if (parser_is_complete(input_buf)) {
             /* Input is complete (or has a real error), send to server */
             if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast, &warned_extra_tokens,
-                                &warned_extra_ast)) {
+                                &warned_extra_ast, use_color)) {
                 free(input_buf);
                 return 1;
             }
@@ -396,6 +448,7 @@ static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
     unsigned long req_id = 0;
     bool warned_extra_tokens = false;
     bool warned_extra_ast = false;
+    bool use_color = isatty(fileno(stdout));
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
         /* Strip trailing newline/CRLF. */
@@ -405,7 +458,7 @@ static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
         }
 
         if (!send_and_print(fd, line, &req_id, want_tokens, want_ast, &warned_extra_tokens,
-                            &warned_extra_ast)) {
+                            &warned_extra_ast, use_color)) {
             return 1;
         }
     }

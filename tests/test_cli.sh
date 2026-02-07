@@ -432,6 +432,83 @@ else
     PASS=$((PASS + 1))
 fi
 
+# ============================================================
+# say() output handling (client-side output frames)
+# ============================================================
+echo
+echo "say() output (client-side):"
+start_server ""
+
+if [ -n "$SERVER_PORT" ]; then
+    # say("hello") should produce output frame "hello\n" + result "nothing"
+    say_hello_result=$(echo 'say("hello")' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    say_hello_expected="hello
+nothing"
+    if [ "$say_hello_result" = "$say_hello_expected" ]; then
+        echo "  PASS: say(\"hello\") outputs hello then nothing"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: say(\"hello\") outputs hello then nothing"
+        echo "    Expected: $say_hello_expected"
+        echo "    Got:      $say_hello_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # say() with a number argument
+    say_num_result=$(echo 'say(42)' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    say_num_expected="42
+nothing"
+    if [ "$say_num_result" = "$say_num_expected" ]; then
+        echo "  PASS: say(42) outputs 42 then nothing"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: say(42) outputs 42 then nothing"
+        echo "    Expected: $say_num_expected"
+        echo "    Got:      $say_num_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Multiple say() calls on separate lines (pipe mode sends each as separate request)
+    multi_say_result=$(printf 'say("a")\nsay("b")' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    multi_say_expected="a
+nothing
+b
+nothing"
+    if [ "$multi_say_result" = "$multi_say_expected" ]; then
+        echo "  PASS: multiple say() calls produce correct output"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: multiple say() calls produce correct output"
+        echo "    Expected: $multi_say_expected"
+        echo "    Got:      $multi_say_result"
+        FAIL=$((FAIL + 1))
+    fi
+
+    # Regular expression without say() still works (no output frames)
+    test_via_server "no say output for regular expr" "1 + 2" "3"
+
+    # say() output appears before result in combined expressions
+    # (pipe mode: each line is a separate request)
+    combo_result=$(printf 'say("hi")\n1 + 2' | "$CUTLET" repl --connect "127.0.0.1:$SERVER_PORT" 2>/dev/null)
+    combo_expected="hi
+nothing
+3"
+    if [ "$combo_result" = "$combo_expected" ]; then
+        echo "  PASS: say() then expression produces correct order"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: say() then expression produces correct order"
+        echo "    Expected: $combo_expected"
+        echo "    Got:      $combo_result"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "  FAIL: server did not start"
+    FAIL=$((FAIL + 5))
+fi
+
+stop_server
+
 echo
 echo "========================================"
 echo "Tests run: $((PASS + FAIL))"

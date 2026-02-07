@@ -116,7 +116,7 @@ Connect the `EvalContext` write callback to the JSON output frame in the server.
 - Thread safety: The global eval lock ensures only one eval runs at a time. Each client thread owns its fd exclusively. No contention.
 - **Tests**: REPL server tests that verify output frames are sent before the result frame. A `say("hello")` eval should produce an output frame with `"hello\n"` followed by a result frame with `"nothing"`.
 
-#### 2e: Client-side output frame handling
+#### 2e: Client-side output frame handling ✓
 
 Update the client to read multiple frames per request.
 
