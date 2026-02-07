@@ -19,6 +19,7 @@ The author of this project is an experienced developer of 20 years. But they don
 - Never disable any linter errors without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
 - Update README if command line flags change. Also update README if build flags change, the dependencies change, or if we change the behavior of the REPL.
+- We don't care about backward compatibility. Feel free to change anything across the codebase if it leads to better design, better UX, cleaner code.
 
 ## REPL debug flags
 
