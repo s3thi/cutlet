@@ -79,7 +79,7 @@ Changes:
 - All existing `eval()` call sites updated for new signature.
 - **Tests**: All existing eval tests updated to pass an `EvalContext` (can use a simple test context that appends to a buffer). No behavioral changes — all existing tests must still pass.
 
-#### 2b: `say()` built-in function
+#### 2b: `say()` built-in function ✓
 
 Add `say()` as a built-in function that emits output through the `EvalContext` write callback.
 

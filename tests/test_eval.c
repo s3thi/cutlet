@@ -27,6 +27,51 @@ static void test_write_noop(void *userdata, const char *data, size_t len) {
 static EvalContext test_ctx = {.write_fn = test_write_noop, .userdata = NULL};
 
 /* ============================================================
+ * Buffer-capturing EvalContext for say() tests
+ * ============================================================ */
+
+/*
+ * Simple growable buffer for capturing say() output in tests.
+ */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} TestBuffer;
+
+static void test_buffer_init(TestBuffer *buf) {
+    buf->data = malloc(256);
+    buf->data[0] = '\0';
+    buf->len = 0;
+    buf->cap = 256;
+}
+
+static void test_buffer_free(TestBuffer *buf) {
+    free(buf->data);
+    buf->data = NULL;
+    buf->len = 0;
+    buf->cap = 0;
+}
+
+/*
+ * Write callback that appends data to a TestBuffer.
+ * userdata must point to a TestBuffer.
+ */
+static void test_write_capture(void *userdata, const char *data, size_t len) {
+    TestBuffer *buf = (TestBuffer *)userdata;
+    while (buf->len + len + 1 > buf->cap) {
+        buf->cap *= 2;
+        char *new_data = realloc(buf->data, buf->cap); // NOLINT
+        if (!new_data)
+            return; /* OOM in test — just drop the write */
+        buf->data = new_data;
+    }
+    memcpy(buf->data + buf->len, data, len);
+    buf->len += len;
+    buf->data[buf->len] = '\0';
+}
+
+/* ============================================================
  * Simple test harness
  * ============================================================ */
 
@@ -779,6 +824,233 @@ TEST(test_if_complex_condition) {
 }
 
 /* ============================================================
+ * say() built-in function (Step 2b)
+ * ============================================================ */
+
+/* say("hello") → writes "hello\n" to output, returns nothing */
+TEST(test_say_string) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(\"hello\")", &node, &perr), "parse say string");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
+    ASSERT_STR_EQ(buf.data, "hello\n", "say writes hello\\n");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say(42) → writes "42\n" to output, returns nothing */
+TEST(test_say_number) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(42)", &node, &perr), "parse say number");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
+    ASSERT_STR_EQ(buf.data, "42\n", "say writes 42\\n");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say(true) → writes "true\n" to output, returns nothing */
+TEST(test_say_bool) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(true)", &node, &perr), "parse say bool");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
+    ASSERT_STR_EQ(buf.data, "true\n", "say writes true\\n");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say(nothing) → writes "nothing\n" to output, returns nothing */
+TEST(test_say_nothing) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(nothing)", &node, &perr), "parse say nothing");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
+    ASSERT_STR_EQ(buf.data, "nothing\n", "say writes nothing\\n");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say(1 + 2) → evaluates expression, writes "3\n" */
+TEST(test_say_expression) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(1 + 2)", &node, &perr), "parse say expr");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
+    ASSERT_STR_EQ(buf.data, "3\n", "say writes 3\\n");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say() with no args → error with specific message */
+TEST(test_say_no_args) {
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("say()", &node, &perr), "parse say no args");
+    Value v = eval(node, &test_ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "say no args is error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "1 argument") != NULL, "error mentions expected arity");
+    ASSERT(strstr(msg, "got 0") != NULL, "error mentions actual count");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* say(1, 2) with too many args → error with specific message */
+TEST(test_say_too_many_args) {
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("say(1, 2)", &node, &perr), "parse say too many args");
+    Value v = eval(node, &test_ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "say too many args is error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "1 argument") != NULL, "error mentions expected arity");
+    ASSERT(strstr(msg, "got 2") != NULL, "error mentions actual count");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* unknown_fn(1) → error mentioning the function name */
+TEST(test_call_unknown_function) {
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("unknown_fn(1)", &node, &perr), "parse unknown fn");
+    Value v = eval(node, &test_ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "unknown function is error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "unknown_fn") != NULL, "error mentions function name");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* say(1/0) → error propagation (division by zero), not "unknown AST node" */
+TEST(test_say_error_propagation) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(1/0)", &node, &perr), "parse say error");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "say propagates error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "division by zero") != NULL, "propagates division by zero error");
+    free(msg);
+    ASSERT_STR_EQ(buf.data, "", "no output on error");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say() with NULL write_fn → error mentioning output writer */
+TEST(test_say_null_write_fn) {
+    EvalContext ctx = {.write_fn = NULL, .userdata = NULL};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    ASSERT(parser_parse("say(\"hello\")", &node, &perr), "parse say null ctx");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_ERROR, "say with null write_fn errors");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "output") != NULL, "error mentions output");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* say returns nothing, usable in expressions: say("hi") == nothing → true */
+TEST(test_say_returns_nothing_in_expr) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(\"hi\") == nothing", &node, &perr), "parse say in expr");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_BOOL, "comparison returns bool");
+    ASSERT(v.boolean == true, "say() == nothing is true");
+    ASSERT_STR_EQ(buf.data, "hi\n", "say still writes output");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Multiple say() calls in a block accumulate output */
+TEST(test_say_multiple_in_block) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    AstNode *node = NULL;
+    ParseError perr;
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
+    ASSERT(parser_parse("say(\"a\")\nsay(\"b\")\nsay(\"c\")", &node, &perr), "parse say block");
+    Value v = eval(node, &ctx);
+    ast_free(node);
+    ASSERT(v.type == VAL_NOTHING, "last say returns nothing");
+    ASSERT_STR_EQ(buf.data, "a\nb\nc\n", "all say output accumulated");
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* "say" can be used as a variable name (not reserved) */
+TEST(test_say_as_variable) { assert_eval_number("my say = 42\nsay", 42.0, "say as variable"); }
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -953,6 +1225,21 @@ int main(void) {
     RUN_TEST(test_if_falsy_nothing);
     RUN_TEST(test_if_in_expression);
     RUN_TEST(test_if_complex_condition);
+
+    printf("\nsay() built-in function:\n");
+    RUN_TEST(test_say_string);
+    RUN_TEST(test_say_number);
+    RUN_TEST(test_say_bool);
+    RUN_TEST(test_say_nothing);
+    RUN_TEST(test_say_expression);
+    RUN_TEST(test_say_no_args);
+    RUN_TEST(test_say_too_many_args);
+    RUN_TEST(test_call_unknown_function);
+    RUN_TEST(test_say_error_propagation);
+    RUN_TEST(test_say_null_write_fn);
+    RUN_TEST(test_say_returns_nothing_in_expr);
+    RUN_TEST(test_say_multiple_in_block);
+    RUN_TEST(test_say_as_variable);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

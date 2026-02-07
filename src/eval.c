@@ -349,6 +349,46 @@ Value eval(const AstNode *node, EvalContext *ctx) {
         return result;
     }
 
+    case AST_CALL: {
+        /* Built-in function call.
+         * node->value = function name, node->children = arguments.
+         * Currently only "say" is recognized; unknown names produce errors. */
+        const char *fn_name = node->value;
+
+        if (strcmp(fn_name, "say") == 0) {
+            /* say() expects exactly 1 argument */
+            if (node->child_count != 1) {
+                return make_error("say() expects 1 argument, got %zu", node->child_count);
+            }
+
+            /* Evaluate the argument; propagate errors */
+            Value arg = eval(node->children[0], ctx);
+            if (arg.type == VAL_ERROR)
+                return arg;
+
+            /* Require a working write callback */
+            if (!ctx->write_fn) {
+                value_free(&arg);
+                return make_error("no output writer available");
+            }
+
+            /* Format the value and write it + newline */
+            char *formatted = value_format(&arg);
+            value_free(&arg);
+            if (!formatted)
+                return make_error("memory allocation failed");
+
+            ctx->write_fn(ctx->userdata, formatted, strlen(formatted));
+            ctx->write_fn(ctx->userdata, "\n", 1);
+            free(formatted);
+
+            return make_nothing();
+        }
+
+        /* Unknown function name */
+        return make_error("unknown function '%s'", fn_name);
+    }
+
     case AST_IF: {
         /* If expression: evaluate condition, then evaluate the appropriate branch.
          * children[0] = condition
