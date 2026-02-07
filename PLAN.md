@@ -89,7 +89,7 @@ Add `say()` as a built-in function that emits output through the `EvalContext` w
 - `say()` calls `value_format()` on the argument, then passes the result + `"\n"` to `ctx->write_fn`. Zero buffering.
 - **Tests**: Eval tests using a buffer-capturing `EvalContext` to verify `say("hello")` writes `"hello\n"` to the output and returns `nothing`. Error tests for wrong arity and unknown functions.
 
-#### 2c: Output frame in JSON protocol
+#### 2c: Output frame in JSON protocol ✓
 
 Extend the JSON protocol to support incremental output frames (nREPL-style). The server can now send multiple frames per eval request:
 

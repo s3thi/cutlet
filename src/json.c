@@ -152,6 +152,28 @@ char *json_encode_response(const JsonResponse *resp) {
     return buf;
 }
 
+char *json_encode_output(const JsonOutputFrame *frame) {
+    /* Estimate size: fixed overhead + escaped data string. */
+    size_t data_esc = frame->data ? json_escaped_len(frame->data) : 0;
+    size_t cap = 64 + data_esc;
+    char *buf = malloc(cap);
+    if (!buf)
+        return NULL;
+
+    size_t pos = 0;
+    pos += (size_t)sprintf(buf + pos, "{\"type\":\"output\",\"id\":%lu", frame->id);
+
+    if (frame->data) {
+        append_str_field(buf, &pos, "data", frame->data, true);
+    } else {
+        pos += (size_t)sprintf(buf + pos, ",\"data\":\"\"");
+    }
+
+    buf[pos++] = '}';
+    buf[pos] = '\0';
+    return buf;
+}
+
 /* ============================================================
  * Decoding helpers
  * ============================================================ */
@@ -449,6 +471,148 @@ bool json_parse_response(const char *json, size_t len, JsonResponse *resp) {
 }
 
 /* ============================================================
+ * Output frame parsing
+ * ============================================================ */
+
+bool json_parse_output(const char *json, size_t len, JsonOutputFrame *frame) {
+    memset(frame, 0, sizeof(*frame));
+
+    size_t pos = 0;
+    skip_ws(json, len, &pos);
+    if (pos >= len || json[pos] != '{')
+        return false;
+    pos++;
+
+    while (pos < len && json[pos] != '}') {
+        skip_ws(json, len, &pos);
+        if (pos >= len)
+            return false;
+        if (json[pos] == ',') {
+            pos++;
+            continue;
+        }
+        if (json[pos] == '}')
+            break;
+
+        char *key = parse_json_string(json, len, &pos);
+        if (!key)
+            return false;
+
+        skip_ws(json, len, &pos);
+        if (pos >= len || json[pos] != ':') {
+            free(key);
+            return false;
+        }
+        pos++;
+        skip_ws(json, len, &pos);
+
+        if (strcmp(key, "type") == 0) {
+            /* Consume type string — always "output". */
+            char *val = parse_json_string(json, len, &pos);
+            free(val);
+        } else if (strcmp(key, "id") == 0) {
+            if (!parse_ulong(json, len, &pos, &frame->id)) {
+                free(key);
+                return false;
+            }
+        } else if (strcmp(key, "data") == 0) {
+            frame->data = parse_json_string(json, len, &pos);
+        } else {
+            /* Unknown key: skip value. */
+            if (json[pos] == '"') {
+                char *skip = parse_json_string(json, len, &pos);
+                free(skip);
+            } else if (isdigit((unsigned char)json[pos])) {
+                unsigned long dummy;
+                parse_ulong(json, len, &pos, &dummy);
+            } else if (match_literal(json, len, &pos, "true") ||
+                       match_literal(json, len, &pos, "false") ||
+                       match_literal(json, len, &pos, "null")) {
+                /* consumed */
+            }
+        }
+        free(key);
+    }
+
+    return true;
+}
+
+/* ============================================================
+ * Frame type discrimination
+ * ============================================================ */
+
+JsonFrameType json_frame_type(const char *json, size_t len) {
+    /*
+     * Peek at the "type" field without doing a full parse.
+     * Scans key-value pairs looking for "type", then matches
+     * its string value against known frame types.
+     */
+    size_t pos = 0;
+    skip_ws(json, len, &pos);
+    if (pos >= len || json[pos] != '{')
+        return JSON_FRAME_UNKNOWN;
+    pos++;
+
+    while (pos < len && json[pos] != '}') {
+        skip_ws(json, len, &pos);
+        if (pos >= len)
+            return JSON_FRAME_UNKNOWN;
+        if (json[pos] == ',') {
+            pos++;
+            continue;
+        }
+        if (json[pos] == '}')
+            break;
+
+        char *key = parse_json_string(json, len, &pos);
+        if (!key)
+            return JSON_FRAME_UNKNOWN;
+
+        skip_ws(json, len, &pos);
+        if (pos >= len || json[pos] != ':') {
+            free(key);
+            return JSON_FRAME_UNKNOWN;
+        }
+        pos++;
+        skip_ws(json, len, &pos);
+
+        if (strcmp(key, "type") == 0) {
+            char *val = parse_json_string(json, len, &pos);
+            free(key);
+            if (!val)
+                return JSON_FRAME_UNKNOWN;
+
+            JsonFrameType result = JSON_FRAME_UNKNOWN;
+            if (strcmp(val, "result") == 0)
+                result = JSON_FRAME_RESULT;
+            else if (strcmp(val, "output") == 0)
+                result = JSON_FRAME_OUTPUT;
+
+            free(val);
+            return result;
+        }
+
+        /* Not the "type" key — skip its value so we can continue. */
+        if (json[pos] == '"') {
+            char *skip = parse_json_string(json, len, &pos);
+            free(skip);
+        } else if (isdigit((unsigned char)json[pos])) {
+            unsigned long dummy;
+            parse_ulong(json, len, &pos, &dummy);
+        } else if (match_literal(json, len, &pos, "true") ||
+                   match_literal(json, len, &pos, "false") ||
+                   match_literal(json, len, &pos, "null")) {
+            /* consumed */
+        }
+
+        free(key);
+    }
+
+    /* No "type" key found. */
+    return JSON_FRAME_UNKNOWN;
+}
+
+/* ============================================================
  * Free helpers
  * ============================================================ */
 
@@ -470,6 +634,13 @@ void json_response_free(JsonResponse *resp) {
     resp->error = NULL;
     resp->tokens = NULL;
     resp->ast = NULL;
+}
+
+void json_output_frame_free(JsonOutputFrame *frame) {
+    if (!frame)
+        return;
+    free(frame->data);
+    frame->data = NULL;
 }
 
 /* ============================================================

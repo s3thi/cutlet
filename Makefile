@@ -49,6 +49,9 @@ TEST_EVAL_BIN = $(BUILD_DIR)/test_eval
 TEST_PTR_ARRAY_SRC = $(TEST_DIR)/test_ptr_array.c
 TEST_PTR_ARRAY_BIN = $(BUILD_DIR)/test_ptr_array
 
+TEST_JSON_SRC = $(TEST_DIR)/test_json.c
+TEST_JSON_BIN = $(BUILD_DIR)/test_json
+
 # Default target: build the cutlet binary
 .PHONY: all
 all: $(BIN)
@@ -67,7 +70,7 @@ $(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(BUILD_DIR)
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-parser test-eval test-repl-server test-runtime test-ptr-array test-cli
+test: test-tokenizer test-repl test-parser test-eval test-repl-server test-runtime test-ptr-array test-json test-cli
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -104,6 +107,11 @@ test-runtime: $(TEST_RUNTIME_BIN)
 test-ptr-array: $(TEST_PTR_ARRAY_BIN)
 	./$(TEST_PTR_ARRAY_BIN)
 
+# Run JSON protocol tests
+.PHONY: test-json
+test-json: $(TEST_JSON_BIN)
+	./$(TEST_JSON_BIN)
+
 # Run CLI integration tests
 .PHONY: test-cli
 test-cli: $(BIN)
@@ -137,6 +145,10 @@ $(TEST_RUNTIME_BIN): $(TEST_RUNTIME_SRC) $(LIB_SRCS) | $(BUILD_DIR)
 $(TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c $(LDFLAGS)
 
+# Build JSON protocol test binary
+$(TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(LDFLAGS)
+
 # ---------- Formatting (clang-format) ----------
 
 # All tracked C source and header files, excluding vendor/ (third-party code).
@@ -155,7 +167,7 @@ format-check:
 # ---------- Compile database ----------
 
 # All source files that contribute to the compile database.
-ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_EVAL_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC)
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_EVAL_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC) $(TEST_JSON_SRC)
 
 # Auto-generate compile_commands.json when missing or when any source file changes.
 compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
@@ -198,6 +210,7 @@ SANITIZE_TEST_REPL_SERVER_BIN = $(SANITIZE_BUILD_DIR)/test_repl_server
 SANITIZE_TEST_EVAL_BIN = $(SANITIZE_BUILD_DIR)/test_eval
 SANITIZE_TEST_RUNTIME_BIN = $(SANITIZE_BUILD_DIR)/test_runtime
 SANITIZE_TEST_PTR_ARRAY_BIN = $(SANITIZE_BUILD_DIR)/test_ptr_array
+SANITIZE_TEST_JSON_BIN = $(SANITIZE_BUILD_DIR)/test_json
 
 $(SANITIZE_BUILD_DIR):
 	mkdir -p $(SANITIZE_BUILD_DIR)
@@ -227,9 +240,12 @@ $(SANITIZE_TEST_RUNTIME_BIN): $(TEST_RUNTIME_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD
 $(SANITIZE_TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS)
 
+$(SANITIZE_TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(SANITIZE_LDFLAGS)
+
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize
-test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_EVAL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_BIN)
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_EVAL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_TEST_JSON_BIN) $(SANITIZE_BIN)
 	./$(SANITIZE_TEST_TOKENIZER_BIN)
 	./$(SANITIZE_TEST_REPL_BIN)
 	./$(SANITIZE_TEST_PARSER_BIN)
@@ -237,6 +253,7 @@ test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITI
 	./$(SANITIZE_TEST_REPL_SERVER_BIN)
 	./$(SANITIZE_TEST_RUNTIME_BIN)
 	./$(SANITIZE_TEST_PTR_ARRAY_BIN)
+	./$(SANITIZE_TEST_JSON_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
 
 # ---------- Combined checks ----------
