@@ -220,6 +220,31 @@ static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_bo
     return node;
 }
 
+/*
+ * Create a function call AST node.
+ * value = function name, children[0..n] = arguments.
+ * Takes ownership of the name string (copied) and the children array.
+ */
+static AstNode *make_call(const char *name, size_t name_len, AstNode **args, size_t arg_count) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+    node->type = AST_CALL;
+    node->value = malloc(name_len + 1);
+    if (!node->value) {
+        free(node);
+        return NULL;
+    }
+    memcpy(node->value, name, name_len);
+    node->value[name_len] = '\0';
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->children = args;
+    node->child_count = arg_count;
+    return node;
+}
+
 /* ============================================================
  * Operator precedence and associativity
  * ============================================================ */
@@ -408,14 +433,114 @@ static AstNode *parse_atom(Parser *p) {
         return NULL;
     }
 
-    /* Identifier */
+    /* Identifier — may be followed by '(' for a function call.
+     * Token values are owned by the tokenizer and invalidated on advance(),
+     * so we must save the identifier name before consuming any more tokens. */
     if (t.type == TOK_IDENT) {
-        AstNode *node = make_leaf(AST_IDENT, t.value, t.value_len);
-        if (!node) {
+        /* Save identifier name before advance invalidates t.value */
+        char *saved_name = malloc(t.value_len + 1);
+        if (!saved_name) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
         }
+        memcpy(saved_name, t.value, t.value_len);
+        saved_name[t.value_len] = '\0';
+        size_t saved_len = t.value_len;
+        size_t saved_line = t.line;
+        size_t saved_col = t.col;
+
         advance(p);
+
+        /* Check if next token is '(' — if so, parse as function call */
+        if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+            p->current.value[0] == '(') {
+            advance(p); /* consume '(' */
+
+            /* Parse comma-separated argument list */
+            PtrArray args;
+            if (!ptr_array_init(&args, 4)) {
+                free(saved_name);
+                parser_error(p, saved_line, saved_col, "memory allocation failed");
+                return NULL;
+            }
+
+            /* Check for zero-arg call: immediate ')' */
+            if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                  p->current.value[0] == ')')) {
+                /* Parse first argument */
+                AstNode *arg = parse_assignment(p);
+                if (!arg) {
+                    free(saved_name);
+                    ptr_array_destroy(&args);
+                    return NULL;
+                }
+                if (!ptr_array_push(&args, arg)) {
+                    ast_free(arg);
+                    free(saved_name);
+                    ptr_array_destroy(&args);
+                    parser_error(p, saved_line, saved_col, "memory allocation failed");
+                    return NULL;
+                }
+
+                /* Parse additional comma-separated arguments */
+                while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                       p->current.value[0] == ',') {
+                    advance(p); /* consume ',' */
+                    arg = parse_assignment(p);
+                    if (!arg) {
+                        free(saved_name);
+                        free_expr_array(&args);
+                        return NULL;
+                    }
+                    if (!ptr_array_push(&args, arg)) {
+                        ast_free(arg);
+                        free(saved_name);
+                        free_expr_array(&args);
+                        parser_error(p, saved_line, saved_col, "memory allocation failed");
+                        return NULL;
+                    }
+                }
+            }
+
+            /* Expect closing ')' */
+            if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                p->current.value[0] != ')') {
+                parser_error(p, p->current.line, p->current.col, "expected ')' after arguments");
+                free(saved_name);
+                free_expr_array(&args);
+                return NULL;
+            }
+            advance(p); /* consume ')' */
+
+            /* Build AST_CALL node — make_call takes ownership of saved_name's content */
+            size_t arg_count = args.count;
+            AstNode **children = NULL;
+            if (arg_count > 0) {
+                children = (AstNode **)ptr_array_release(&args);
+            } else {
+                ptr_array_destroy(&args);
+            }
+
+            AstNode *call = make_call(saved_name, saved_len, children, arg_count);
+            free(saved_name);
+            if (!call) {
+                for (size_t i = 0; i < arg_count; i++)
+                    ast_free(children[i]);
+                if (children)
+                    ptr_array_free_raw((void *)children);
+                parser_error(p, saved_line, saved_col, "memory allocation failed");
+                return NULL;
+            }
+            return call;
+        }
+
+        /* Plain identifier (not a call) */
+        AstNode *node = make_leaf(AST_IDENT, saved_name, saved_len);
+        free(saved_name);
+        if (!node) {
+            parser_error(p, saved_line, saved_col, "memory allocation failed");
+            return NULL;
+        }
         return node;
     }
 
@@ -1063,6 +1188,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "BLOCK";
     case AST_IF:
         return "IF";
+    case AST_CALL:
+        return "CALL";
     default:
         return "UNKNOWN";
     }
@@ -1186,6 +1313,52 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf + pos, total_len - pos, "]");
         ptr_array_destroy(&child_strs);
+        return buf;
+    }
+
+    if (node->type == AST_CALL) {
+        /* Call: [CALL name arg1 arg2 ...]
+         * value = function name
+         * children[0..n] = arguments */
+
+        /* Calculate total length: "[CALL name" + args + "]" */
+        PtrArray arg_strs;
+        if (!ptr_array_init(&arg_strs, node->child_count))
+            return NULL;
+
+        size_t total_len = 1 + strlen(type_str) + 1 + strlen(node->value); /* "[CALL name" */
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < arg_strs.count; j++) {
+                    free(arg_strs.items[j]);
+                }
+                ptr_array_destroy(&arg_strs);
+                return NULL;
+            }
+            ptr_array_push(&arg_strs, str);
+            total_len += 1 + strlen(str); /* " arg" */
+        }
+        total_len += 1 + 1; /* "]" + null terminator */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < arg_strs.count; i++) {
+                free(arg_strs.items[i]);
+            }
+            ptr_array_destroy(&arg_strs);
+            return NULL;
+        }
+
+        /* Build the string */
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s", type_str, node->value);
+        for (size_t i = 0; i < arg_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)arg_strs.items[i]);
+            free(arg_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&arg_strs);
         return buf;
     }
 

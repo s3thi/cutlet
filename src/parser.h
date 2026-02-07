@@ -25,6 +25,7 @@ typedef enum {
     AST_ASSIGN,  /* assignment: name = expr */
     AST_BLOCK,   /* block: sequence of newline-separated expressions */
     AST_IF,      /* if expression: if cond then body [else body] end */
+    AST_CALL,    /* function call: name(arg1, arg2, ...) */
 } AstNodeType;
 
 typedef struct AstNode {

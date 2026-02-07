@@ -1078,6 +1078,157 @@ TEST(test_if_assign_error) {
 }
 
 /* ============================================================
+ * Function call parsing tests (Step 1: PLAN.md)
+ * ============================================================ */
+
+/* Basic call: single string argument */
+TEST(test_call_single_string_arg) {
+    ASSERT(ast_matches("say(\"hello\")", "AST [CALL say [STRING hello]]"), "say(\"hello\")");
+    PASS();
+}
+
+/* Call with expression argument */
+TEST(test_call_expr_arg) {
+    ASSERT(ast_matches("say(1 + 2)", "AST [CALL say [BINOP + [NUMBER 1] [NUMBER 2]]]"),
+           "say(1 + 2)");
+    PASS();
+}
+
+/* Call with zero arguments */
+TEST(test_call_zero_args) {
+    ASSERT(ast_matches("say()", "AST [CALL say]"), "say()");
+    PASS();
+}
+
+/* Call with multiple arguments */
+TEST(test_call_multi_args) {
+    ASSERT(ast_matches("foo(1, 2, 3)", "AST [CALL foo [NUMBER 1] [NUMBER 2] [NUMBER 3]]"),
+           "foo(1, 2, 3)");
+    PASS();
+}
+
+/* Call with two arguments */
+TEST(test_call_two_args) {
+    ASSERT(ast_matches("foo(\"a\", \"b\")", "AST [CALL foo [STRING a] [STRING b]]"),
+           "foo(\"a\", \"b\")");
+    PASS();
+}
+
+/* Call in arithmetic expression */
+TEST(test_call_in_expr) {
+    ASSERT(ast_matches("1 + say(2)", "AST [BINOP + [NUMBER 1] [CALL say [NUMBER 2]]]"),
+           "1 + say(2)");
+    PASS();
+}
+
+/* Call as assignment value */
+TEST(test_call_in_assignment) {
+    ASSERT(ast_matches("my x = say(42)", "AST [DECL x [CALL say [NUMBER 42]]]"), "my x = say(42)");
+    PASS();
+}
+
+/* Nested calls: call as argument to another call */
+TEST(test_call_nested) {
+    ASSERT(ast_matches("say(say(1))", "AST [CALL say [CALL say [NUMBER 1]]]"), "say(say(1))");
+    PASS();
+}
+
+/* Call with complex expression argument */
+TEST(test_call_complex_arg) {
+    ASSERT(ast_matches("say(1 + 2 * 3)",
+                       "AST [CALL say [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]]"),
+           "say(1 + 2 * 3)");
+    PASS();
+}
+
+/* Call with variable argument */
+TEST(test_call_ident_arg) {
+    ASSERT(ast_matches("say(x)", "AST [CALL say [IDENT x]]"), "say(x)");
+    PASS();
+}
+
+/* Call with boolean argument */
+TEST(test_call_bool_arg) {
+    ASSERT(ast_matches("say(true)", "AST [CALL say [BOOL true]]"), "say(true)");
+    PASS();
+}
+
+/* Call with if expression argument */
+TEST(test_call_if_arg) {
+    ASSERT(ast_matches("say(if true then 1 else 2 end)",
+                       "AST [CALL say [IF [BOOL true] [NUMBER 1] [NUMBER 2]]]"),
+           "say(if true then 1 else 2 end)");
+    PASS();
+}
+
+/* Call in if condition */
+TEST(test_call_in_if_condition) {
+    ASSERT(ast_matches("if foo() then 1 else 2 end", "AST [IF [CALL foo] [NUMBER 1] [NUMBER 2]]"),
+           "call in if condition");
+    PASS();
+}
+
+/* Error: unclosed call paren */
+TEST(test_call_unclosed_paren) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("say(1", &node, &err), "unclosed call paren should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: trailing comma in call */
+TEST(test_call_trailing_comma) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("say(1,)", &node, &err), "trailing comma should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: leading comma in call */
+TEST(test_call_leading_comma) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("say(,1)", &node, &err), "leading comma should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: double comma in call */
+TEST(test_call_double_comma) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("say(1,,2)", &node, &err), "double comma should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete: incomplete function call */
+TEST(test_is_incomplete_call_unclosed) {
+    /* "say(" needs closing paren */
+    ASSERT(!parser_is_complete("say("), "unclosed call should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_call_trailing_comma) {
+    /* "say(1," needs another argument and closing paren */
+    ASSERT(!parser_is_complete("say(1,"), "call with trailing comma should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: complete function call */
+TEST(test_is_complete_call) {
+    ASSERT(parser_is_complete("say(1)"), "complete call should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_call_zero_args) {
+    ASSERT(parser_is_complete("say()"), "zero-arg call should be complete");
+    PASS();
+}
+
+/* ============================================================
  * ast_free(NULL) safety test
  * ============================================================ */
 
@@ -1404,6 +1555,33 @@ int main(void) {
     RUN_TEST(test_else_keyword_reserved);
     RUN_TEST(test_end_keyword_reserved);
     RUN_TEST(test_if_assign_error);
+
+    printf("\nFunction call parsing:\n");
+    RUN_TEST(test_call_single_string_arg);
+    RUN_TEST(test_call_expr_arg);
+    RUN_TEST(test_call_zero_args);
+    RUN_TEST(test_call_multi_args);
+    RUN_TEST(test_call_two_args);
+    RUN_TEST(test_call_in_expr);
+    RUN_TEST(test_call_in_assignment);
+    RUN_TEST(test_call_nested);
+    RUN_TEST(test_call_complex_arg);
+    RUN_TEST(test_call_ident_arg);
+    RUN_TEST(test_call_bool_arg);
+    RUN_TEST(test_call_if_arg);
+    RUN_TEST(test_call_in_if_condition);
+
+    printf("\nFunction call error cases:\n");
+    RUN_TEST(test_call_unclosed_paren);
+    RUN_TEST(test_call_trailing_comma);
+    RUN_TEST(test_call_leading_comma);
+    RUN_TEST(test_call_double_comma);
+
+    printf("\nparser_is_complete() - function calls:\n");
+    RUN_TEST(test_is_incomplete_call_unclosed);
+    RUN_TEST(test_is_incomplete_call_trailing_comma);
+    RUN_TEST(test_is_complete_call);
+    RUN_TEST(test_is_complete_call_zero_args);
 
     printf("\nSafety:\n");
     RUN_TEST(test_ast_free_null);
