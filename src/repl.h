@@ -61,18 +61,4 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, Ev
  */
 void repl_result_free(ReplResult *r);
 
-/*
- * Legacy API: format a line in the old "OK [TYPE value]" / "ERR ..." format.
- * Kept for backward compatibility during transition.
- * The caller must free the returned string.
- */
-char *repl_format_line(const char *input);
-
-/*
- * Legacy API: format a line in the old "AST [TYPE ...]" / "ERR ..." format.
- * Kept for backward compatibility during transition.
- * The caller must free the returned string.
- */
-char *repl_format_line_ast(const char *input);
-
 #endif /* CUTLET_REPL_H */

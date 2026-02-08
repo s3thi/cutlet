@@ -1,15 +1,15 @@
 /*
  * test_runtime.c - Tests for the runtime evaluation lock
  *
- * Proves that concurrent calls to repl_format_line() and
- * repl_format_line_ast() are serialized by the global eval lock.
+ * Proves that concurrent calls to repl_eval_line() are serialized
+ * by the global eval lock.
  *
  * Strategy:
  * - Use runtime_test_on_lock_enter/exit hooks (CUTLET_TESTING) to
  *   maintain an atomic counter of threads inside the critical section.
- * - Spawn multiple threads that each call repl_format_line() many times.
+ * - Spawn multiple threads that each call repl_eval_line() many times.
  * - Assert the counter never exceeds 1 (no overlap).
- * - A secondary test does the same for repl_format_line_ast().
+ * - Secondary tests do the same for eval with AST and mixed modes.
  */
 
 #include "../src/eval.h"

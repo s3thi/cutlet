@@ -21,6 +21,14 @@ The author of this project is an experienced developer of 20 years. But they don
 - Update README if command line flags change. Also update README if build flags change, the dependencies change, or if we change the behavior of the REPL.
 - We don't care about backward compatibility. Feel free to change anything across the codebase if it leads to better design, better UX, cleaner code.
 
+## Language feature checklist
+
+When a new language feature is added, remind the user to:
+- Update `TUTORIAL.md` to cover the new feature.
+- Add or update example programs in `examples/` (with matching `.expected` files).
+
+The agent should NOT make these updates itself — just remind the user at the end of the implementation step.
+
 ## REPL debug flags
 
 The REPL supports two debug flags that can be combined:

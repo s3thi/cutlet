@@ -1,8 +1,8 @@
 /*
  * test_repl.c - Tests for the Cutlet REPL core
  *
- * Token mode (repl_format_line): parse expression → eval → format result.
- * AST mode (repl_format_line_ast): parse expression → format AST tree.
+ * All tests use the primary repl_eval_line() API, which returns a
+ * structured ReplResult with ok, value, error, tokens, and ast fields.
  *
  * Uses the same simple test harness as test_tokenizer.c.
  */
@@ -55,195 +55,217 @@ static int tests_failed = 0;
         tests_passed++;                                                                            \
     } while (0)
 
-/* Helper to run format and compare result */
-static int format_matches(const char *input, const char *expected) {
-    char *result = repl_format_line(input);
-    if (result == NULL)
-        return 0;
-    int match = strcmp(result, expected) == 0;
-    if (!match) {
-        printf("\n    Expected: %s\n    Got:      %s\n", expected, result);
+/* ============================================================
+ * Helpers that use repl_eval_line() directly
+ * ============================================================ */
+
+/* Check that input evaluates successfully to expected_value.
+ * Pass NULL for expected_value to check blank/whitespace input. */
+static int eval_value_matches(const char *input, const char *expected_value) {
+    ReplResult r = repl_eval_line(input, false, false, &noop_ctx);
+    int match;
+    if (expected_value == NULL) {
+        match = r.ok && r.value == NULL;
+    } else {
+        match = r.ok && r.value && strcmp(r.value, expected_value) == 0;
     }
-    free(result);
+    if (!match) {
+        printf("\n    Expected: ok=true value=%s\n    Got:      ok=%d value=%s error=%s\n",
+               expected_value ? expected_value : "(null)", r.ok, r.value ? r.value : "(null)",
+               r.error ? r.error : "(null)");
+    }
+    repl_result_free(&r);
     return match;
 }
 
-/* Helper for AST mode */
-static int ast_format_matches(const char *input, const char *expected) {
-    char *result = repl_format_line_ast(input);
-    if (result == NULL)
-        return 0;
-    int match = strcmp(result, expected) == 0;
+/* Check that input produces an eval/parse error matching expected_error. */
+static int eval_error_matches(const char *input, const char *expected_error) {
+    ReplResult r = repl_eval_line(input, false, false, &noop_ctx);
+    int match = !r.ok && r.error && strcmp(r.error, expected_error) == 0;
     if (!match) {
-        printf("\n    Expected: %s\n    Got:      %s\n", expected, result);
+        printf("\n    Expected: ok=false error=%s\n    Got:      ok=%d error=%s\n", expected_error,
+               r.ok, r.error ? r.error : "(null)");
     }
-    free(result);
+    repl_result_free(&r);
+    return match;
+}
+
+/* Check that input produces the expected AST string.
+ * Uses want_ast=true. The eval result (ok/error) is ignored. */
+static int eval_ast_matches(const char *input, const char *expected_ast) {
+    ReplResult r = repl_eval_line(input, false, true, &noop_ctx);
+    int match = r.ast && strcmp(r.ast, expected_ast) == 0;
+    if (!match) {
+        printf("\n    Expected AST: %s\n    Got:          %s\n", expected_ast,
+               r.ast ? r.ast : "(null)");
+    }
+    repl_result_free(&r);
     return match;
 }
 
 /* ============================================================
- * Empty and whitespace input tests (token mode)
+ * Empty and whitespace input tests
  * ============================================================ */
 
 TEST(test_empty_input) {
-    ASSERT(format_matches("", "OK"), "empty input should return OK");
+    ASSERT(eval_value_matches("", NULL), "empty input should return ok with no value");
     PASS();
 }
 
 TEST(test_null_input) {
-    ASSERT(format_matches(NULL, "OK"), "NULL input should return OK");
+    ASSERT(eval_value_matches(NULL, NULL), "NULL input should return ok with no value");
     PASS();
 }
 
 TEST(test_whitespace_only_spaces) {
-    ASSERT(format_matches("   ", "OK"), "spaces only should return OK");
+    ASSERT(eval_value_matches("   ", NULL), "spaces only should return ok with no value");
     PASS();
 }
 
 TEST(test_whitespace_only_tabs) {
-    ASSERT(format_matches("\t\t", "OK"), "tabs only should return OK");
+    ASSERT(eval_value_matches("\t\t", NULL), "tabs only should return ok with no value");
     PASS();
 }
 
 TEST(test_whitespace_only_newline) {
-    ASSERT(format_matches("\n", "OK"), "newline only should return OK");
+    ASSERT(eval_value_matches("\n", NULL), "newline only should return ok with no value");
     PASS();
 }
 
 TEST(test_whitespace_mixed) {
-    ASSERT(format_matches("  \t\n  ", "OK"), "mixed whitespace should return OK");
+    ASSERT(eval_value_matches("  \t\n  ", NULL), "mixed whitespace should return ok with no value");
     PASS();
 }
 
 /* ============================================================
- * Single number evaluation (token mode)
+ * Single number evaluation
  * ============================================================ */
 
 TEST(test_single_number_zero) {
-    ASSERT(format_matches("0", "OK [NUMBER 0]"), "zero");
+    ASSERT(eval_value_matches("0", "0"), "zero");
     PASS();
 }
 
 TEST(test_single_number_positive) {
-    ASSERT(format_matches("42", "OK [NUMBER 42]"), "positive number");
+    ASSERT(eval_value_matches("42", "42"), "positive number");
     PASS();
 }
 
 TEST(test_single_number_large) {
-    ASSERT(format_matches("1234567890", "OK [NUMBER 1234567890]"), "large number");
+    ASSERT(eval_value_matches("1234567890", "1234567890"), "large number");
     PASS();
 }
 
 TEST(test_number_with_leading_whitespace) {
-    ASSERT(format_matches("  42", "OK [NUMBER 42]"), "number with leading space");
+    ASSERT(eval_value_matches("  42", "42"), "number with leading space");
     PASS();
 }
 
 TEST(test_number_with_trailing_whitespace) {
-    ASSERT(format_matches("42  ", "OK [NUMBER 42]"), "number with trailing space");
+    ASSERT(eval_value_matches("42  ", "42"), "number with trailing space");
     PASS();
 }
 
 /* ============================================================
- * String evaluation (token mode)
+ * String evaluation
  * ============================================================ */
 
 TEST(test_single_string_empty) {
-    ASSERT(format_matches("\"\"", "OK [STRING ]"), "empty string");
+    ASSERT(eval_value_matches("\"\"", ""), "empty string");
     PASS();
 }
 
 TEST(test_single_string_simple) {
-    ASSERT(format_matches("\"hello\"", "OK [STRING hello]"), "simple string");
+    ASSERT(eval_value_matches("\"hello\"", "hello"), "simple string");
     PASS();
 }
 
 TEST(test_single_string_with_spaces) {
-    ASSERT(format_matches("\"hello world\"", "OK [STRING hello world]"), "string with spaces");
+    ASSERT(eval_value_matches("\"hello world\"", "hello world"), "string with spaces");
     PASS();
 }
 
 TEST(test_single_string_with_digits) {
-    ASSERT(format_matches("\"test123\"", "OK [STRING test123]"), "string with digits");
+    ASSERT(eval_value_matches("\"test123\"", "test123"), "string with digits");
     PASS();
 }
 
 /* ============================================================
- * Expression evaluation (token mode)
+ * Expression evaluation
  * ============================================================ */
 
 TEST(test_eval_addition) {
-    ASSERT(format_matches("1 + 2", "OK [NUMBER 3]"), "1+2=3");
+    ASSERT(eval_value_matches("1 + 2", "3"), "1+2=3");
     PASS();
 }
 
 TEST(test_eval_subtraction) {
-    ASSERT(format_matches("10 - 3", "OK [NUMBER 7]"), "10-3=7");
+    ASSERT(eval_value_matches("10 - 3", "7"), "10-3=7");
     PASS();
 }
 
 TEST(test_eval_multiplication) {
-    ASSERT(format_matches("2 * 3", "OK [NUMBER 6]"), "2*3=6");
+    ASSERT(eval_value_matches("2 * 3", "6"), "2*3=6");
     PASS();
 }
 
 TEST(test_eval_division_exact) {
-    ASSERT(format_matches("6 / 3", "OK [NUMBER 2]"), "6/3=2");
+    ASSERT(eval_value_matches("6 / 3", "2"), "6/3=2");
     PASS();
 }
 
 TEST(test_eval_division_float) {
-    ASSERT(format_matches("7 / 2", "OK [NUMBER 3.5]"), "7/2=3.5");
+    ASSERT(eval_value_matches("7 / 2", "3.5"), "7/2=3.5");
     PASS();
 }
 
 TEST(test_eval_exponent) {
-    ASSERT(format_matches("2 ** 10", "OK [NUMBER 1024]"), "2**10");
+    ASSERT(eval_value_matches("2 ** 10", "1024"), "2**10");
     PASS();
 }
 
 TEST(test_eval_precedence) {
-    ASSERT(format_matches("1 + 2 * 3", "OK [NUMBER 7]"), "1+2*3=7");
+    ASSERT(eval_value_matches("1 + 2 * 3", "7"), "1+2*3=7");
     PASS();
 }
 
 TEST(test_eval_parens) {
-    ASSERT(format_matches("(1 + 2) * 3", "OK [NUMBER 9]"), "(1+2)*3=9");
+    ASSERT(eval_value_matches("(1 + 2) * 3", "9"), "(1+2)*3=9");
     PASS();
 }
 
 TEST(test_eval_unary_minus) {
-    ASSERT(format_matches("-3", "OK [NUMBER -3]"), "unary -3");
+    ASSERT(eval_value_matches("-3", "-3"), "unary -3");
     PASS();
 }
 
 TEST(test_eval_float_division) {
-    ASSERT(format_matches("42 / 5", "OK [NUMBER 8.4]"), "42/5=8.4");
+    ASSERT(eval_value_matches("42 / 5", "8.4"), "42/5=8.4");
     PASS();
 }
 
 /* ============================================================
- * Error cases (token mode)
+ * Error cases
  * ============================================================ */
 
 TEST(test_error_unterminated_string) {
-    ASSERT(format_matches("\"hello", "ERR 1:1 unterminated string"), "unterminated string error");
+    ASSERT(eval_error_matches("\"hello", "1:1 unterminated string"), "unterminated string error");
     PASS();
 }
 
 TEST(test_error_number_adjacent_ident) {
-    ASSERT(format_matches("42foo", "ERR 1:1 number followed by identifier character"),
+    ASSERT(eval_error_matches("42foo", "1:1 number followed by identifier character"),
            "number adjacent ident error");
     PASS();
 }
 
 TEST(test_error_unknown_ident) {
-    ASSERT(format_matches("foo", "ERR unknown variable 'foo'"), "unknown ident error");
+    ASSERT(eval_error_matches("foo", "unknown variable 'foo'"), "unknown ident error");
     PASS();
 }
 
 TEST(test_error_div_by_zero) {
-    ASSERT(format_matches("1 / 0", "ERR division by zero"), "div by zero error");
+    ASSERT(eval_error_matches("1 / 0", "division by zero"), "div by zero error");
     PASS();
 }
 
@@ -252,117 +274,118 @@ TEST(test_error_div_by_zero) {
  * ============================================================ */
 
 TEST(test_decl_returns_value) {
-    ASSERT(format_matches("my x = 2", "OK [NUMBER 2]"), "decl returns value");
+    ASSERT(eval_value_matches("my x = 2", "2"), "decl returns value");
     PASS();
 }
 
 TEST(test_decl_then_read) {
     /* Declare, then read in separate eval calls (persistent env). */
-    char *r1 = repl_format_line("my x = 2");
-    ASSERT_NOT_NULL(r1, "decl result");
-    ASSERT_STR_EQ(r1, "OK [NUMBER 2]", "decl value");
-    free(r1);
+    ReplResult r1 = repl_eval_line("my x = 2", false, false, &noop_ctx);
+    ASSERT(r1.ok, "decl ok");
+    ASSERT_NOT_NULL(r1.value, "decl value set");
+    ASSERT_STR_EQ(r1.value, "2", "decl value");
+    repl_result_free(&r1);
 
-    char *r2 = repl_format_line("x + 3");
-    ASSERT_NOT_NULL(r2, "read result");
-    ASSERT_STR_EQ(r2, "OK [NUMBER 5]", "x + 3 = 5");
-    free(r2);
+    ASSERT(eval_value_matches("x + 3", "5"), "x + 3 = 5");
     PASS();
 }
 
 TEST(test_decl_expr_precedence) {
     /* my x = 1 + 2 * 3 → assigns 7 (assignment binds looser) */
-    ASSERT(format_matches("my y = 1 + 2 * 3", "OK [NUMBER 7]"), "decl precedence");
+    ASSERT(eval_value_matches("my y = 1 + 2 * 3", "7"), "decl precedence");
     PASS();
 }
 
 TEST(test_assign_returns_value) {
     /* Must declare first, then reassign. */
-    char *r1 = repl_format_line("my z = 10");
-    free(r1);
-    ASSERT(format_matches("z = 20", "OK [NUMBER 20]"), "assign returns value");
+    ReplResult r1 = repl_eval_line("my z = 10", false, false, &noop_ctx);
+    repl_result_free(&r1);
+    ASSERT(eval_value_matches("z = 20", "20"), "assign returns value");
     PASS();
 }
 
 TEST(test_assign_updates_variable) {
-    char *r1 = repl_format_line("my w = 5");
-    free(r1);
-    char *r2 = repl_format_line("w = 99");
-    free(r2);
-    ASSERT(format_matches("w", "OK [NUMBER 99]"), "assign updates var");
+    ReplResult r1 = repl_eval_line("my w = 5", false, false, &noop_ctx);
+    repl_result_free(&r1);
+    ReplResult r2 = repl_eval_line("w = 99", false, false, &noop_ctx);
+    repl_result_free(&r2);
+    ASSERT(eval_value_matches("w", "99"), "assign updates var");
     PASS();
 }
 
 TEST(test_assign_undeclared_error) {
     /* Assigning to undeclared variable is a runtime error. */
-    ASSERT(format_matches("undeclared = 1", "ERR undefined variable 'undeclared'"),
+    ASSERT(eval_error_matches("undeclared = 1", "undefined variable 'undeclared'"),
            "undeclared assign error");
     PASS();
 }
 
 TEST(test_decl_chain) {
     /* my a = my b = 2 → both declared with value 2 */
-    char *r = repl_format_line("my aa = my bb = 2");
-    ASSERT_NOT_NULL(r, "chain result");
-    ASSERT_STR_EQ(r, "OK [NUMBER 2]", "chain value");
-    free(r);
+    ReplResult r = repl_eval_line("my aa = my bb = 2", false, false, &noop_ctx);
+    ASSERT(r.ok, "chain ok");
+    ASSERT_NOT_NULL(r.value, "chain value set");
+    ASSERT_STR_EQ(r.value, "2", "chain value");
+    repl_result_free(&r);
 
-    ASSERT(format_matches("aa", "OK [NUMBER 2]"), "aa is 2");
-    ASSERT(format_matches("bb", "OK [NUMBER 2]"), "bb is 2");
+    ASSERT(eval_value_matches("aa", "2"), "aa is 2");
+    ASSERT(eval_value_matches("bb", "2"), "bb is 2");
     PASS();
 }
 
 TEST(test_assign_chain) {
     /* Declare p and q, then p = q = 42 */
-    char *r1 = repl_format_line("my p = 0");
-    free(r1);
-    char *r2 = repl_format_line("my q = 0");
-    free(r2);
+    ReplResult r1 = repl_eval_line("my p = 0", false, false, &noop_ctx);
+    repl_result_free(&r1);
+    ReplResult r2 = repl_eval_line("my q = 0", false, false, &noop_ctx);
+    repl_result_free(&r2);
 
-    char *r3 = repl_format_line("p = q = 42");
-    ASSERT_NOT_NULL(r3, "assign chain result");
-    ASSERT_STR_EQ(r3, "OK [NUMBER 42]", "chain value");
-    free(r3);
+    ReplResult r3 = repl_eval_line("p = q = 42", false, false, &noop_ctx);
+    ASSERT(r3.ok, "assign chain ok");
+    ASSERT_NOT_NULL(r3.value, "assign chain value set");
+    ASSERT_STR_EQ(r3.value, "42", "chain value");
+    repl_result_free(&r3);
 
-    ASSERT(format_matches("p", "OK [NUMBER 42]"), "p is 42");
-    ASSERT(format_matches("q", "OK [NUMBER 42]"), "q is 42");
+    ASSERT(eval_value_matches("p", "42"), "p is 42");
+    ASSERT(eval_value_matches("q", "42"), "q is 42");
     PASS();
 }
 
 TEST(test_unknown_ident_still_errors) {
-    ASSERT(format_matches("nope + 1", "ERR unknown variable 'nope'"), "unknown ident error");
+    ASSERT(eval_error_matches("nope + 1", "unknown variable 'nope'"), "unknown ident error");
     PASS();
 }
 
 TEST(test_invalid_lhs_error) {
     /* 1 = 2 should be a parse error */
-    char *r = repl_format_line("1 = 2");
-    ASSERT_NOT_NULL(r, "result not null");
-    ASSERT(strncmp(r, "ERR", 3) == 0, "should be error");
-    ASSERT(strstr(r, "invalid assignment target") != NULL, "error message");
-    free(r);
+    ReplResult r = repl_eval_line("1 = 2", false, false, &noop_ctx);
+    ASSERT(!r.ok, "should be error");
+    ASSERT_NOT_NULL(r.error, "error set");
+    ASSERT(strstr(r.error, "invalid assignment target") != NULL, "error message");
+    repl_result_free(&r);
     PASS();
 }
 
 TEST(test_decl_string_value) {
-    char *r1 = repl_format_line("my greeting = \"hello\"");
-    ASSERT_NOT_NULL(r1, "decl string result");
-    ASSERT_STR_EQ(r1, "OK [STRING hello]", "decl string value");
-    free(r1);
+    ReplResult r1 = repl_eval_line("my greeting = \"hello\"", false, false, &noop_ctx);
+    ASSERT(r1.ok, "decl string ok");
+    ASSERT_NOT_NULL(r1.value, "decl string value set");
+    ASSERT_STR_EQ(r1.value, "hello", "decl string value");
+    repl_result_free(&r1);
 
-    ASSERT(format_matches("greeting", "OK [STRING hello]"), "read string var");
+    ASSERT(eval_value_matches("greeting", "hello"), "read string var");
     PASS();
 }
 
 TEST(test_decl_ast_format) {
     /* Check AST output for my x = 2 */
-    ASSERT(ast_format_matches("my x = 2", "AST [DECL x [NUMBER 2]]"), "decl ast");
+    ASSERT(eval_ast_matches("my x = 2", "AST [DECL x [NUMBER 2]]"), "decl ast");
     PASS();
 }
 
 TEST(test_assign_ast_format) {
     /* Check AST output for x = 2 */
-    ASSERT(ast_format_matches("x = 2", "AST [ASSIGN x [NUMBER 2]]"), "assign ast");
+    ASSERT(eval_ast_matches("x = 2", "AST [ASSIGN x [NUMBER 2]]"), "assign ast");
     PASS();
 }
 
@@ -371,52 +394,56 @@ TEST(test_assign_ast_format) {
  * ============================================================ */
 
 TEST(test_ast_empty) {
-    ASSERT(ast_format_matches("", "AST"), "ast empty");
+    ASSERT(eval_ast_matches("", "AST"), "ast empty");
     PASS();
 }
 
 TEST(test_ast_whitespace) {
-    ASSERT(ast_format_matches("   ", "AST"), "ast whitespace");
+    ASSERT(eval_ast_matches("   ", "AST"), "ast whitespace");
     PASS();
 }
 
 TEST(test_ast_number) {
-    ASSERT(ast_format_matches("42", "AST [NUMBER 42]"), "ast number");
+    ASSERT(eval_ast_matches("42", "AST [NUMBER 42]"), "ast number");
     PASS();
 }
 
 TEST(test_ast_string) {
-    ASSERT(ast_format_matches("\"hello\"", "AST [STRING hello]"), "ast string");
+    ASSERT(eval_ast_matches("\"hello\"", "AST [STRING hello]"), "ast string");
     PASS();
 }
 
 TEST(test_ast_ident) {
-    ASSERT(ast_format_matches("foo", "AST [IDENT foo]"), "ast ident");
+    /* Evaluating "foo" produces an eval error (unknown variable),
+     * but the AST is still built before evaluation runs. */
+    ASSERT(eval_ast_matches("foo", "AST [IDENT foo]"), "ast ident");
     PASS();
 }
 
 TEST(test_ast_binop) {
-    ASSERT(ast_format_matches("1 + 2", "AST [BINOP + [NUMBER 1] [NUMBER 2]]"), "ast binop");
+    ASSERT(eval_ast_matches("1 + 2", "AST [BINOP + [NUMBER 1] [NUMBER 2]]"), "ast binop");
     PASS();
 }
 
 TEST(test_ast_precedence) {
     ASSERT(
-        ast_format_matches("1 + 2 * 3", "AST [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]"),
+        eval_ast_matches("1 + 2 * 3", "AST [BINOP + [NUMBER 1] [BINOP * [NUMBER 2] [NUMBER 3]]]"),
         "ast precedence");
     PASS();
 }
 
 TEST(test_ast_unary) {
-    ASSERT(ast_format_matches("-3", "AST [UNARY - [NUMBER 3]]"), "ast unary");
+    ASSERT(eval_ast_matches("-3", "AST [UNARY - [NUMBER 3]]"), "ast unary");
     PASS();
 }
 
 TEST(test_ast_error) {
-    char *result = repl_format_line_ast("(");
-    ASSERT_NOT_NULL(result, "result not null");
-    ASSERT(strncmp(result, "ERR ", 4) == 0, "should be error");
-    free(result);
+    /* Parse error: AST is not available (parsing failed). */
+    ReplResult r = repl_eval_line("(", false, true, &noop_ctx);
+    ASSERT(!r.ok, "should be error");
+    ASSERT(r.ast == NULL, "no AST on parse error");
+    ASSERT_NOT_NULL(r.error, "error set");
+    repl_result_free(&r);
     PASS();
 }
 
@@ -425,14 +452,16 @@ TEST(test_ast_error) {
  * ============================================================ */
 
 TEST(test_result_is_heap_allocated) {
-    char *result1 = repl_format_line("42");
-    char *result2 = repl_format_line("7");
-    ASSERT_NOT_NULL(result1, "first result not null");
-    ASSERT_NOT_NULL(result2, "second result not null");
-    ASSERT_STR_EQ(result1, "OK [NUMBER 42]", "first result correct");
-    ASSERT_STR_EQ(result2, "OK [NUMBER 7]", "second result correct");
-    free(result1);
-    free(result2);
+    ReplResult r1 = repl_eval_line("42", false, false, &noop_ctx);
+    ReplResult r2 = repl_eval_line("7", false, false, &noop_ctx);
+    ASSERT(r1.ok, "first ok");
+    ASSERT(r2.ok, "second ok");
+    ASSERT_NOT_NULL(r1.value, "first value set");
+    ASSERT_NOT_NULL(r2.value, "second value set");
+    ASSERT_STR_EQ(r1.value, "42", "first result correct");
+    ASSERT_STR_EQ(r2.value, "7", "second result correct");
+    repl_result_free(&r1);
+    repl_result_free(&r2);
     PASS();
 }
 
@@ -553,13 +582,13 @@ TEST(test_eval_line_tokens_on_error) {
  * Boolean literal REPL output tests
  * ============================================================ */
 
-TEST(test_bool_true_repl_format) {
-    ASSERT(format_matches("true", "OK [BOOL true]"), "true format");
+TEST(test_bool_true_value) {
+    ASSERT(eval_value_matches("true", "true"), "true value");
     PASS();
 }
 
-TEST(test_bool_false_repl_format) {
-    ASSERT(format_matches("false", "OK [BOOL false]"), "false format");
+TEST(test_bool_false_value) {
+    ASSERT(eval_value_matches("false", "false"), "false value");
     PASS();
 }
 
@@ -660,8 +689,8 @@ int main(void) {
     RUN_TEST(test_result_is_heap_allocated);
 
     printf("\nBoolean literals:\n");
-    RUN_TEST(test_bool_true_repl_format);
-    RUN_TEST(test_bool_false_repl_format);
+    RUN_TEST(test_bool_true_value);
+    RUN_TEST(test_bool_false_value);
     RUN_TEST(test_bool_true_eval_line);
     RUN_TEST(test_bool_false_eval_line);
 

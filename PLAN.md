@@ -139,7 +139,7 @@ Add a `run` subcommand to execute a `.cutlet` file directly, without the TCP ser
 - Update `print_usage()`, update README.
 - **Tests**: CLI integration tests in `test_cli.sh` — write a temp `.cutlet` file, run it with `cutlet run`, verify stdout output.
 
-### Step 4: Write `TUTORIAL.md`
+### Step 4: Write `TUTORIAL.md` ✓
 
 Write a language tutorial in the style of [learnxinyminutes.com](https://learnxinyminutes.com/go/). The tutorial is a single `.cutlet` file embedded in markdown with extensive inline comments (using `#` once we have comments, or just markdown prose around code blocks).
 
@@ -156,6 +156,8 @@ Since Cutlet doesn't have comments yet, the tutorial will use markdown prose wit
 - `say()` for output
 - Running files with `cutlet run`
 - The REPL
+
+NOTE: comments were added to the interpreter while building this step. Now cutlet has comments, and the tutorial is written with commented code.
 
 ### Step 5: Example programs in `examples/`
 
@@ -177,13 +179,13 @@ Add a test (in `tests/test_examples.sh` or as part of `test_cli.sh`) that:
 4. Reports pass/fail per example.
 5. Integrated into `make test` so it runs with the rest of the suite.
 
-### Step 7: Update `AGENTS.md`
+### Step 7: Update `AGENTS.md` ✓
 
 Add a reminder to `AGENTS.md` that says:
 - When a new language feature is added, remind the user to update `TUTORIAL.md` and add/update examples in `examples/`.
 - The agent should NOT do the update itself — just remind the user.
 
-### Step 8: Remove legacy REPL functions
+### Step 8: Remove legacy REPL functions ✓
 
 Remove `repl_format_line()` and `repl_format_line_ast()` from `repl.c` and `repl.h`. These legacy wrappers are only used by tests (`test_repl.c` and `test_runtime.c`) — no production code depends on them. Rewrite the ~25 test call sites in those files to use `repl_eval_line()` directly instead.
 

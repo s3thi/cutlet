@@ -3,9 +3,6 @@
  *
  * Primary API: repl_eval_line() — parses, evaluates, and optionally
  * produces debug token/AST output.
- *
- * Legacy wrappers repl_format_line() and repl_format_line_ast() are
- * kept for backward compatibility (used by existing tests).
  */
 
 #include "repl.h"
@@ -174,82 +171,4 @@ void repl_result_free(ReplResult *r) {
     r->error = NULL;
     r->tokens = NULL;
     r->ast = NULL;
-}
-
-/* ============================================================
- * Legacy API wrappers
- * ============================================================ */
-
-char *repl_format_line(const char *input) {
-    /* Legacy wrapper: create an explicit no-op context. say() will error
-     * if called through this path, which is acceptable since this wrapper
-     * is only used by tests and will be removed in step 8. */
-    EvalContext ctx = {.write_fn = NULL, .userdata = NULL};
-    ReplResult r = repl_eval_line(input, false, false, &ctx);
-
-    char *result = NULL;
-
-    if (!r.ok && r.error) {
-        /* Format: "ERR <error>" */
-        size_t len = 4 + strlen(r.error) + 1;
-        result = malloc(len);
-        if (result) {
-            snprintf(result, len, "ERR %s", r.error);
-        }
-    } else if (!r.ok) {
-        result = strdup("ERR unknown error");
-    } else if (r.value == NULL) {
-        /* Blank input. */
-        result = strdup("OK");
-    } else {
-        /* Determine type from value string. */
-        const char *type_str;
-        const char *v = r.value;
-        bool is_num = false;
-        bool is_bool = (strcmp(v, "true") == 0 || strcmp(v, "false") == 0);
-        if (*v == '-')
-            v++;
-        if (*v >= '0' && *v <= '9')
-            is_num = true;
-
-        type_str = is_bool ? "BOOL" : is_num ? "NUMBER" : "STRING";
-        size_t len = 4 + strlen(type_str) + 1 + strlen(r.value) + 1 + 1;
-        result = malloc(len);
-        if (result) {
-            snprintf(result, len, "OK [%s %s]", type_str, r.value);
-        }
-    }
-
-    repl_result_free(&r);
-    return result;
-}
-
-char *repl_format_line_ast(const char *input) {
-    /* AST mode: parse only, no evaluation. This preserves the legacy
-     * behavior where identifiers produce AST output rather than eval errors. */
-    runtime_eval_lock();
-
-    char *result = NULL;
-
-    if (is_blank(input)) {
-        result = strdup("AST");
-        goto out;
-    }
-
-    AstNode *node = NULL;
-    ParseError err = {0};
-
-    if (parser_parse(input, &node, &err)) {
-        result = ast_format(node);
-        ast_free(node);
-        goto out;
-    }
-
-    char buf[320];
-    snprintf(buf, sizeof(buf), "ERR %zu:%zu %s", err.line, err.col, err.message);
-    result = strdup(buf);
-
-out:
-    runtime_eval_unlock();
-    return result;
 }
