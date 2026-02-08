@@ -126,7 +126,7 @@ Update the client to read multiple frames per request.
 - `json.h`/`json.c`: Add a helper to peek at the `"type"` field of a frame (or parse into a tagged union).
 - **Tests**: Integration tests in `test_cli.sh` — pipe `say("hello")` to the client, verify `hello` appears in stdout before the result value.
 
-### Step 3: `cutlet run <file>` — file execution
+### Step 3: `cutlet run <file>` — file execution ✓
 
 Add a `run` subcommand to execute a `.cutlet` file directly, without the TCP server.
 

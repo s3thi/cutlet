@@ -509,6 +509,196 @@ fi
 
 stop_server
 
+# ============================================================
+# cutlet run <file> — file execution
+# ============================================================
+echo
+echo "cutlet run (file execution):"
+
+# Helper: run a cutlet file and check stdout output + exit code.
+# Usage: test_run_file <name> <file_contents> <expected_stdout> [extra_flags]
+test_run_file() {
+    name="$1"
+    contents="$2"
+    expected="$3"
+    flags="$4"
+
+    tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+    printf '%s' "$contents" > "$tmpfile"
+
+    # shellcheck disable=SC2086
+    actual=$("$CUTLET" run "$tmpfile" $flags 2>/dev/null)
+    exit_code=$?
+
+    if [ "$actual" = "$expected" ] && [ "$exit_code" -eq 0 ]; then
+        echo "  PASS: $name"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name"
+        echo "    Expected stdout: $(echo "$expected" | head -5)"
+        echo "    Got stdout:      $(echo "$actual" | head -5)"
+        echo "    Exit code:       $exit_code (expected 0)"
+        FAIL=$((FAIL + 1))
+    fi
+
+    rm -f "$tmpfile"
+}
+
+# Helper: run a cutlet file and expect failure (exit code 1) + stderr output.
+test_run_file_error() {
+    name="$1"
+    contents="$2"
+    expected_stderr_substr="$3"
+    flags="$4"
+
+    tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+    printf '%s' "$contents" > "$tmpfile"
+
+    # shellcheck disable=SC2086
+    set +e
+    stderr_out=$("$CUTLET" run "$tmpfile" $flags 2>&1 1>/dev/null)
+    exit_code=$?
+    set -e
+
+    if [ "$exit_code" -ne 0 ] && echo "$stderr_out" | grep -qF "$expected_stderr_substr"; then
+        echo "  PASS: $name"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name"
+        echo "    Expected exit code != 0, got: $exit_code"
+        echo "    Expected stderr containing: $expected_stderr_substr"
+        echo "    Got stderr: $stderr_out"
+        FAIL=$((FAIL + 1))
+    fi
+
+    rm -f "$tmpfile"
+}
+
+# Basic: say() produces output
+test_run_file "say hello" 'say("hello")' "hello"
+
+# say() with number
+test_run_file "say number" 'say(42)' "42"
+
+# Multiple say() calls
+test_run_file "multiple say" 'say("a")
+say("b")
+say("c")' "a
+b
+c"
+
+# Final expression value is NOT printed (unlike REPL)
+test_run_file "no final value" '1 + 2' ""
+
+# say() output only, final value suppressed
+test_run_file "say then expr" 'say("hi")
+1 + 2' "hi"
+
+# Variables work across statements
+test_run_file "variables" 'my x = 10
+my y = 20
+say(x + y)' "30"
+
+# Empty file exits 0 with no output
+test_run_file "empty file" '' ""
+
+# Whitespace-only file exits 0 with no output
+test_run_file "whitespace file" '
+  ' ""
+
+# Parse error: exit 1, error on stderr
+test_run_file_error "parse error" '"unterminated' "unterminated string"
+
+# Runtime error: exit 1, error on stderr
+test_run_file_error "runtime error" '1 / 0' "division by zero"
+
+# Unknown function error
+test_run_file_error "unknown function" 'foo()' "unknown function"
+
+# Nonexistent file: exit 1, error on stderr
+set +e
+nonexistent_stderr=$("$CUTLET" run "/tmp/cutlet_nonexistent_file_xyz.cutlet" 2>&1 1>/dev/null)
+nonexistent_exit=$?
+set -e
+if [ "$nonexistent_exit" -ne 0 ] && echo "$nonexistent_stderr" | grep -qi "error"; then
+    echo "  PASS: nonexistent file"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: nonexistent file"
+    echo "    Exit code: $nonexistent_exit (expected != 0)"
+    echo "    Stderr: $nonexistent_stderr"
+    FAIL=$((FAIL + 1))
+fi
+
+# --tokens flag shows token debug output
+tokens_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'say("hi")' > "$tokens_tmpfile"
+tokens_result=$("$CUTLET" run "$tokens_tmpfile" --tokens 2>/dev/null)
+if echo "$tokens_result" | grep -q "TOKENS"; then
+    echo "  PASS: --tokens shows token output"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --tokens shows token output"
+    echo "    Got: $tokens_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$tokens_tmpfile"
+
+# --ast flag shows AST debug output
+ast_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'say("hi")' > "$ast_tmpfile"
+ast_result=$("$CUTLET" run "$ast_tmpfile" --ast 2>/dev/null)
+if echo "$ast_result" | grep -q "AST"; then
+    echo "  PASS: --ast shows AST output"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows AST output"
+    echo "    Got: $ast_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$ast_tmpfile"
+
+# --tokens --ast combined
+both_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' '1 + 2' > "$both_tmpfile"
+both_result=$("$CUTLET" run "$both_tmpfile" --tokens --ast 2>/dev/null)
+if echo "$both_result" | grep -q "TOKENS" && echo "$both_result" | grep -q "AST"; then
+    echo "  PASS: --tokens --ast shows both"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --tokens --ast shows both"
+    echo "    Got: $both_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$both_tmpfile"
+
+# say() output appears even with --tokens/--ast
+say_debug_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'say("world")' > "$say_debug_tmpfile"
+say_debug_result=$("$CUTLET" run "$say_debug_tmpfile" --tokens --ast 2>/dev/null)
+if echo "$say_debug_result" | grep -q "world" && echo "$say_debug_result" | grep -q "TOKENS"; then
+    echo "  PASS: say() output with debug flags"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: say() output with debug flags"
+    echo "    Got: $say_debug_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$say_debug_tmpfile"
+
+# cutlet run with no filename shows error
+set +e
+no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)
+no_file_exit=$?
+set -e
+if [ "$no_file_exit" -ne 0 ]; then
+    echo "  PASS: run with no filename errors"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: run with no filename should error"
+    FAIL=$((FAIL + 1))
+fi
+
 echo
 echo "========================================"
 echo "Tests run: $((PASS + FAIL))"

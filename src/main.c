@@ -5,6 +5,7 @@
  *   cutlet repl [--tokens] [--ast]                    start TCP REPL server (default)
  *   cutlet repl --listen [HOST:PORT] [--tokens] [--ast]  start TCP REPL server
  *   cutlet repl --connect [HOST:PORT] [--tokens] [--ast] connect to running server
+ *   cutlet run <file> [--tokens] [--ast]              execute a file directly
  *
  * The default mode starts a TCP server. There is no local-only eval mode.
  *
@@ -56,9 +57,10 @@
  * Print usage information.
  */
 static void print_usage(const char *prog) {
-    fprintf(stderr,
-            "Usage: %s repl [--tokens] [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
+    fprintf(stderr, "Usage:\n");
+    fprintf(stderr, "  %s repl [--tokens] [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
             prog);
+    fprintf(stderr, "  %s run <file> [--tokens] [--ast]\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Commands:\n");
     fprintf(
@@ -69,6 +71,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr,
             "  repl --connect [HOST:PORT]  Connect to a running REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
+    fprintf(stderr, "  run <file>                  Execute a Cutlet source file\n");
     fprintf(stderr, "\nDebug flags:\n");
     fprintf(stderr, "  --tokens    Show tokenizer output for each expression\n");
     fprintf(stderr, "  --ast       Show AST output for each expression\n");
@@ -515,6 +518,105 @@ static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
     return result;
 }
 
+/*
+ * EvalContext write callback for file execution mode.
+ * Writes output directly to stdout via fwrite().
+ * userdata is unused (NULL).
+ */
+static void stdout_write_fn(void *userdata, const char *data, size_t len) {
+    (void)userdata;
+    fwrite(data, 1, len, stdout);
+    fflush(stdout);
+}
+
+/*
+ * Execute a Cutlet source file directly (no TCP server).
+ *
+ * Reads the entire file into memory, parses it as a block,
+ * evaluates it, and prints any say() output to stdout.
+ * The final expression value is NOT printed (unlike the REPL).
+ * Parse/eval errors are printed to stderr.
+ *
+ * Returns 0 on success, 1 on error.
+ */
+static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
+    /* Open and read the file. */
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "Error: cannot open file '%s'\n", filename);
+        return 1;
+    }
+
+    /* Get file size. */
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fprintf(stderr, "Error: cannot read file '%s'\n", filename);
+        fclose(f);
+        return 1;
+    }
+    long file_size = ftell(f);
+    if (file_size < 0) {
+        fprintf(stderr, "Error: cannot read file '%s'\n", filename);
+        fclose(f);
+        return 1;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: cannot read file '%s'\n", filename);
+        fclose(f);
+        return 1;
+    }
+
+    /* Read file contents into a buffer. */
+    char *source = malloc((size_t)file_size + 1);
+    if (!source) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        fclose(f);
+        return 1;
+    }
+    /* Pre-zero the buffer so it's always null-terminated regardless
+     * of how many bytes fread returns. */
+    memset(source, 0, (size_t)file_size + 1);
+    fread(source, 1, (size_t)file_size, f);
+    if (ferror(f)) {
+        fprintf(stderr, "Error: cannot read file '%s'\n", filename);
+        free(source);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+
+    /* Create an EvalContext that writes say() output to stdout. */
+    EvalContext ctx = {.write_fn = stdout_write_fn, .userdata = NULL};
+
+    /* Evaluate the file contents. repl_eval_line() handles parsing
+     * as a block (multi-line) and evaluation in one call. */
+    ReplResult r = repl_eval_line(source, enable_tokens, enable_ast, &ctx);
+    free(source);
+
+    /* Print debug output if requested. */
+    if (enable_tokens && r.tokens) {
+        printf("%s\n", r.tokens);
+    }
+    if (enable_ast && r.ast) {
+        printf("%s\n", r.ast);
+    }
+
+    int exit_code = 0;
+
+    if (!r.ok) {
+        /* Print error to stderr. */
+        if (r.error) {
+            fprintf(stderr, "Error: %s\n", r.error);
+        } else {
+            fprintf(stderr, "Error: unknown error\n");
+        }
+        exit_code = 1;
+    }
+    /* On success, do NOT print the final value (unlike REPL). */
+
+    repl_result_free(&r);
+    return exit_code;
+}
+
 int main(int argc, char *argv[]) {
     if (!runtime_init()) {
         fprintf(stderr, "Error: failed to initialize runtime\n");
@@ -573,6 +675,35 @@ int main(int argc, char *argv[]) {
 
         /* Default: start server (--listen is optional). */
         return run_listen(flag_tokens, flag_ast, listen_addr);
+    } else if (strcmp(cmd, "run") == 0) {
+        /* Parse: cutlet run <file> [--tokens] [--ast] */
+        if (argc < 3) {
+            fprintf(stderr, "Error: 'run' requires a filename\n");
+            print_usage(argv[0]);
+            runtime_destroy();
+            return 1;
+        }
+
+        const char *filename = argv[2];
+        bool flag_tokens = false;
+        bool flag_ast = false;
+
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--tokens") == 0) {
+                flag_tokens = true;
+            } else if (strcmp(argv[i], "--ast") == 0) {
+                flag_ast = true;
+            } else {
+                fprintf(stderr, "Unknown run option: %s\n", argv[i]);
+                print_usage(argv[0]);
+                runtime_destroy();
+                return 1;
+            }
+        }
+
+        int result = run_file(filename, flag_tokens, flag_ast);
+        runtime_destroy();
+        return result;
     } else if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
         print_usage(argv[0]);
         return 0;
