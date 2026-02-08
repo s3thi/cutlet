@@ -1051,6 +1051,20 @@ TEST(test_say_multiple_in_block) {
 TEST(test_say_as_variable) { assert_eval_number("my say = 42\nsay", 42.0, "say as variable"); }
 
 /* ============================================================
+ * Comment eval tests (# line comments)
+ * ============================================================ */
+
+TEST(test_comment_trailing_eval) {
+    /* "42 # comment" → 42 */
+    assert_eval_number("42 # comment", 42.0, "trailing comment");
+}
+
+TEST(test_comment_multiline_eval) {
+    /* "my x = 1 # set x\nx + 1 # use x" → 2 */
+    assert_eval_number("my x_cmt = 1 # set x\nx_cmt + 1 # use x", 2.0, "comment in multi-line");
+}
+
+/* ============================================================
  * Single number (leaf node)
  * ============================================================ */
 
@@ -1240,6 +1254,10 @@ int main(void) {
     RUN_TEST(test_say_returns_nothing_in_expr);
     RUN_TEST(test_say_multiple_in_block);
     RUN_TEST(test_say_as_variable);
+
+    printf("\nComment eval:\n");
+    RUN_TEST(test_comment_trailing_eval);
+    RUN_TEST(test_comment_multiline_eval);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

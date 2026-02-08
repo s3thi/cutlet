@@ -25,9 +25,17 @@ static bool is_blank(const char *input) {
     if (!input)
         return true;
     while (*input) {
-        if (*input != ' ' && *input != '\t' && *input != '\n' && *input != '\r')
+        if (*input == ' ' || *input == '\t' || *input == '\n' || *input == '\r') {
+            input++;
+        } else if (*input == '#') {
+            /* Skip comment: # to end of line */
+            input++;
+            while (*input && *input != '\n' && *input != '\r') {
+                input++;
+            }
+        } else {
             return false;
-        input++;
+        }
     }
     return true;
 }

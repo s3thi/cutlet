@@ -160,9 +160,12 @@ void tokenizer_destroy(Tokenizer *tok) {
 }
 
 /*
- * Skip whitespace (spaces and tabs only) and update position tracking.
+ * Skip whitespace (spaces and tabs only) and comments (# to end of line).
  * Newlines are NOT skipped — they are emitted as TOK_NEWLINE tokens.
- * Returns the number of whitespace characters skipped.
+ * Comments start with '#' and extend to the end of the line. The newline
+ * character itself is NOT consumed (it still becomes a TOK_NEWLINE token).
+ * '#' inside strings is not affected (strings are handled before this).
+ * Returns the number of characters skipped.
  */
 static size_t skip_whitespace(Tokenizer *tok) {
     size_t start_pos = tok->pos;
@@ -172,6 +175,15 @@ static size_t skip_whitespace(Tokenizer *tok) {
         if (c == ' ' || c == '\t') {
             tok->pos++;
             tok->col++;
+        } else if (c == '#') {
+            /* Skip comment: consume everything until newline or EOF.
+             * The newline itself is NOT consumed — it will be emitted
+             * as a TOK_NEWLINE token on the next call to tokenizer_next(). */
+            while (tok->pos < tok->input_len && tok->input[tok->pos] != '\n' &&
+                   tok->input[tok->pos] != '\r') {
+                tok->pos++;
+                tok->col++;
+            }
         } else {
             break;
         }

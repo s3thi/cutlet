@@ -1396,6 +1396,57 @@ TEST(test_is_incomplete_multiline_unclosed_if) {
 }
 
 /* ============================================================
+ * Comment parsing tests (# line comments)
+ * ============================================================ */
+
+TEST(test_comment_trailing_number) {
+    /* "42 # trailing comment" → [NUMBER 42] */
+    ASSERT(ast_matches("42 # trailing comment", "AST [NUMBER 42]"), "trailing comment on number");
+    PASS();
+}
+
+TEST(test_comment_decl_and_use) {
+    /* "my x = 1 # declare x\nx" → [BLOCK [DECL x [NUMBER 1]] [IDENT x]] */
+    ASSERT(ast_matches("my x = 1 # declare x\nx", "AST [BLOCK [DECL x [NUMBER 1]] [IDENT x]]"),
+           "comment after decl");
+    PASS();
+}
+
+TEST(test_comment_in_if) {
+    /* "if true then\n  1 # branch\nend" → parses correctly */
+    ASSERT(ast_matches("if true then\n  1 # branch\nend", "AST [IF [BOOL true] [NUMBER 1]]"),
+           "comment in if body");
+    PASS();
+}
+
+/* parser_is_complete() with comments */
+
+TEST(test_is_complete_comment_only) {
+    /* "# comment" → complete (no expression, same as whitespace-only) */
+    ASSERT(parser_is_complete("# comment"), "comment-only should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_comment_with_newline) {
+    /* "# comment\n" → complete */
+    ASSERT(parser_is_complete("# comment\n"), "comment with newline should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_expr_with_comment) {
+    /* "42 # comment" → complete */
+    ASSERT(parser_is_complete("42 # comment"), "expr with trailing comment should be complete");
+    PASS();
+}
+
+TEST(test_is_incomplete_if_with_comment) {
+    /* "if true then # todo" → incomplete (still needs body and end) */
+    ASSERT(!parser_is_complete("if true then # todo"),
+           "if with comment but no body should be incomplete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1613,6 +1664,17 @@ int main(void) {
     RUN_TEST(test_is_incomplete_trailing_not);
     RUN_TEST(test_is_incomplete_nested_unclosed_parens);
     RUN_TEST(test_is_incomplete_multiline_unclosed_if);
+
+    printf("\nComment parsing (# line comments):\n");
+    RUN_TEST(test_comment_trailing_number);
+    RUN_TEST(test_comment_decl_and_use);
+    RUN_TEST(test_comment_in_if);
+
+    printf("\nparser_is_complete() - comments:\n");
+    RUN_TEST(test_is_complete_comment_only);
+    RUN_TEST(test_is_complete_comment_with_newline);
+    RUN_TEST(test_is_complete_expr_with_comment);
+    RUN_TEST(test_is_incomplete_if_with_comment);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

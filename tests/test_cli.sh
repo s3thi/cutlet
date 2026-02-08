@@ -686,6 +686,15 @@ else
 fi
 rm -f "$say_debug_tmpfile"
 
+# Comments in file execution
+test_run_file "comments in file" '# This is a comment
+my x = 10 # set x
+# Another comment
+say(x + 5) # print result' "15"
+
+# Comment-only file exits 0 with no output
+test_run_file "comment-only file" '# just a comment' ""
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

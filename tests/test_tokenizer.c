@@ -1690,6 +1690,149 @@ TEST(test_newline_type_str) {
 }
 
 /* ============================================================
+ * Comment tests (# line comments)
+ *
+ * Comments start with # and extend to end of line.
+ * They are stripped at the tokenizer level (skip_whitespace).
+ * The newline itself is NOT consumed — it becomes TOK_NEWLINE.
+ * # inside strings is NOT a comment.
+ * ============================================================ */
+
+TEST(test_comment_only) {
+    /* "# comment" → EOF (comment-only input) */
+    Tokenizer *tok = tokenizer_create("# comment");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "comment-only input should produce EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_trailing) {
+    /* "42 # comment" → NUMBER(42), EOF */
+    Tokenizer *tok = tokenizer_create("42 # comment");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "comment should be skipped, then EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_before_newline_and_code) {
+    /* "42 # comment\n7" → NUMBER(42), NEWLINE, NUMBER(7) */
+    Tokenizer *tok = tokenizer_create("42 # comment\n7");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE after comment");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "7", 1), "expected NUMBER '7'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_at_start_of_line) {
+    /* "# comment\n42" → NEWLINE, NUMBER(42), EOF */
+    Tokenizer *tok = tokenizer_create("# comment\n42");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected NEWLINE after comment");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_not_in_string) {
+    /* '"hello # world"' → STRING("hello # world") — # is not a comment inside strings */
+    Tokenizer *tok = tokenizer_create("\"hello # world\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "hello # world", 13),
+                "expected STRING 'hello # world'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_multiple_lines) {
+    /* "# comment1\n# comment2\n42" → NEWLINE, NEWLINE, NUMBER(42), EOF */
+    Tokenizer *tok = tokenizer_create("# comment1\n# comment2\n42");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected first NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected second NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_comment_interleaved_with_code) {
+    /* "42 # comment\n# another\n7" → NUMBER(42), NEWLINE, NEWLINE, NUMBER(7), EOF */
+    Tokenizer *tok = tokenizer_create("42 # comment\n# another\n7");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "42", 2), "expected NUMBER '42'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected first NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_NEWLINE, "expected second NEWLINE");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "7", 1), "expected NUMBER '7'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -1824,6 +1967,15 @@ int main(void) {
     RUN_TEST(test_newline_only);
     RUN_TEST(test_newline_with_spaces);
     RUN_TEST(test_newline_type_str);
+
+    printf("\nComment tests (# line comments):\n");
+    RUN_TEST(test_comment_only);
+    RUN_TEST(test_comment_trailing);
+    RUN_TEST(test_comment_before_newline_and_code);
+    RUN_TEST(test_comment_at_start_of_line);
+    RUN_TEST(test_comment_not_in_string);
+    RUN_TEST(test_comment_multiple_lines);
+    RUN_TEST(test_comment_interleaved_with_code);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);

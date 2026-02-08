@@ -1450,14 +1450,24 @@ char *ast_format(const AstNode *node) {
  *   - Expected 'then', 'end', 'else' (unclosed if/then/else)
  */
 /*
- * Helper: check if string contains only whitespace (spaces, tabs, newlines).
+ * Helper: check if string contains only whitespace (spaces, tabs, newlines)
+ * and/or comments (# to end of line). This ensures that comment-only input
+ * like "# hello" is treated as complete (empty), not sent to the parser
+ * where it would hit EOF and produce a misleading "incomplete" classification.
  */
 static bool is_whitespace_only(const char *s) {
     while (*s) {
-        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r') {
+        if (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
+            s++;
+        } else if (*s == '#') {
+            /* Skip comment: consume everything until newline or end of string */
+            s++;
+            while (*s && *s != '\n' && *s != '\r') {
+                s++;
+            }
+        } else {
             return false;
         }
-        s++;
     }
     return true;
 }
