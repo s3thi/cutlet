@@ -1,15 +1,17 @@
 /*
  * repl.c - Cutlet REPL core implementation
  *
- * Primary API: repl_eval_line() — parses, evaluates, and optionally
- * produces debug token/AST output.
+ * Primary API: repl_eval_line() — parses, compiles to bytecode,
+ * executes via VM, and optionally produces debug token/AST output.
  */
 
 #include "repl.h"
-#include "eval.h"
+#include "compiler.h"
 #include "parser.h"
 #include "runtime.h"
 #include "tokenizer.h"
+#include "value.h"
+#include "vm.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,10 +133,21 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, Ev
         r.ast = ast_format(node);
     }
 
-    /* Evaluate the expression using the caller-provided context.
-     * Built-in functions like say() use ctx to emit output. */
-    Value v = eval(node, ctx);
+    /* Compile the AST to bytecode. */
+    CompileError cerr;
+    Chunk *chunk = compile(node, &cerr);
     ast_free(node);
+
+    if (!chunk) {
+        r.ok = false;
+        r.error = strdup(cerr.message);
+        goto out;
+    }
+
+    /* Execute the bytecode via the VM. */
+    Value v = vm_execute(chunk, ctx);
+    chunk_free(chunk);
+    free(chunk);
 
     if (v.type == VAL_ERROR) {
         r.ok = false;

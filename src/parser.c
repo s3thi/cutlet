@@ -79,7 +79,7 @@ static bool token_is_keyword(const Token *t, const char *kw) {
 /*
  * Create a leaf AST node (NUMBER, STRING, IDENT).
  */
-static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len) {
+static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len, size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -94,6 +94,7 @@ static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len)
     node->left = NULL;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = NULL;
     node->child_count = 0;
     return node;
@@ -102,7 +103,8 @@ static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len)
 /*
  * Create a binary operator AST node.
  */
-static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode *right) {
+static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode *right,
+                           size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -117,6 +119,7 @@ static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode
     node->left = left;
     node->right = right;
     node->grouped = false;
+    node->line = line;
     node->children = NULL;
     node->child_count = 0;
     return node;
@@ -125,7 +128,7 @@ static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode
 /*
  * Create a unary operator AST node.
  */
-static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
+static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand, size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -140,6 +143,7 @@ static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
     node->left = operand;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = NULL;
     node->child_count = 0;
     return node;
@@ -148,7 +152,8 @@ static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand) {
 /*
  * Create a declaration or assignment AST node.
  */
-static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, AstNode *expr) {
+static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, AstNode *expr,
+                           size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -163,6 +168,7 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
     node->left = expr;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = NULL;
     node->child_count = 0;
     return node;
@@ -172,7 +178,7 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
  * Create a block AST node containing an array of child expressions.
  * Takes ownership of the children array and all nodes within it.
  */
-static AstNode *make_block(AstNode **children, size_t count) {
+static AstNode *make_block(AstNode **children, size_t count, size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -181,6 +187,7 @@ static AstNode *make_block(AstNode **children, size_t count) {
     node->left = NULL;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = children;
     node->child_count = count;
     return node;
@@ -192,7 +199,7 @@ static AstNode *make_block(AstNode **children, size_t count) {
  * children[2]=else-body (if has_else is true).
  * Takes ownership of condition, then_body, and else_body.
  */
-static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_body) {
+static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_body, size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -215,6 +222,7 @@ static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_bo
     node->left = NULL;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = children;
     node->child_count = count;
     return node;
@@ -225,7 +233,8 @@ static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_bo
  * value = function name, children[0..n] = arguments.
  * Takes ownership of the name string (copied) and the children array.
  */
-static AstNode *make_call(const char *name, size_t name_len, AstNode **args, size_t arg_count) {
+static AstNode *make_call(const char *name, size_t name_len, AstNode **args, size_t arg_count,
+                          size_t line) {
     AstNode *node = malloc(sizeof(AstNode));
     if (!node)
         return NULL;
@@ -240,6 +249,7 @@ static AstNode *make_call(const char *name, size_t name_len, AstNode **args, siz
     node->left = NULL;
     node->right = NULL;
     node->grouped = false;
+    node->line = line;
     node->children = args;
     node->child_count = arg_count;
     return node;
@@ -363,7 +373,7 @@ static AstNode *parse_atom(Parser *p) {
 
     /* Number literal */
     if (t.type == TOK_NUMBER) {
-        AstNode *node = make_leaf(AST_NUMBER, t.value, t.value_len);
+        AstNode *node = make_leaf(AST_NUMBER, t.value, t.value_len, t.line);
         if (!node) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
@@ -374,7 +384,7 @@ static AstNode *parse_atom(Parser *p) {
 
     /* String literal */
     if (t.type == TOK_STRING) {
-        AstNode *node = make_leaf(AST_STRING, t.value, t.value_len);
+        AstNode *node = make_leaf(AST_STRING, t.value, t.value_len, t.line);
         if (!node) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
@@ -385,7 +395,7 @@ static AstNode *parse_atom(Parser *p) {
 
     /* Boolean literals: true, false */
     if (token_is_keyword(&t, "true") || token_is_keyword(&t, "false")) {
-        AstNode *node = make_leaf(AST_BOOL, t.value, t.value_len);
+        AstNode *node = make_leaf(AST_BOOL, t.value, t.value_len, t.line);
         if (!node) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
@@ -396,7 +406,7 @@ static AstNode *parse_atom(Parser *p) {
 
     /* Nothing literal */
     if (token_is_keyword(&t, "nothing")) {
-        AstNode *node = make_leaf(AST_NOTHING, t.value, t.value_len);
+        AstNode *node = make_leaf(AST_NOTHING, t.value, t.value_len, t.line);
         if (!node) {
             parser_error(p, t.line, t.col, "memory allocation failed");
             return NULL;
@@ -417,7 +427,7 @@ static AstNode *parse_atom(Parser *p) {
         AstNode *operand = parse_expr(p, 3);
         if (!operand)
             return NULL;
-        AstNode *node = make_unary("not", 3, operand);
+        AstNode *node = make_unary("not", 3, operand, t.line);
         if (!node) {
             ast_free(operand);
             parser_error(p, t.line, t.col, "memory allocation failed");
@@ -521,7 +531,7 @@ static AstNode *parse_atom(Parser *p) {
                 ptr_array_destroy(&args);
             }
 
-            AstNode *call = make_call(saved_name, saved_len, children, arg_count);
+            AstNode *call = make_call(saved_name, saved_len, children, arg_count, saved_line);
             free(saved_name);
             if (!call) {
                 for (size_t i = 0; i < arg_count; i++)
@@ -535,7 +545,7 @@ static AstNode *parse_atom(Parser *p) {
         }
 
         /* Plain identifier (not a call) */
-        AstNode *node = make_leaf(AST_IDENT, saved_name, saved_len);
+        AstNode *node = make_leaf(AST_IDENT, saved_name, saved_len, saved_line);
         free(saved_name);
         if (!node) {
             parser_error(p, saved_line, saved_col, "memory allocation failed");
@@ -553,7 +563,7 @@ static AstNode *parse_atom(Parser *p) {
             AstNode *operand = parse_expr(p, 7);
             if (!operand)
                 return NULL;
-            AstNode *node = make_unary("-", 1, operand);
+            AstNode *node = make_unary("-", 1, operand, t.line);
             if (!node) {
                 ast_free(operand);
                 parser_error(p, t.line, t.col, "memory allocation failed");
@@ -619,7 +629,7 @@ static AstNode *parse_assignment(Parser *p) {
         }
 
         Token name_tok = p->current;
-        AstNode *decl = make_named(AST_DECL, name_tok.value, name_tok.value_len, NULL);
+        AstNode *decl = make_named(AST_DECL, name_tok.value, name_tok.value_len, NULL, kw.line);
         if (!decl) {
             parser_error(p, kw.line, kw.col, "memory allocation failed");
             return NULL;
@@ -665,7 +675,7 @@ static AstNode *parse_assignment(Parser *p) {
             return NULL;
         }
 
-        AstNode *assign = make_named(AST_ASSIGN, left->value, strlen(left->value), rhs);
+        AstNode *assign = make_named(AST_ASSIGN, left->value, strlen(left->value), rhs, op_line);
         if (!assign) {
             ast_free(left);
             ast_free(rhs);
@@ -720,7 +730,7 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
             return NULL;
         }
 
-        AstNode *binop = make_binop(op_buf, op_len, left, right);
+        AstNode *binop = make_binop(op_buf, op_len, left, right, op_line);
         if (!binop) {
             ast_free(left);
             ast_free(right);
@@ -834,7 +844,7 @@ static AstNode *parse_if(Parser *p) {
     } else {
         size_t count = then_exprs.count;
         AstNode **children = (AstNode **)ptr_array_release(&then_exprs);
-        then_body = make_block(children, count);
+        then_body = make_block(children, count, if_tok.line);
         if (!then_body) {
             for (size_t i = 0; i < count; i++)
                 ast_free(children[i]);
@@ -923,7 +933,7 @@ static AstNode *parse_if(Parser *p) {
             } else {
                 size_t count = else_exprs.count;
                 AstNode **children = (AstNode **)ptr_array_release(&else_exprs);
-                else_body = make_block(children, count);
+                else_body = make_block(children, count, if_tok.line);
                 if (!else_body) {
                     for (size_t i = 0; i < count; i++)
                         ast_free(children[i]);
@@ -957,7 +967,7 @@ static AstNode *parse_if(Parser *p) {
         return NULL;
     }
 
-    AstNode *if_node = make_if(condition, then_body, else_body);
+    AstNode *if_node = make_if(condition, then_body, else_body, if_tok.line);
     if (!if_node) {
         ast_free(condition);
         ast_free(then_body);
@@ -1129,7 +1139,8 @@ bool parser_parse(const char *input, AstNode **out, ParseError *err) {
     /* Multiple expressions: wrap in AST_BLOCK */
     size_t count = exprs.count;
     AstNode **children = (AstNode **)ptr_array_release(&exprs);
-    AstNode *block = make_block(children, count);
+    /* Use line 1 for the top-level block. */
+    AstNode *block = make_block(children, count, 1);
     if (!block) {
         /* On failure, free_expr_array can't be used since array was released */
         for (size_t i = 0; i < count; i++) {

@@ -7,9 +7,9 @@
  * Uses the same simple test harness as test_tokenizer.c.
  */
 
-#include "../src/eval.h"
 #include "../src/repl.h"
 #include "../src/runtime.h"
+#include "../src/value.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -260,12 +260,12 @@ TEST(test_error_number_adjacent_ident) {
 }
 
 TEST(test_error_unknown_ident) {
-    ASSERT(eval_error_matches("foo", "unknown variable 'foo'"), "unknown ident error");
+    ASSERT(eval_error_matches("foo", "line 1: unknown variable 'foo'"), "unknown ident error");
     PASS();
 }
 
 TEST(test_error_div_by_zero) {
-    ASSERT(eval_error_matches("1 / 0", "division by zero"), "div by zero error");
+    ASSERT(eval_error_matches("1 / 0", "line 1: division by zero"), "div by zero error");
     PASS();
 }
 
@@ -315,7 +315,7 @@ TEST(test_assign_updates_variable) {
 
 TEST(test_assign_undeclared_error) {
     /* Assigning to undeclared variable is a runtime error. */
-    ASSERT(eval_error_matches("undeclared = 1", "undefined variable 'undeclared'"),
+    ASSERT(eval_error_matches("undeclared = 1", "line 1: undefined variable 'undeclared'"),
            "undeclared assign error");
     PASS();
 }
@@ -352,7 +352,8 @@ TEST(test_assign_chain) {
 }
 
 TEST(test_unknown_ident_still_errors) {
-    ASSERT(eval_error_matches("nope + 1", "unknown variable 'nope'"), "unknown ident error");
+    ASSERT(eval_error_matches("nope + 1", "line 1: unknown variable 'nope'"),
+           "unknown ident error");
     PASS();
 }
 

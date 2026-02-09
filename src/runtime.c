@@ -4,22 +4,23 @@
  * Implements the global evaluation lock that serializes all evaluation.
  * See runtime.h for the lock hierarchy and design rationale.
  *
- * Implementation uses pthread_rwlock_t so we can later allow read-only
- * access without changing the lock primitive.  For now every acquisition
- * is a write lock.
+ * Variable storage uses an open-addressing hash table with FNV-1a hash
+ * and linear probing. Auto-resizes at 75% load factor. O(1) average
+ * lookup instead of O(n) linked list scan.
  *
  * Thread safety: init uses pthread_once to guarantee the rwlock is
- * initialized exactly once, even under concurrent calls.  destroy
+ * initialized exactly once, even under concurrent calls. destroy
  * clears the variable environment; the lock lives for the process lifetime.
  */
 
 #include "runtime.h"
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Global evaluation lock.  Write-locked for every eval; read-locks
+/* Global evaluation lock. Write-locked for every eval; read-locks
  * reserved for future read-only introspection. */
 static pthread_rwlock_t eval_lock;
 
@@ -29,17 +30,122 @@ static pthread_once_t runtime_once = PTHREAD_ONCE_INIT;
 /* Set to true by runtime_init_impl if pthread_rwlock_init succeeds. */
 static bool init_ok = false;
 
-/* Simple variable environment (linked list).  Access is serialized by the
- * global eval lock; do not call these helpers without holding the lock. */
-typedef struct RuntimeVar {
-    char *name;
-    Value value;
-    struct RuntimeVar *next;
-} RuntimeVar;
+/* ============================================================
+ * Hash table for global variables
+ * ============================================================ */
 
-static RuntimeVar *runtime_vars = NULL;
+/* Each entry in the hash table. An entry is "occupied" when name != NULL. */
+typedef struct {
+    char *name;  /* Owned. NULL means empty slot. */
+    Value value; /* Owned. */
+} VarEntry;
 
-static void runtime_vars_clear(void);
+/* Initial table capacity (must be a power of 2). */
+#define VAR_TABLE_INIT_CAP 16
+
+/* Load factor threshold for resizing (75%). */
+#define VAR_TABLE_MAX_LOAD 0.75
+
+static VarEntry *var_table = NULL;
+static size_t var_table_cap = 0;   /* Current capacity (always power of 2). */
+static size_t var_table_count = 0; /* Number of occupied entries. */
+
+/*
+ * FNV-1a hash for a null-terminated string.
+ * Fast, simple, good distribution for short identifier strings.
+ */
+static uint32_t fnv1a(const char *key) {
+    uint32_t hash = 2166136261u;
+    for (const char *p = key; *p; p++) {
+        hash ^= (uint8_t)*p;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+/*
+ * Find the slot for a given key, or the first empty slot.
+ * Uses linear probing. Table must not be full (ensured by load factor).
+ */
+static size_t var_table_find_slot(VarEntry *table, size_t cap, const char *name) {
+    uint32_t hash = fnv1a(name);
+    size_t idx = hash & (cap - 1); /* cap is always power of 2 */
+    for (;;) {
+        if (table[idx].name == NULL)
+            return idx; /* Empty slot */
+        if (strcmp(table[idx].name, name) == 0)
+            return idx; /* Found existing entry */
+        idx = (idx + 1) & (cap - 1);
+    }
+}
+
+/*
+ * Resize the hash table to new_cap. Rehashes all existing entries.
+ * Returns true on success, false on OOM.
+ */
+static bool var_table_resize(size_t new_cap) {
+    VarEntry *new_table = calloc(new_cap, sizeof(VarEntry));
+    if (!new_table)
+        return false;
+
+    /* Rehash all existing entries into the new table. */
+    for (size_t i = 0; i < var_table_cap; i++) {
+        if (var_table[i].name != NULL) {
+            size_t slot = var_table_find_slot(new_table, new_cap, var_table[i].name);
+            new_table[slot] = var_table[i]; /* Move ownership */
+        }
+    }
+
+    free(var_table);
+    var_table = new_table;
+    var_table_cap = new_cap;
+    /* count stays the same */
+    return true;
+}
+
+/* Clear all entries in the variable table. */
+static void var_table_clear(void) {
+    for (size_t i = 0; i < var_table_cap; i++) {
+        if (var_table[i].name != NULL) {
+            free(var_table[i].name);
+            value_free(&var_table[i].value);
+            var_table[i].name = NULL;
+        }
+    }
+    free(var_table);
+    var_table = NULL;
+    var_table_cap = 0;
+    var_table_count = 0;
+}
+
+/* Ensure the table is initialized and has room for at least one more entry. */
+static bool var_table_ensure_capacity(void) {
+    if (var_table == NULL) {
+        var_table = calloc(VAR_TABLE_INIT_CAP, sizeof(VarEntry));
+        if (!var_table)
+            return false;
+        var_table_cap = VAR_TABLE_INIT_CAP;
+        return true;
+    }
+    /* Resize if at or above 75% load. */
+    if ((double)(var_table_count + 1) > (double)var_table_cap * VAR_TABLE_MAX_LOAD) {
+        return var_table_resize(var_table_cap * 2);
+    }
+    return true;
+}
+
+/*
+ * Find an existing variable by name.
+ * Returns a pointer to the entry if found, NULL otherwise.
+ */
+static VarEntry *var_table_find(const char *name) {
+    if (var_table == NULL || var_table_count == 0)
+        return NULL;
+    size_t slot = var_table_find_slot(var_table, var_table_cap, name);
+    if (var_table[slot].name == NULL)
+        return NULL;
+    return &var_table[slot];
+}
 
 /* Test-only hook pointers (only compiled in when CUTLET_TESTING is defined). */
 #ifdef CUTLET_TESTING
@@ -60,23 +166,11 @@ bool runtime_init(void) {
 
 /* Clears the variable environment. The eval lock lives for the process
  * lifetime, so this remains safe to call any time. */
-void runtime_destroy(void) { runtime_vars_clear(); }
-
-static void runtime_vars_clear(void) {
-    RuntimeVar *cur = runtime_vars;
-    while (cur) {
-        RuntimeVar *next = cur->next;
-        free(cur->name);
-        value_free(&cur->value);
-        free(cur);
-        cur = next;
-    }
-    runtime_vars = NULL;
-}
+void runtime_destroy(void) { var_table_clear(); }
 
 void runtime_eval_lock(void) {
     /* Lazy init: safe to call even if runtime_init() was never called
-     * explicitly.  pthread_once guarantees this is a no-op after the
+     * explicitly. pthread_once guarantees this is a no-op after the
      * first successful init. */
     runtime_init();
     pthread_rwlock_wrlock(&eval_lock);
@@ -98,80 +192,62 @@ void runtime_eval_unlock(void) {
     pthread_rwlock_unlock(&eval_lock);
 }
 
-static RuntimeVar *runtime_var_find(const char *name) {
-    for (RuntimeVar *cur = runtime_vars; cur; cur = cur->next) {
-        if (strcmp(cur->name, name) == 0)
-            return cur;
-    }
-    return NULL;
-}
-
-static bool value_clone(Value *out, const Value *src) {
-    if (!out || !src)
-        return false;
-    *out = *src;
-    if (src->type == VAL_STRING || src->type == VAL_ERROR) {
-        const char *s = src->string ? src->string : "";
-        out->string = strdup(s);
-        if (!out->string)
-            return false;
-    } else {
-        out->string = NULL;
-    }
-    return true;
-}
-
 RuntimeVarStatus runtime_var_get(const char *name, Value *out) {
     runtime_init();
-    RuntimeVar *var = runtime_var_find(name);
-    if (!var)
+    VarEntry *entry = var_table_find(name);
+    if (!entry)
         return RUNTIME_VAR_NOT_FOUND;
-    if (!value_clone(out, &var->value))
+    if (!value_clone(out, &entry->value))
         return RUNTIME_VAR_OOM;
     return RUNTIME_VAR_OK;
 }
 
 RuntimeVarStatus runtime_var_define(const char *name, const Value *value) {
     runtime_init();
-    RuntimeVar *var = runtime_var_find(name);
+
+    /* Check if already exists (overwrite). */
+    VarEntry *entry = var_table_find(name);
+    if (entry) {
+        Value cloned;
+        if (!value_clone(&cloned, value))
+            return RUNTIME_VAR_OOM;
+        value_free(&entry->value);
+        entry->value = cloned;
+        return RUNTIME_VAR_OK;
+    }
+
+    /* New entry: ensure capacity. */
+    if (!var_table_ensure_capacity())
+        return RUNTIME_VAR_OOM;
+
     Value cloned;
     if (!value_clone(&cloned, value))
         return RUNTIME_VAR_OOM;
 
-    if (var) {
-        value_free(&var->value);
-        var->value = cloned;
-        return RUNTIME_VAR_OK;
+    char *name_dup = strdup(name);
+    if (!name_dup) {
+        value_free(&cloned);
+        return RUNTIME_VAR_OOM;
     }
 
-    RuntimeVar *entry = malloc(sizeof(RuntimeVar));
-    if (!entry) {
-        value_free(&cloned);
-        return RUNTIME_VAR_OOM;
-    }
-    entry->name = strdup(name);
-    if (!entry->name) {
-        value_free(&cloned);
-        free(entry);
-        return RUNTIME_VAR_OOM;
-    }
-    entry->value = cloned;
-    entry->next = runtime_vars;
-    runtime_vars = entry;
+    size_t slot = var_table_find_slot(var_table, var_table_cap, name);
+    var_table[slot].name = name_dup;
+    var_table[slot].value = cloned;
+    var_table_count++;
     return RUNTIME_VAR_OK;
 }
 
 RuntimeVarStatus runtime_var_assign(const char *name, const Value *value) {
     runtime_init();
-    RuntimeVar *var = runtime_var_find(name);
-    if (!var)
+    VarEntry *entry = var_table_find(name);
+    if (!entry)
         return RUNTIME_VAR_NOT_FOUND;
 
     Value cloned;
     if (!value_clone(&cloned, value))
         return RUNTIME_VAR_OOM;
 
-    value_free(&var->value);
-    var->value = cloned;
+    value_free(&entry->value);
+    entry->value = cloned;
     return RUNTIME_VAR_OK;
 }

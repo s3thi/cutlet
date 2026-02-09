@@ -12,9 +12,9 @@
  * - Secondary tests do the same for eval with AST and mixed modes.
  */
 
-#include "../src/eval.h"
 #include "../src/repl.h"
 #include "../src/runtime.h"
+#include "../src/value.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>

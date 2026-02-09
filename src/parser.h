@@ -34,6 +34,7 @@ typedef struct AstNode {
     struct AstNode *left;  /* left operand (or sole operand for unary) */
     struct AstNode *right; /* right operand (NULL for unary/leaf) */
     bool grouped;          /* true if the node originated from parentheses */
+    size_t line;           /* source line number from the first token of this node */
 
     /* For AST_BLOCK only: array of child expressions */
     struct AstNode **children; /* owned array of owned nodes */

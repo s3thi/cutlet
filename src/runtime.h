@@ -22,7 +22,7 @@
 #ifndef CUTLET_RUNTIME_H
 #define CUTLET_RUNTIME_H
 
-#include "eval.h"
+#include "value.h"
 #include <stdbool.h>
 
 /*

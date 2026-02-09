@@ -20,7 +20,7 @@ ISOCLINE_SRC = $(ISOCLINE_DIR)/src/isocline.c
 ISOCLINE_CFLAGS = -I$(ISOCLINE_DIR)/include -I$(ISOCLINE_DIR)/src
 
 # Library source files (everything except main.c)
-LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/eval.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/compiler.c $(SRC_DIR)/vm.c
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
 
 # Main binary
@@ -43,14 +43,20 @@ TEST_REPL_SERVER_BIN = $(BUILD_DIR)/test_repl_server
 TEST_RUNTIME_SRC = $(TEST_DIR)/test_runtime.c
 TEST_RUNTIME_BIN = $(BUILD_DIR)/test_runtime
 
-TEST_EVAL_SRC = $(TEST_DIR)/test_eval.c
-TEST_EVAL_BIN = $(BUILD_DIR)/test_eval
-
 TEST_PTR_ARRAY_SRC = $(TEST_DIR)/test_ptr_array.c
 TEST_PTR_ARRAY_BIN = $(BUILD_DIR)/test_ptr_array
 
 TEST_JSON_SRC = $(TEST_DIR)/test_json.c
 TEST_JSON_BIN = $(BUILD_DIR)/test_json
+
+TEST_CHUNK_SRC = $(TEST_DIR)/test_chunk.c
+TEST_CHUNK_BIN = $(BUILD_DIR)/test_chunk
+
+TEST_COMPILER_SRC = $(TEST_DIR)/test_compiler.c
+TEST_COMPILER_BIN = $(BUILD_DIR)/test_compiler
+
+TEST_VM_SRC = $(TEST_DIR)/test_vm.c
+TEST_VM_BIN = $(BUILD_DIR)/test_vm
 
 # Default target: build the cutlet binary
 .PHONY: all
@@ -70,7 +76,7 @@ $(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(BUILD_DIR)
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-parser test-eval test-repl-server test-runtime test-ptr-array test-json test-cli
+test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-ptr-array test-json test-chunk test-compiler test-vm test-cli
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -92,11 +98,6 @@ test-parser: $(TEST_PARSER_BIN)
 test-repl-server: $(TEST_REPL_SERVER_BIN)
 	./$(TEST_REPL_SERVER_BIN)
 
-# Run eval tests
-.PHONY: test-eval
-test-eval: $(TEST_EVAL_BIN)
-	./$(TEST_EVAL_BIN)
-
 # Run runtime tests
 .PHONY: test-runtime
 test-runtime: $(TEST_RUNTIME_BIN)
@@ -112,6 +113,21 @@ test-ptr-array: $(TEST_PTR_ARRAY_BIN)
 test-json: $(TEST_JSON_BIN)
 	./$(TEST_JSON_BIN)
 
+# Run chunk tests
+.PHONY: test-chunk
+test-chunk: $(TEST_CHUNK_BIN)
+	./$(TEST_CHUNK_BIN)
+
+# Run compiler tests
+.PHONY: test-compiler
+test-compiler: $(TEST_COMPILER_BIN)
+	./$(TEST_COMPILER_BIN)
+
+# Run VM tests
+.PHONY: test-vm
+test-vm: $(TEST_VM_BIN)
+	./$(TEST_VM_BIN)
+
 # Run CLI integration tests
 .PHONY: test-cli
 test-cli: $(BIN)
@@ -124,10 +140,6 @@ $(TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(BUILD_DI
 # Build parser test binary
 $(TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(LDFLAGS)
-
-# Build eval test binary
-$(TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -pthread -lm
 
 # Build REPL test binary
 $(TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(BUILD_DIR)
@@ -149,6 +161,18 @@ $(TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $(BUILD_DI
 $(TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(LDFLAGS)
 
+# Build chunk test binary
+$(TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(LDFLAGS) -lm
+
+# Build compiler test binary
+$(TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -lm
+
+# Build VM test binary
+$(TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -pthread -lm
+
 # ---------- Formatting (clang-format) ----------
 
 # All tracked C source and header files, excluding vendor/ (third-party code).
@@ -167,7 +191,7 @@ format-check:
 # ---------- Compile database ----------
 
 # All source files that contribute to the compile database.
-ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_EVAL_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC) $(TEST_JSON_SRC)
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC) $(TEST_JSON_SRC) $(TEST_CHUNK_SRC) $(TEST_COMPILER_SRC) $(TEST_VM_SRC)
 
 # Auto-generate compile_commands.json when missing or when any source file changes.
 compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
@@ -207,10 +231,12 @@ SANITIZE_TEST_TOKENIZER_BIN = $(SANITIZE_BUILD_DIR)/test_tokenizer
 SANITIZE_TEST_REPL_BIN = $(SANITIZE_BUILD_DIR)/test_repl
 SANITIZE_TEST_PARSER_BIN = $(SANITIZE_BUILD_DIR)/test_parser
 SANITIZE_TEST_REPL_SERVER_BIN = $(SANITIZE_BUILD_DIR)/test_repl_server
-SANITIZE_TEST_EVAL_BIN = $(SANITIZE_BUILD_DIR)/test_eval
 SANITIZE_TEST_RUNTIME_BIN = $(SANITIZE_BUILD_DIR)/test_runtime
 SANITIZE_TEST_PTR_ARRAY_BIN = $(SANITIZE_BUILD_DIR)/test_ptr_array
 SANITIZE_TEST_JSON_BIN = $(SANITIZE_BUILD_DIR)/test_json
+SANITIZE_TEST_CHUNK_BIN = $(SANITIZE_BUILD_DIR)/test_chunk
+SANITIZE_TEST_COMPILER_BIN = $(SANITIZE_BUILD_DIR)/test_compiler
+SANITIZE_TEST_VM_BIN = $(SANITIZE_BUILD_DIR)/test_vm
 
 $(SANITIZE_BUILD_DIR):
 	mkdir -p $(SANITIZE_BUILD_DIR)
@@ -224,9 +250,6 @@ $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $
 
 $(SANITIZE_TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS)
-
-$(SANITIZE_TEST_EVAL_BIN): $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_EVAL_SRC) $(SRC_DIR)/eval.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(SANITIZE_LDFLAGS) -pthread -lm
@@ -243,17 +266,28 @@ $(SANITIZE_TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $
 $(SANITIZE_TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(SANITIZE_LDFLAGS)
 
+$(SANITIZE_TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SANITIZE_LDFLAGS) -lm
+
+$(SANITIZE_TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS) -lm
+
+$(SANITIZE_TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS) -pthread -lm
+
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize
-test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_EVAL_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_TEST_JSON_BIN) $(SANITIZE_BIN)
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_TEST_JSON_BIN) $(SANITIZE_TEST_CHUNK_BIN) $(SANITIZE_TEST_COMPILER_BIN) $(SANITIZE_TEST_VM_BIN) $(SANITIZE_BIN)
 	./$(SANITIZE_TEST_TOKENIZER_BIN)
 	./$(SANITIZE_TEST_REPL_BIN)
 	./$(SANITIZE_TEST_PARSER_BIN)
-	./$(SANITIZE_TEST_EVAL_BIN)
 	./$(SANITIZE_TEST_REPL_SERVER_BIN)
 	./$(SANITIZE_TEST_RUNTIME_BIN)
 	./$(SANITIZE_TEST_PTR_ARRAY_BIN)
 	./$(SANITIZE_TEST_JSON_BIN)
+	./$(SANITIZE_TEST_CHUNK_BIN)
+	./$(SANITIZE_TEST_COMPILER_BIN)
+	./$(SANITIZE_TEST_VM_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
 
 # ---------- Combined checks ----------

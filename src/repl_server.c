@@ -13,9 +13,9 @@
  */
 
 #include "repl_server.h"
-#include "eval.h"
 #include "json.h"
 #include "repl.h"
+#include "value.h"
 
 #include <arpa/inet.h>
 #include <errno.h>

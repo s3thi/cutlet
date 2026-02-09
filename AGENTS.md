@@ -24,8 +24,8 @@ The author of this project is an experienced developer of 20 years. But they don
 ## Language feature checklist
 
 When a new language feature is added, remind the user to:
+
 - Update `TUTORIAL.md` to cover the new feature.
-- Add or update example programs in `examples/` (with matching `.expected` files).
 
 The agent should NOT make these updates itself — just remind the user at the end of the implementation step.
 

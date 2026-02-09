@@ -15,7 +15,7 @@
 #ifndef CUTLET_REPL_H
 #define CUTLET_REPL_H
 
-#include "eval.h" /* for EvalContext */
+#include "value.h" /* for EvalContext */
 #include <stdbool.h>
 
 /*
