@@ -39,8 +39,15 @@ static bool vm_pop(VM *vm, Value *out) {
     return true;
 }
 
-// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
-static Value vm_peek(VM *vm, int distance) { return vm->stack_top[-1 - distance]; }
+/* Returns false on stack underflow (not enough elements to peek). */
+static bool vm_peek(VM *vm, int distance, Value *out) {
+    if (vm->stack_top - 1 - distance < vm->stack) {
+        *out = (Value){0};
+        return false;
+    }
+    *out = vm->stack_top[-1 - distance];
+    return true;
+}
 
 /* Free all values remaining on the stack. */
 static void vm_free_stack(VM *vm) {
@@ -251,8 +258,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_ADD: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
@@ -266,8 +278,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_SUBTRACT: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
@@ -281,8 +298,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_MULTIPLY: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
@@ -296,8 +318,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_DIVIDE: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
@@ -316,8 +343,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_POWER: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
@@ -331,7 +363,9 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_NEGATE: {
             Value a;
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &a)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (a.type != VAL_NUMBER) {
                 value_free(&a);
                 return vm_runtime_error(&vm, "unary minus requires a number");
@@ -344,8 +378,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_EQUAL: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             bool eq = values_equal(&a, &b);
             value_free(&a);
             value_free(&b);
@@ -357,8 +396,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_NOT_EQUAL: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             bool eq = values_equal(&a, &b);
             value_free(&a);
             value_free(&b);
@@ -370,8 +414,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_LESS: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
@@ -389,8 +438,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_GREATER: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
@@ -408,8 +462,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_LESS_EQUAL: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
@@ -427,8 +486,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_GREATER_EQUAL: {
             Value b, a;
-            vm_pop(&vm, &b);
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
@@ -446,7 +510,9 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_NOT: {
             Value a;
-            vm_pop(&vm, &a);
+            if (!vm_pop(&vm, &a)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             bool truthy = is_truthy(&a);
             value_free(&a);
             if (!vm_push(&vm, make_bool(!truthy))) {
@@ -459,7 +525,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             uint8_t idx = read_byte(&vm);
             const char *name = chunk->constants[idx].string;
             /* Peek TOS (don't pop — the value stays as the expression result). */
-            Value tos = vm_peek(&vm, 0);
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             RuntimeVarStatus status = runtime_var_define(name, &tos);
             if (status != RUNTIME_VAR_OK) {
                 return vm_runtime_error(&vm, "memory allocation failed");
@@ -488,7 +557,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             uint8_t idx = read_byte(&vm);
             const char *name = chunk->constants[idx].string;
             /* Peek TOS (don't pop — value stays as expression result). */
-            Value tos = vm_peek(&vm, 0);
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             RuntimeVarStatus status = runtime_var_assign(name, &tos);
             if (status == RUNTIME_VAR_NOT_FOUND) {
                 return vm_runtime_error(&vm, "undefined variable '%s'", name);
@@ -507,7 +579,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_JUMP_IF_FALSE: {
             uint16_t offset = read_short(&vm);
-            Value tos = vm_peek(&vm, 0);
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (!is_truthy(&tos)) {
                 vm.ip += offset;
             }
@@ -516,7 +591,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_JUMP_IF_TRUE: {
             uint16_t offset = read_short(&vm);
-            Value tos = vm_peek(&vm, 0);
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             if (is_truthy(&tos)) {
                 vm.ip += offset;
             }
@@ -525,7 +603,9 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_POP: {
             Value v;
-            vm_pop(&vm, &v);
+            if (!vm_pop(&vm, &v)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
             value_free(&v);
             break;
         }

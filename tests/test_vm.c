@@ -53,7 +53,7 @@ static void test_write_capture(void *userdata, const char *data, size_t len) {
     TestBuffer *buf = (TestBuffer *)userdata;
     while (buf->len + len + 1 > buf->cap) {
         buf->cap *= 2;
-        char *new_data = realloc(buf->data, buf->cap); // NOLINT
+        char *new_data = realloc(buf->data, buf->cap); // NOLINT(clang-analyzer-unix.Malloc)
         if (!new_data)
             return;
         buf->data = new_data;
@@ -93,6 +93,24 @@ static int tests_failed = 0;
     } while (0)
 
 #define ASSERT_STR_EQ(a, b, msg) ASSERT(strcmp((a), (b)) == 0, msg)
+
+/* Like ASSERT but frees a Value and TestBuffer before returning on failure.
+ * Used in say() tests to avoid leaking the capture buffer. */
+#define ASSERT_CLEANUP(cond, msg, val, buf)                                                        \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            printf("FAIL\n");                                                                      \
+            printf("    Assertion failed: %s\n", msg);                                             \
+            printf("    At %s:%d\n", __FILE__, __LINE__);                                          \
+            tests_failed++;                                                                        \
+            value_free(&(val));                                                                    \
+            test_buffer_free(&(buf));                                                              \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
+
+#define ASSERT_STR_EQ_CLEANUP(a, b, msg, val, buf)                                                 \
+    ASSERT_CLEANUP(strcmp((a), (b)) == 0, msg, val, buf)
 
 #define PASS()                                                                                     \
     do {                                                                                           \
@@ -633,11 +651,9 @@ TEST(test_say_string) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(\"hello\")", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
-    ASSERT_STR_EQ(buf.data, "hello\n", "say writes hello\\n");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hello\n", "say writes hello\\n", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -647,11 +663,9 @@ TEST(test_say_number) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(42)", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
-    ASSERT_STR_EQ(buf.data, "42\n", "say writes 42\\n");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "42\n", "say writes 42\\n", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -661,11 +675,9 @@ TEST(test_say_bool) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(true)", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
-    ASSERT_STR_EQ(buf.data, "true\n", "say writes true\\n");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "true\n", "say writes true\\n", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -675,11 +687,9 @@ TEST(test_say_nothing) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(nothing)", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
-    ASSERT_STR_EQ(buf.data, "nothing\n", "say writes nothing\\n");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "nothing\n", "say writes nothing\\n", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -689,11 +699,9 @@ TEST(test_say_expression) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(1 + 2)", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "say returns nothing");
-    ASSERT_STR_EQ(buf.data, "3\n", "say writes 3\\n");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "3\n", "say writes 3\\n", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -735,14 +743,13 @@ TEST(test_say_error_propagation) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(1/0)", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_ERROR, "say propagates error");
+    ASSERT_CLEANUP(v.type == VAL_ERROR, "say propagates error", v, buf);
     char *msg = value_format(&v);
-    ASSERT(strstr(msg, "division by zero") != NULL, "propagates division by zero error");
+    ASSERT_CLEANUP(strstr(msg, "division by zero") != NULL, "propagates division by zero error", v,
+                   buf);
     free(msg);
-    ASSERT_STR_EQ(buf.data, "", "no output on error");
+    ASSERT_STR_EQ_CLEANUP(buf.data, "", "no output on error", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -763,12 +770,10 @@ TEST(test_say_returns_nothing_in_expr) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(\"hi\") == nothing", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_BOOL, "comparison returns bool");
-    ASSERT(v.boolean == true, "say() == nothing is true");
-    ASSERT_STR_EQ(buf.data, "hi\n", "say still writes output");
+    ASSERT_CLEANUP(v.type == VAL_BOOL, "comparison returns bool", v, buf);
+    ASSERT_CLEANUP(v.boolean == true, "say() == nothing is true", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hi\n", "say still writes output", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -778,11 +783,9 @@ TEST(test_say_multiple_in_block) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
     Value v = run_input("say(\"a\")\nsay(\"b\")\nsay(\"c\")", &ctx);
-    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
-    ASSERT(v.type == VAL_NOTHING, "last say returns nothing");
-    ASSERT_STR_EQ(buf.data, "a\nb\nc\n", "all say output accumulated");
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "last say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "a\nb\nc\n", "all say output accumulated", v, buf);
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
@@ -837,6 +840,58 @@ TEST(test_stack_overflow) {
     ASSERT(result.type == VAL_ERROR, "should be error on stack overflow");
     char *msg = value_format(&result);
     ASSERT(strstr(msg, "stack overflow") != NULL, "error should mention stack overflow");
+    free(msg);
+    value_free(&result);
+    chunk_free(&chunk);
+    PASS();
+}
+
+/* ============================================================
+ * Stack underflow protection (peek)
+ * ============================================================ */
+
+TEST(test_peek_empty_stack) {
+    /*
+     * Build bytecode that triggers vm_peek on an empty stack.
+     * OP_DEFINE_GLOBAL peeks TOS, so emit it with no prior push.
+     * We need a constant for the variable name.
+     */
+    Chunk chunk;
+    chunk_init(&chunk);
+    int idx = chunk_add_constant(&chunk, make_string(strdup("x")));
+    ASSERT(idx >= 0, "constant added");
+    chunk_write(&chunk, OP_DEFINE_GLOBAL, 1);
+    chunk_write(&chunk, (uint8_t)idx, 1);
+    chunk_write(&chunk, OP_RETURN, 1);
+
+    Value result = vm_execute(&chunk, &test_ctx);
+    ASSERT(result.type == VAL_ERROR, "should be error on peek underflow");
+    char *msg = value_format(&result);
+    ASSERT(strstr(msg, "stack underflow") != NULL, "error should mention stack underflow");
+    free(msg);
+    value_free(&result);
+    chunk_free(&chunk);
+    PASS();
+}
+
+/* ============================================================
+ * Stack underflow protection (pop)
+ * ============================================================ */
+
+TEST(test_pop_empty_stack) {
+    /*
+     * Build bytecode that triggers vm_pop on an empty stack.
+     * OP_ADD pops two values, so emit it with nothing pushed.
+     */
+    Chunk chunk;
+    chunk_init(&chunk);
+    chunk_write(&chunk, OP_ADD, 1);
+    chunk_write(&chunk, OP_RETURN, 1);
+
+    Value result = vm_execute(&chunk, &test_ctx);
+    ASSERT(result.type == VAL_ERROR, "should be error on pop underflow");
+    char *msg = value_format(&result);
+    ASSERT(strstr(msg, "stack underflow") != NULL, "error should mention stack underflow");
     free(msg);
     value_free(&result);
     chunk_free(&chunk);
@@ -1043,6 +1098,12 @@ int main(void) {
 
     printf("\nStack overflow protection:\n");
     RUN_TEST(test_stack_overflow);
+
+    printf("\nStack underflow protection (peek):\n");
+    RUN_TEST(test_peek_empty_stack);
+
+    printf("\nStack underflow protection (pop):\n");
+    RUN_TEST(test_pop_empty_stack);
 
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);

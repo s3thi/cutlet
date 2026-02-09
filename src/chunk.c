@@ -43,8 +43,13 @@ bool chunk_write(Chunk *chunk, uint8_t byte, int line) {
             return false;
         chunk->code = new_code;
         int *new_lines = realloc(chunk->lines, new_cap * sizeof(int));
-        if (!new_lines)
+        if (!new_lines) {
+            /* code was already reallocated (can't undo) but capacity stays at the
+             * old value, so count will never advance past lines' allocation.
+             * The next chunk_write call will retry the lines realloc. */
+            chunk->code = new_code;
             return false;
+        }
         chunk->lines = new_lines;
         chunk->capacity = new_cap;
     }
