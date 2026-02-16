@@ -54,6 +54,24 @@ Cutlet is a dynamic programming language written in C. It aims to be a small
 # No escape sequences yet. What you type is what you get.
 # Strings can contain any characters except newlines and double quotes.
 
+# Concatenation with .. (two dots).
+"hello" .. " world"     # => hello world
+"a" .. "b" .. "c"       # => abc
+
+# .. auto-coerces any value to a string.
+"score: " .. 42         # => score: 42
+"alive: " .. true       # => alive: true
+"value: " .. nothing    # => value: nothing
+
+# + does NOT work on strings — it's only for numbers.
+# "a" + "b"             # => ERR arithmetic requires numbers
+
+# .. binds looser than + but tighter than comparison.
+1 + 2 .. 3 + 4          # => 37 (same as (1+2) .. (3+4))
+
+# .. is right-associative (like Lua).
+"a" .. "b" .. "c"       # => abc (same as "a" .. ("b" .. "c"))
+
 # ============================================================
 # 3. Booleans and nothing
 # ============================================================
