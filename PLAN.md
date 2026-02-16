@@ -7,10 +7,11 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 ## What exists today (all complete + tested)
 
-- **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / ,` always single-char. `#` line comments.
-- **Pratt parser**: Precedence climbing. `or` (prec 1) → `and` (prec 2) → `not` (prec 3, prefix) → comparison (prec 4, non-assoc) → `+ -` (prec 5) → `* /` (prec 6) → unary minus (prec 7) → `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
+- **Tokenizer**: NUMBER, STRING, IDENT, OPERATOR, EOF, ERROR tokens. Solo symbols `( ) + - / % ,` always single-char. `#` line comments.
+- **Pratt parser**: Precedence climbing. `or` (prec 1) → `and` (prec 2) → `not` (prec 3, prefix) → comparison (prec 4, non-assoc) → `+ -` (prec 5) → `* / %` (prec 6) → unary minus (prec 7) → `**` (prec 8, right). Parenthesized grouping. `=` assignment and `my` declaration (prec 0, right).
 - **AST nodes**: NUMBER, STRING, IDENT, BOOL, NOTHING, BINOP, UNARY, DECL, ASSIGN, BLOCK, IF, CALL. S-expr format output.
-- **Evaluator**: Tree-walking. Produces VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, or VAL_ERROR. All arithmetic in double precision. `EvalContext` with write callback threads through all `eval()` calls, enabling built-in functions like `say()` to stream output.
+- **Bytecode compiler + VM**: Single-pass compiler emits bytecode into Chunks. Stack-based VM executes opcodes. Produces VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, or VAL_ERROR. All arithmetic in double precision. `EvalContext` with write callback enables built-in functions like `say()` to stream output.
+- **Modulo operator**: `%` at precedence 6 (same as `*` and `/`), left-associative. Python/Ruby-style semantics: result has the sign of the divisor (`a % b = a - b * floor(a / b)`). Division by zero produces `"modulo by zero"` error.
 - **Built-in functions**: `say(expr)` — prints formatted value + newline via `EvalContext` write callback. Returns `nothing`. Wrong arity and unknown function names produce runtime errors.
 - **Booleans**: `true`/`false` keywords → `AST_BOOL` → `VAL_BOOL`.
 - **Nothing**: `nothing` keyword → `AST_NOTHING` → `VAL_NOTHING`. Falsy. `nothing == nothing` is true; ordered comparisons with nothing produce errors.
@@ -33,7 +34,10 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 |------|---------|
 | `src/tokenizer.c/h` | Lexer |
 | `src/parser.c/h` | Pratt parser, AST types, `parser_is_complete()` |
-| `src/eval.c/h` | Evaluator, Value types, `EvalContext` |
+| `src/compiler.c/h` | Single-pass bytecode compiler (AST → Chunk) |
+| `src/chunk.c/h` | Bytecode chunk: opcodes, constants pool, disassembler |
+| `src/vm.c/h` | Stack-based bytecode VM |
+| `src/value.c/h` | Value types (`VAL_NUMBER`, `VAL_STRING`, etc.), `EvalContext` |
 | `src/runtime.c/h` | Global lock, variable environment |
 | `src/main.c` | CLI entry, local REPL, TCP server/client with isocline, `run` subcommand |
 | `src/repl.c/h` | REPL core (`repl_eval_line()`) |
@@ -66,7 +70,7 @@ Create example `.cutlet` programs in `examples/` with matching `.expected` files
 
 ## Next task
 
-(No task currently queued.)
+(No task queued — ready for next feature.)
 
 ---
 End of handoff.

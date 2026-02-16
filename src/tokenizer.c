@@ -407,7 +407,7 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
  * must always stand alone.
  */
 static bool is_solo_symbol(char c) {
-    return c == '(' || c == ')' || c == '+' || c == '-' || c == '/' || c == ',';
+    return c == '(' || c == ')' || c == '+' || c == '-' || c == '/' || c == '%' || c == ',';
 }
 
 /*

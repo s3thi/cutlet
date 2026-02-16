@@ -1833,6 +1833,48 @@ TEST(test_comment_interleaved_with_code) {
 }
 
 /* ============================================================
+ * Modulo operator tokenization tests
+ * ============================================================ */
+
+/* % tokenizes as TOK_OPERATOR with value "%" */
+TEST(test_tok_modulo_operator) {
+    Tokenizer *tok = tokenizer_create("%");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "%", 1), "expected OPERATOR '%'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* % is a solo symbol: 10%3 tokenizes as NUMBER "10", OPERATOR "%", NUMBER "3" */
+TEST(test_tok_modulo_solo_symbol) {
+    Tokenizer *tok = tokenizer_create("10%3");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "%", 1), "expected OPERATOR '%'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "3", 1), "expected NUMBER '3'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -1976,6 +2018,10 @@ int main(void) {
     RUN_TEST(test_comment_not_in_string);
     RUN_TEST(test_comment_multiple_lines);
     RUN_TEST(test_comment_interleaved_with_code);
+
+    printf("\nModulo operator tokenization:\n");
+    RUN_TEST(test_tok_modulo_operator);
+    RUN_TEST(test_tok_modulo_solo_symbol);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);

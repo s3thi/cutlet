@@ -33,6 +33,7 @@ typedef enum {
     OP_SUBTRACT,
     OP_MULTIPLY,
     OP_DIVIDE,
+    OP_MODULO,
     OP_POWER,
     OP_NEGATE, /* Unary minus (pop 1, push 1) */
 

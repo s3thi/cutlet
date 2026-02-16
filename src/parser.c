@@ -19,7 +19,7 @@
  *              | IDENT "=" assignment
  *              | pratt(0)
  *   atom     → NUMBER | STRING | IDENT | '(' expr ')' | '-' expr
- *   infix    → '+' | '-' | '*' | '/' | '**'
+ *   infix    → '+' | '-' | '*' | '/' | '%' | '**'
  */
 
 #include "parser.h"
@@ -266,7 +266,7 @@ static AstNode *make_call(const char *name, size_t name_len, AstNode **args, siz
  *   3: not (keyword, prefix — handled in parse_atom)
  *   4: comparison (==, !=, <, >, <=, >=) — non-associative
  *   5: +, - (left-associative)
- *   6: *, / (left-associative)
+ *   6: *, /, % (left-associative)
  *   7: unary - (prefix, handled in parse_atom)
  *   8: ** (right-associative)
  */
@@ -276,7 +276,7 @@ static int infix_precedence(const char *op, size_t len) {
             return 4;
         if (op[0] == '+' || op[0] == '-')
             return 5;
-        if (op[0] == '*' || op[0] == '/')
+        if (op[0] == '*' || op[0] == '/' || op[0] == '%')
             return 6;
     }
     if (len == 2) {

@@ -341,6 +341,34 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_MODULO: {
+            Value b, a;
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
+                value_free(&a);
+                value_free(&b);
+                return vm_runtime_error(&vm, "arithmetic requires numbers");
+            }
+            if (b.number == 0) {
+                value_free(&a);
+                value_free(&b);
+                return vm_runtime_error(&vm, "modulo by zero");
+            }
+            /* Python-style modulo: result has the sign of the divisor.
+             * Formula: a % b = a - b * floor(a / b) */
+            double result = a.number - b.number * floor(a.number / b.number);
+            if (!vm_push(&vm, make_number(result))) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_POWER: {
             Value b, a;
             if (!vm_pop(&vm, &b)) {

@@ -175,6 +175,8 @@ static void compile_binop(Compiler *c, const AstNode *node) {
         emit_byte(c, OP_MULTIPLY, line);
     } else if (strcmp(op, "/") == 0) {
         emit_byte(c, OP_DIVIDE, line);
+    } else if (strcmp(op, "%") == 0) {
+        emit_byte(c, OP_MODULO, line);
     } else if (strcmp(op, "**") == 0) {
         emit_byte(c, OP_POWER, line);
     } else if (strcmp(op, "==") == 0) {

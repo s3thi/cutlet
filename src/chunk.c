@@ -114,6 +114,8 @@ const char *opcode_name(OpCode op) {
         return "OP_MULTIPLY";
     case OP_DIVIDE:
         return "OP_DIVIDE";
+    case OP_MODULO:
+        return "OP_MODULO";
     case OP_POWER:
         return "OP_POWER";
     case OP_NEGATE:
@@ -180,6 +182,7 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_SUBTRACT:
     case OP_MULTIPLY:
     case OP_DIVIDE:
+    case OP_MODULO:
     case OP_POWER:
     case OP_NEGATE:
     case OP_EQUAL:

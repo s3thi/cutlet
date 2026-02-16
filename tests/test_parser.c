@@ -1447,6 +1447,30 @@ TEST(test_is_incomplete_if_with_comment) {
 }
 
 /* ============================================================
+ * Modulo operator parsing tests
+ * ============================================================ */
+
+/* 10 % 3 → [BINOP % [NUMBER 10] [NUMBER 3]] */
+TEST(test_expr_modulo) {
+    ASSERT(ast_matches("10 % 3", "AST [BINOP % [NUMBER 10] [NUMBER 3]]"), "modulo");
+    PASS();
+}
+
+/* Precedence: 2 + 10 % 3 → [BINOP + [NUMBER 2] [BINOP % [NUMBER 10] [NUMBER 3]]] */
+TEST(test_expr_modulo_precedence) {
+    ASSERT(ast_matches("2 + 10 % 3", "AST [BINOP + [NUMBER 2] [BINOP % [NUMBER 10] [NUMBER 3]]]"),
+           "modulo precedence vs add");
+    PASS();
+}
+
+/* Left-associativity: 10 % 5 % 3 → [BINOP % [BINOP % [NUMBER 10] [NUMBER 5]] [NUMBER 3]] */
+TEST(test_expr_modulo_left_assoc) {
+    ASSERT(ast_matches("10 % 5 % 3", "AST [BINOP % [BINOP % [NUMBER 10] [NUMBER 5]] [NUMBER 3]]"),
+           "modulo left-associativity");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1675,6 +1699,11 @@ int main(void) {
     RUN_TEST(test_is_complete_comment_with_newline);
     RUN_TEST(test_is_complete_expr_with_comment);
     RUN_TEST(test_is_incomplete_if_with_comment);
+
+    printf("\nModulo operator:\n");
+    RUN_TEST(test_expr_modulo);
+    RUN_TEST(test_expr_modulo_precedence);
+    RUN_TEST(test_expr_modulo_left_assoc);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

@@ -906,6 +906,21 @@ TEST(test_single_number) { assert_vm_number("42", 42.0, "single number"); }
 TEST(test_single_zero) { assert_vm_number("0", 0.0, "zero"); }
 
 /* ============================================================
+ * Modulo operator
+ * ============================================================ */
+
+TEST(test_mod_basic) { assert_vm_number("10 % 3", 1.0, "10%3=1"); }
+TEST(test_mod_exact) { assert_vm_number("10 % 5", 0.0, "10%5=0"); }
+TEST(test_mod_neg_dividend) { assert_vm_number("-7 % 3", 2.0, "-7%3=2 (Python-style)"); }
+TEST(test_mod_neg_divisor) { assert_vm_number("7 % -3", -2.0, "7%-3=-2 (Python-style)"); }
+TEST(test_mod_both_neg) { assert_vm_number("-7 % -3", -1.0, "-7%-3=-1 (Python-style)"); }
+/* Use arithmetic to produce a float since the tokenizer doesn't support decimal literals yet */
+TEST(test_mod_float) { assert_vm_number("(21 / 2) % 3", 1.5, "10.5%3=1.5"); }
+TEST(test_mod_by_zero) { assert_vm_error("5 % 0", "modulo by zero"); }
+TEST(test_mod_string_error) { assert_vm_error("\"hello\" % 3", "arithmetic requires numbers"); }
+TEST(test_mod_bool_error) { assert_vm_error("true % 2", "arithmetic requires numbers"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1108,6 +1123,17 @@ int main(void) {
     printf("\nLeaf nodes:\n");
     RUN_TEST(test_single_number);
     RUN_TEST(test_single_zero);
+
+    printf("\nModulo operator:\n");
+    RUN_TEST(test_mod_basic);
+    RUN_TEST(test_mod_exact);
+    RUN_TEST(test_mod_neg_dividend);
+    RUN_TEST(test_mod_neg_divisor);
+    RUN_TEST(test_mod_both_neg);
+    RUN_TEST(test_mod_float);
+    RUN_TEST(test_mod_by_zero);
+    RUN_TEST(test_mod_string_error);
+    RUN_TEST(test_mod_bool_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

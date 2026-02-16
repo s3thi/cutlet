@@ -822,6 +822,10 @@ say(x + 5) # print result' "15"
 # Comment-only file exits 0 with no output
 test_run_file "comment-only file" '# just a comment' ""
 
+# Modulo operator
+test_run_file "modulo operator" 'say(10 % 3)' "1"
+test_run_file_error "modulo by zero" '5 % 0' "modulo by zero"
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)
