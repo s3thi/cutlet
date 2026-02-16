@@ -205,18 +205,24 @@ say(nothing)    # prints: nothing
 # 10. The REPL
 # ============================================================
 
-# Start the REPL server:
+# Start an interactive REPL:
 #   cutlet repl
-#
-# Connect to it:
-#   cutlet repl --connect
 #
 # The REPL evaluates each expression and prints the result.
 # Multi-line input is supported — the prompt changes to ... when
 # your input is incomplete (unclosed if/end, parentheses, etc.).
 #
+# You can also pipe input:
+#   echo "1 + 2" | cutlet repl
+#
 # Debug flags:
 #   cutlet repl --tokens         # show tokenizer output
 #   cutlet repl --ast            # show AST output
 #   cutlet repl --tokens --ast   # show both
+#
+# For networked REPL (TCP server/client):
+#   cutlet repl --listen              # start a TCP REPL server
+#   cutlet repl --connect             # connect to a running server
+#   cutlet repl --listen :9000        # listen on custom port
+#   cutlet repl --connect :9000       # connect to custom port
 ```
