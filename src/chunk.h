@@ -37,6 +37,9 @@ typedef enum {
     OP_POWER,
     OP_NEGATE, /* Unary minus (pop 1, push 1) */
 
+    /* String concatenation (pop 2, push 1 string) */
+    OP_CONCAT,
+
     /* Comparison (pop 2, push 1 bool) */
     OP_EQUAL,
     OP_NOT_EQUAL,

@@ -8,10 +8,11 @@
  *   2. and (left-associative, keyword infix)
  *   3. not (prefix, keyword)
  *   4. ==, !=, <, >, <=, >= (comparison, non-associative)
- *   5. +, - (binary, left-associative)
- *   6. *, / (left-associative)
- *   7. unary - (prefix)
- *   8. ** (right-associative)
+ *   5. .. (concatenation, right-associative)
+ *   6. +, - (binary, left-associative)
+ *   7. *, /, % (left-associative)
+ *   8. unary - (prefix)
+ *   9. ** (right-associative)
  *
  * Grammar:
  *   expr     → assignment
@@ -19,7 +20,7 @@
  *              | IDENT "=" assignment
  *              | pratt(0)
  *   atom     → NUMBER | STRING | IDENT | '(' expr ')' | '-' expr
- *   infix    → '+' | '-' | '*' | '/' | '%' | '**'
+ *   infix    → '+' | '-' | '*' | '/' | '%' | '**' | '..'
  */
 
 #include "parser.h"
@@ -265,26 +266,29 @@ static AstNode *make_call(const char *name, size_t name_len, AstNode **args, siz
  *   2: and (keyword, left-associative)
  *   3: not (keyword, prefix — handled in parse_atom)
  *   4: comparison (==, !=, <, >, <=, >=) — non-associative
- *   5: +, - (left-associative)
- *   6: *, /, % (left-associative)
- *   7: unary - (prefix, handled in parse_atom)
- *   8: ** (right-associative)
+ *   5: .. (concatenation, right-associative)
+ *   6: +, - (left-associative)
+ *   7: *, /, % (left-associative)
+ *   8: unary - (prefix, handled in parse_atom)
+ *   9: ** (right-associative)
  */
 static int infix_precedence(const char *op, size_t len) {
     if (len == 1) {
         if (op[0] == '<' || op[0] == '>')
             return 4;
         if (op[0] == '+' || op[0] == '-')
-            return 5;
-        if (op[0] == '*' || op[0] == '/' || op[0] == '%')
             return 6;
+        if (op[0] == '*' || op[0] == '/' || op[0] == '%')
+            return 7;
     }
     if (len == 2) {
         if ((op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
             (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '='))
             return 4;
+        if (op[0] == '.' && op[1] == '.')
+            return 5; /* .. (concatenation) */
         if (op[0] == '*' && op[1] == '*')
-            return 8; /* ** is above unary (7) */
+            return 9; /* ** is above unary (8) */
         if (op[0] == 'o' && op[1] == 'r')
             return 1;
     }
@@ -315,10 +319,10 @@ static bool is_comparison_op(const char *op, size_t len) {
 
 /*
  * Check if an operator is right-associative.
- * Only ** is right-associative.
+ * ** (exponentiation) and .. (concatenation) are right-associative.
  */
 static bool is_right_assoc(const char *op, size_t len) {
-    return len == 2 && op[0] == '*' && op[1] == '*';
+    return len == 2 && ((op[0] == '*' && op[1] == '*') || (op[0] == '.' && op[1] == '.'));
 }
 
 /*
@@ -559,8 +563,8 @@ static AstNode *parse_atom(Parser *p) {
         /* Unary minus */
         if (t.value_len == 1 && t.value[0] == '-') {
             advance(p);
-            /* Unary minus has precedence 7 (between * and **) */
-            AstNode *operand = parse_expr(p, 7);
+            /* Unary minus has precedence 8 (between * and **) */
+            AstNode *operand = parse_expr(p, 8);
             if (!operand)
                 return NULL;
             AstNode *node = make_unary("-", 1, operand, t.line);

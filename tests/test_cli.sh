@@ -826,6 +826,11 @@ test_run_file "comment-only file" '# just a comment' ""
 test_run_file "modulo operator" 'say(10 % 3)' "1"
 test_run_file_error "modulo by zero" '5 % 0' "modulo by zero"
 
+# String concatenation operator (..)
+test_run_file "concat strings" 'say("hello" .. " world")' "hello world"
+test_run_file "concat auto-coerce" 'say("score: " .. 42)' "score: 42"
+test_run_file "concat chained" 'say("a" .. "b" .. "c")' "abc"
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

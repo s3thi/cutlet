@@ -389,6 +389,45 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_CONCAT: {
+            /* String concatenation: pop two values, coerce each to string
+             * via value_format(), concatenate, and push the result. */
+            Value b, a;
+            if (!vm_pop(&vm, &b)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &a)) {
+                value_free(&b);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            char *sa = value_format(&a);
+            char *sb = value_format(&b);
+            value_free(&a);
+            value_free(&b);
+            if (!sa || !sb) {
+                free(sa);
+                free(sb);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            size_t la = strlen(sa);
+            size_t lb = strlen(sb);
+            char *result = malloc(la + lb + 1);
+            if (!result) {
+                free(sa);
+                free(sb);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            memcpy(result, sa, la);
+            memcpy(result + la, sb, lb);
+            result[la + lb] = '\0';
+            free(sa);
+            free(sb);
+            if (!vm_push(&vm, make_string(result))) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_NEGATE: {
             Value a;
             if (!vm_pop(&vm, &a)) {

@@ -1875,6 +1875,70 @@ TEST(test_tok_modulo_solo_symbol) {
 }
 
 /* ============================================================
+ * String concatenation operator (..) tokenization tests
+ * ============================================================ */
+
+/* .. tokenizes as a single TOK_OPERATOR with value ".." */
+TEST(test_tok_concat_operator) {
+    Tokenizer *tok = tokenizer_create("..");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "expected OPERATOR '..'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* .. in an expression: "a" .. "b" */
+TEST(test_tok_concat_in_expr) {
+    Tokenizer *tok = tokenizer_create("\"a\" .. \"b\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "string a");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "operator ..");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "string b");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* .. without spaces: "a".."b" — dots group since . is not a solo symbol */
+TEST(test_tok_concat_no_spaces) {
+    Tokenizer *tok = tokenizer_create("\"a\"..\"b\"");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "string a");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "operator ..");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "string b");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -2022,6 +2086,11 @@ int main(void) {
     printf("\nModulo operator tokenization:\n");
     RUN_TEST(test_tok_modulo_operator);
     RUN_TEST(test_tok_modulo_solo_symbol);
+
+    printf("\nString concatenation operator (..) tokenization:\n");
+    RUN_TEST(test_tok_concat_operator);
+    RUN_TEST(test_tok_concat_in_expr);
+    RUN_TEST(test_tok_concat_no_spaces);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);

@@ -120,6 +120,8 @@ const char *opcode_name(OpCode op) {
         return "OP_POWER";
     case OP_NEGATE:
         return "OP_NEGATE";
+    case OP_CONCAT:
+        return "OP_CONCAT";
     case OP_EQUAL:
         return "OP_EQUAL";
     case OP_NOT_EQUAL:
@@ -185,6 +187,7 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_MODULO:
     case OP_POWER:
     case OP_NEGATE:
+    case OP_CONCAT:
     case OP_EQUAL:
     case OP_NOT_EQUAL:
     case OP_LESS:

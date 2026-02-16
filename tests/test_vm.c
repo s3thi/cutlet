@@ -225,6 +225,29 @@ static void assert_vm_nothing(const char *input, const char *label) {
     (void)label;
 }
 
+/* Helper: run input, check result is a string with expected value. */
+static void assert_vm_string(const char *input, const char *expected, const char *label) {
+    Value v = run_input(input, &test_ctx);
+    if (v.type != VAL_STRING) {
+        char *s = value_format(&v);
+        printf("FAIL\n    expected string for '%s', got: %s\n", input, s ? s : "(null)");
+        free(s);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+    if (strcmp(v.string, expected) != 0) {
+        printf("FAIL\n    '%s': expected \"%s\", got \"%s\"\n", input, expected, v.string);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+    value_free(&v);
+    printf("PASS\n");
+    tests_passed++;
+    (void)label;
+}
+
 /* ============================================================
  * Basic arithmetic
  * ============================================================ */
@@ -921,6 +944,43 @@ TEST(test_mod_string_error) { assert_vm_error("\"hello\" % 3", "arithmetic requi
 TEST(test_mod_bool_error) { assert_vm_error("true % 2", "arithmetic requires numbers"); }
 
 /* ============================================================
+ * String concatenation operator (..)
+ * ============================================================ */
+
+/* Basic string concatenation */
+TEST(test_concat_strings) {
+    assert_vm_string("\"hello\" .. \" world\"", "hello world", "basic concat");
+}
+TEST(test_concat_empty_left) { assert_vm_string("\"\" .. \"a\"", "a", "empty left"); }
+TEST(test_concat_empty_right) { assert_vm_string("\"a\" .. \"\"", "a", "empty right"); }
+TEST(test_concat_both_empty) { assert_vm_string("\"\" .. \"\"", "", "both empty"); }
+
+/* Auto-coercion: any value type to string */
+TEST(test_concat_str_num) { assert_vm_string("\"x\" .. 42", "x42", "string .. number"); }
+TEST(test_concat_num_str) { assert_vm_string("42 .. \"x\"", "42x", "number .. string"); }
+TEST(test_concat_bool_str) { assert_vm_string("true .. \"!\"", "true!", "bool .. string"); }
+TEST(test_concat_nothing_str) {
+    assert_vm_string("nothing .. \"x\"", "nothingx", "nothing .. string");
+}
+TEST(test_concat_num_num) { assert_vm_string("1 .. 2", "12", "number .. number"); }
+TEST(test_concat_float_str) { assert_vm_string("(7 / 2) .. \"x\"", "3.5x", "float .. string"); }
+
+/* Chained: right-associative, "a" .. "b" .. "c" → "abc" */
+TEST(test_concat_chained) { assert_vm_string("\"a\" .. \"b\" .. \"c\"", "abc", "chained concat"); }
+
+/* With variables */
+TEST(test_concat_with_var) {
+    assert_vm_string("my xc = \"hello\"\nxc .. \" world\"", "hello world", "concat with var");
+}
+
+/* Precedence: 1 + 2 .. 3 + 4 → "3" .. "7" → "37"
+ * + binds tighter than .., so (1+2) .. (3+4) = "3" .. "7" = "37" */
+TEST(test_concat_precedence) { assert_vm_string("1 + 2 .. 3 + 4", "37", "concat precedence"); }
+
+/* Confirm + with strings still errors */
+TEST(test_add_strings_error) { assert_vm_error("\"a\" + \"b\"", "add strings error"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1134,6 +1194,22 @@ int main(void) {
     RUN_TEST(test_mod_by_zero);
     RUN_TEST(test_mod_string_error);
     RUN_TEST(test_mod_bool_error);
+
+    printf("\nString concatenation operator (..):\n");
+    RUN_TEST(test_concat_strings);
+    RUN_TEST(test_concat_empty_left);
+    RUN_TEST(test_concat_empty_right);
+    RUN_TEST(test_concat_both_empty);
+    RUN_TEST(test_concat_str_num);
+    RUN_TEST(test_concat_num_str);
+    RUN_TEST(test_concat_bool_str);
+    RUN_TEST(test_concat_nothing_str);
+    RUN_TEST(test_concat_num_num);
+    RUN_TEST(test_concat_float_str);
+    RUN_TEST(test_concat_chained);
+    RUN_TEST(test_concat_with_var);
+    RUN_TEST(test_concat_precedence);
+    RUN_TEST(test_add_strings_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

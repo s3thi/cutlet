@@ -1471,6 +1471,60 @@ TEST(test_expr_modulo_left_assoc) {
 }
 
 /* ============================================================
+ * String concatenation operator (..)
+ * ============================================================ */
+
+/* Basic: "a" .. "b" → [BINOP .. [STRING a] [STRING b]] */
+TEST(test_expr_concat_basic) {
+    ASSERT(ast_matches("\"a\" .. \"b\"", "AST [BINOP .. [STRING a] [STRING b]]"), "basic concat");
+    PASS();
+}
+
+/* Precedence: .. binds looser than + but tighter than comparison.
+ * 1 + 2 .. 3 + 4 → [BINOP .. [BINOP + [NUMBER 1] [NUMBER 2]] [BINOP + [NUMBER 3] [NUMBER 4]]] */
+TEST(test_expr_concat_precedence_vs_add) {
+    ASSERT(ast_matches(
+               "1 + 2 .. 3 + 4",
+               "AST [BINOP .. [BINOP + [NUMBER 1] [NUMBER 2]] [BINOP + [NUMBER 3] [NUMBER 4]]]"),
+           "concat precedence vs add");
+    PASS();
+}
+
+/* Precedence: .. binds tighter than comparison.
+ * "a" .. "b" == "ab" → [BINOP == [BINOP .. [STRING a] [STRING b]] [STRING ab]] */
+TEST(test_expr_concat_precedence_vs_cmp) {
+    ASSERT(ast_matches("\"a\" .. \"b\" == \"ab\"",
+                       "AST [BINOP == [BINOP .. [STRING a] [STRING b]] [STRING ab]]"),
+           "concat precedence vs comparison");
+    PASS();
+}
+
+/* Right-associativity: "a" .. "b" .. "c" → [BINOP .. [STRING a] [BINOP .. [STRING b] [STRING c]]]
+ */
+TEST(test_expr_concat_right_assoc) {
+    ASSERT(ast_matches("\"a\" .. \"b\" .. \"c\"",
+                       "AST [BINOP .. [STRING a] [BINOP .. [STRING b] [STRING c]]]"),
+           "concat right-associativity");
+    PASS();
+}
+
+/* Chained three: "a" .. "b" .. "c" .. "d" */
+TEST(test_expr_concat_chained) {
+    ASSERT(ast_matches(
+               "\"a\" .. \"b\" .. \"c\" .. \"d\"",
+               "AST [BINOP .. [STRING a] [BINOP .. [STRING b] [BINOP .. [STRING c] [STRING d]]]]"),
+           "concat chained 4");
+    PASS();
+}
+
+/* With number: "x" .. 42 */
+TEST(test_expr_concat_with_number) {
+    ASSERT(ast_matches("\"x\" .. 42", "AST [BINOP .. [STRING x] [NUMBER 42]]"),
+           "concat with number");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1704,6 +1758,14 @@ int main(void) {
     RUN_TEST(test_expr_modulo);
     RUN_TEST(test_expr_modulo_precedence);
     RUN_TEST(test_expr_modulo_left_assoc);
+
+    printf("\nString concatenation operator (..):\n");
+    RUN_TEST(test_expr_concat_basic);
+    RUN_TEST(test_expr_concat_precedence_vs_add);
+    RUN_TEST(test_expr_concat_precedence_vs_cmp);
+    RUN_TEST(test_expr_concat_right_assoc);
+    RUN_TEST(test_expr_concat_chained);
+    RUN_TEST(test_expr_concat_with_number);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
