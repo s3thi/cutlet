@@ -849,6 +849,37 @@ end' "0
 test_run_file "while never runs" 'my result = while false do 42 end
 say(result)' "nothing"
 
+# Break and continue in file execution
+test_run_file "break exits loop" 'my i = 0
+while i < 10 do
+  i = i + 1
+  if i == 3 then break end
+end
+say(i)' "3"
+
+test_run_file "break with value" 'my result = while true do
+  break 42
+end
+say(result)' "42"
+
+test_run_file "bare break returns nothing" 'my result = while true do
+  break
+end
+say(result)' "nothing"
+
+test_run_file "continue skips iteration" 'my i = 0
+while i < 5 do
+  i = i + 1
+  if i % 2 == 0 then continue end
+  say(i)
+end' "1
+3
+5"
+
+test_run_file_error "break outside loop" 'break' "break"
+
+test_run_file_error "continue outside loop" 'continue' "continue"
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

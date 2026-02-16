@@ -334,7 +334,9 @@ static bool is_reserved_keyword(const Token *t) {
            token_is_keyword(t, "nothing") || token_is_keyword(t, "and") ||
            token_is_keyword(t, "or") || token_is_keyword(t, "not") || token_is_keyword(t, "if") ||
            token_is_keyword(t, "then") || token_is_keyword(t, "else") ||
-           token_is_keyword(t, "end") || token_is_keyword(t, "while") || token_is_keyword(t, "do");
+           token_is_keyword(t, "end") || token_is_keyword(t, "while") ||
+           token_is_keyword(t, "do") || token_is_keyword(t, "break") ||
+           token_is_keyword(t, "continue");
 }
 
 /* ============================================================
@@ -429,6 +431,75 @@ static AstNode *parse_atom(Parser *p) {
     /* While loop expression */
     if (token_is_keyword(&t, "while")) {
         return parse_while(p);
+    }
+
+    /* Break expression: break [value]
+     * Parsed syntactically anywhere; the compiler enforces loop context.
+     * Peek at the next token to decide whether break has a value:
+     * if the next token can start an expression, parse the value. */
+    if (token_is_keyword(&t, "break")) {
+        advance(p);
+        AstNode *value_node = NULL;
+
+        /* Check if the next token can start an expression.
+         * If it's end/else/then/do/EOF/NEWLINE or another non-expression token,
+         * treat this as a bare break. */
+        Token next = p->current;
+        bool has_value = false;
+        if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
+            (next.type == TOK_OPERATOR && next.value_len == 1 &&
+             (next.value[0] == '(' || next.value[0] == '-'))) {
+            has_value = true;
+        } else if (next.type == TOK_IDENT) {
+            /* Identifiers that start expressions: non-keyword idents,
+             * plus keywords that are expression starters. */
+            has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
+                        !token_is_keyword(&next, "then") && !token_is_keyword(&next, "do") &&
+                        !token_is_keyword(&next, "and") && !token_is_keyword(&next, "or") &&
+                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue");
+        }
+
+        if (has_value) {
+            value_node = parse_assignment(p);
+            if (!value_node)
+                return NULL;
+        }
+
+        AstNode *node = malloc(sizeof(AstNode));
+        if (!node) {
+            ast_free(value_node);
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        node->type = AST_BREAK;
+        node->value = NULL;
+        node->left = value_node;
+        node->right = NULL;
+        node->grouped = false;
+        node->line = t.line;
+        node->children = NULL;
+        node->child_count = 0;
+        return node;
+    }
+
+    /* Continue expression: skip to next loop iteration.
+     * Parsed syntactically anywhere; the compiler enforces loop context. */
+    if (token_is_keyword(&t, "continue")) {
+        advance(p);
+        AstNode *node = malloc(sizeof(AstNode));
+        if (!node) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        node->type = AST_CONTINUE;
+        node->value = NULL;
+        node->left = NULL;
+        node->right = NULL;
+        node->grouped = false;
+        node->line = t.line;
+        node->children = NULL;
+        node->child_count = 0;
+        return node;
     }
 
     /* "not" prefix operator: precedence 3, binds looser than comparisons */
@@ -1369,6 +1440,10 @@ const char *ast_node_type_str(AstNodeType type) {
         return "CALL";
     case AST_WHILE:
         return "WHILE";
+    case AST_BREAK:
+        return "BREAK";
+    case AST_CONTINUE:
+        return "CONTINUE";
     default:
         return "UNKNOWN";
     }
@@ -1619,6 +1694,41 @@ static char *ast_format_node(const AstNode *node) {
         snprintf(buf, len, "[%s %s %s]", type_str, cond_str, body_str);
         free(cond_str);
         free(body_str);
+        return buf;
+    }
+
+    if (node->type == AST_BREAK) {
+        /* Break: [BREAK] or [BREAK expr] */
+        if (node->left) {
+            char *val_str = ast_format_node(node->left);
+            if (!val_str)
+                return NULL;
+            size_t len = 1 + strlen(type_str) + 1 + strlen(val_str) + 1 + 1;
+            char *buf = malloc(len);
+            if (!buf) {
+                free(val_str);
+                return NULL;
+            }
+            snprintf(buf, len, "[%s %s]", type_str, val_str);
+            free(val_str);
+            return buf;
+        }
+        /* Bare break: [BREAK] */
+        size_t len = 1 + strlen(type_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf)
+            return NULL;
+        snprintf(buf, len, "[%s]", type_str);
+        return buf;
+    }
+
+    if (node->type == AST_CONTINUE) {
+        /* Continue: [CONTINUE] */
+        size_t len = 1 + strlen(type_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf)
+            return NULL;
+        snprintf(buf, len, "[%s]", type_str);
         return buf;
     }
 

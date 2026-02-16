@@ -638,6 +638,32 @@ TEST(test_while_repl_as_expression) {
 }
 
 /* ============================================================
+ * Break and continue
+ * ============================================================ */
+
+TEST(test_break_repl_basic) {
+    /* break exits loop, bare break returns nothing */
+    ASSERT(eval_value_matches("while true do break end", "nothing"),
+           "bare break returns nothing in REPL");
+    PASS();
+}
+
+TEST(test_break_repl_with_value) {
+    /* break with value returns that value */
+    ASSERT(eval_value_matches("while true do break 42 end", "42"),
+           "break with value returns value in REPL");
+    PASS();
+}
+
+TEST(test_continue_repl_basic) {
+    /* continue skips iteration, loop with continue on every iteration returns nothing */
+    ASSERT(eval_value_matches("my cr_i = 0\nwhile cr_i < 3 do\n  cr_i = cr_i + 1\n  continue\nend",
+                              "nothing"),
+           "continue on every iteration returns nothing in REPL");
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -767,6 +793,11 @@ int main(void) {
     RUN_TEST(test_while_repl_basic);
     RUN_TEST(test_while_repl_multiline);
     RUN_TEST(test_while_repl_as_expression);
+
+    printf("\nBreak and continue:\n");
+    RUN_TEST(test_break_repl_basic);
+    RUN_TEST(test_break_repl_with_value);
+    RUN_TEST(test_continue_repl_basic);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_concat_basic);

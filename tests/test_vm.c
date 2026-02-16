@@ -1012,6 +1012,106 @@ TEST(test_while_never_runs_expr) {
 }
 
 /* ============================================================
+ * Break and continue
+ * ============================================================ */
+
+/* break exits the loop immediately — verify via variable state after loop */
+TEST(test_break_exits_loop) {
+    /* Loop runs until brk_i1 reaches 3, then break. Check variable after loop. */
+    assert_vm_number("my brk_i1 = 0\nwhile brk_i1 < 10 do\n  brk_i1 = brk_i1 + 1\n  if brk_i1 == 3 "
+                     "then break end\n  brk_i1\nend\nbrk_i1",
+                     3.0, "break exits loop at right time");
+}
+
+/* break with value: loop evaluates to the break value */
+TEST(test_break_with_value) {
+    assert_vm_number("while true do break 42 end", 42.0, "break with value returns that value");
+}
+
+/* bare break: loop evaluates to nothing */
+TEST(test_bare_break_returns_nothing) {
+    assert_vm_nothing("while true do break end", "bare break returns nothing");
+}
+
+/* break from if inside loop */
+TEST(test_break_from_if_inside_loop) {
+    assert_vm_number("my brk_i2 = 0\nwhile true do\n  brk_i2 = brk_i2 + 1\n  if brk_i2 == 5 then "
+                     "break brk_i2 * 10 end\n  brk_i2\nend",
+                     50.0, "break from if inside loop");
+}
+
+/* continue skips the rest of the iteration */
+TEST(test_continue_skips_iteration) {
+    /* Print only odd numbers from 1 to 5 via say(). Last iteration (i=5)
+     * doesn't hit continue, so the loop returns 5. */
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("my cnt_i1 = 0\nwhile cnt_i1 < 5 do\n  cnt_i1 = cnt_i1 + 1\n  if cnt_i1 % "
+                        "2 == 0 then continue end\n  say(cnt_i1)\n  cnt_i1\nend",
+                        &ctx);
+    /* say() should have printed 1, 3, 5 */
+    ASSERT_CLEANUP(v.type == VAL_NUMBER, "loop returns last non-continue body value", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "1\n3\n5\n", "continue skips even iterations", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* continue on last iteration produces nothing as loop value */
+TEST(test_continue_last_iteration_nothing) {
+    /* Loop runs once, continue is always hit => loop value is nothing */
+    assert_vm_nothing("my cnt_i2 = 0\nwhile cnt_i2 < 1 do\n  cnt_i2 = cnt_i2 + 1\n  continue\nend",
+                      "continue on every iteration returns nothing");
+}
+
+/* Nested loops: break affects innermost only */
+TEST(test_nested_break_affects_inner) {
+    assert_vm_number("my brk_out = 0\nwhile brk_out < 3 do\n  brk_out = brk_out + 1\n  while true "
+                     "do break end\n  brk_out\nend",
+                     3.0, "break affects only inner loop");
+}
+
+/* Nested loops: continue affects innermost only */
+TEST(test_nested_continue_affects_inner) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input(
+        "my cnt_out = 0\nwhile cnt_out < 2 do\n  cnt_out = cnt_out + 1\n  my cnt_in = 0\n  while "
+        "cnt_in < 3 do\n    cnt_in = cnt_in + 1\n    if cnt_in == 2 then continue end\n    "
+        "say(cnt_out .. \"-\" .. cnt_in)\n    cnt_in\n  end\n  cnt_out\nend",
+        &ctx);
+    /* Should print: 1-1, 1-3, 2-1, 2-3 (skipping cnt_in==2 each time) */
+    ASSERT_STR_EQ_CLEANUP(buf.data, "1-1\n1-3\n2-1\n2-3\n", "continue affects inner loop only", v,
+                          buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* break outside loop is a compile error */
+TEST(test_break_outside_loop_error) { assert_vm_error("break", "break outside loop"); }
+
+/* continue outside loop is a compile error */
+TEST(test_continue_outside_loop_error) { assert_vm_error("continue", "continue outside loop"); }
+
+/* break with say() to ensure output happens before break */
+TEST(test_break_with_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("my brk_s = 0\nwhile brk_s < 5 do\n  say(brk_s)\n  brk_s = brk_s + 1\n  if "
+                        "brk_s == 3 then break end\n  brk_s\nend",
+                        &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "break without value returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "0\n1\n2\n", "say output before break", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -1271,6 +1371,19 @@ int main(void) {
     RUN_TEST(test_while_nested);
     RUN_TEST(test_while_as_expression);
     RUN_TEST(test_while_never_runs_expr);
+
+    printf("\nBreak and continue:\n");
+    RUN_TEST(test_break_exits_loop);
+    RUN_TEST(test_break_with_value);
+    RUN_TEST(test_bare_break_returns_nothing);
+    RUN_TEST(test_break_from_if_inside_loop);
+    RUN_TEST(test_continue_skips_iteration);
+    RUN_TEST(test_continue_last_iteration_nothing);
+    RUN_TEST(test_nested_break_affects_inner);
+    RUN_TEST(test_nested_continue_affects_inner);
+    RUN_TEST(test_break_outside_loop_error);
+    RUN_TEST(test_continue_outside_loop_error);
+    RUN_TEST(test_break_with_say);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_concat_strings);

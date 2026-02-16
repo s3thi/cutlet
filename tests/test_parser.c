@@ -1593,6 +1593,120 @@ TEST(test_is_complete_while_multiline) {
 }
 
 /* ============================================================
+ * Break and continue parsing tests
+ * ============================================================ */
+
+/* break alone: while true do break end */
+TEST(test_break_bare) {
+    ASSERT(ast_matches("while true do break end", "AST [WHILE [BOOL true] [BREAK]]"),
+           "bare break in while");
+    PASS();
+}
+
+/* break with value expression */
+TEST(test_break_with_value) {
+    ASSERT(ast_matches("while true do break 42 end", "AST [WHILE [BOOL true] [BREAK [NUMBER 42]]]"),
+           "break with number value");
+    PASS();
+}
+
+/* break with complex expression */
+TEST(test_break_with_complex_expr) {
+    ASSERT(ast_matches("while true do break 1 + 2 end",
+                       "AST [WHILE [BOOL true] [BREAK [BINOP + [NUMBER 1] [NUMBER 2]]]]"),
+           "break with complex expression");
+    PASS();
+}
+
+/* break with string value */
+TEST(test_break_with_string) {
+    ASSERT(ast_matches("while true do break \"done\" end",
+                       "AST [WHILE [BOOL true] [BREAK [STRING done]]]"),
+           "break with string value");
+    PASS();
+}
+
+/* continue alone */
+TEST(test_continue_basic) {
+    ASSERT(ast_matches("while true do continue end", "AST [WHILE [BOOL true] [CONTINUE]]"),
+           "continue in while");
+    PASS();
+}
+
+/* break before newline is bare break (not break with next line's value) */
+TEST(test_break_before_newline) {
+    ASSERT(ast_matches("while true do\n  break\n  42\nend",
+                       "AST [WHILE [BOOL true] [BLOCK [BREAK] [NUMBER 42]]]"),
+           "break before newline is bare break");
+    PASS();
+}
+
+/* break before end is bare break */
+TEST(test_break_before_end) {
+    ASSERT(ast_matches("while true do break end", "AST [WHILE [BOOL true] [BREAK]]"),
+           "break before end is bare break");
+    PASS();
+}
+
+/* break inside if inside while */
+TEST(test_break_in_if) {
+    ASSERT(ast_matches("while true do if true then break end end",
+                       "AST [WHILE [BOOL true] [IF [BOOL true] [BREAK]]]"),
+           "break inside if inside while");
+    PASS();
+}
+
+/* break with value inside if inside while */
+TEST(test_break_with_value_in_if) {
+    ASSERT(ast_matches("while true do if true then break 99 end end",
+                       "AST [WHILE [BOOL true] [IF [BOOL true] [BREAK [NUMBER 99]]]]"),
+           "break with value inside if");
+    PASS();
+}
+
+/* continue inside if inside while */
+TEST(test_continue_in_if) {
+    ASSERT(ast_matches("while true do if true then continue end end",
+                       "AST [WHILE [BOOL true] [IF [BOOL true] [CONTINUE]]]"),
+           "continue inside if inside while");
+    PASS();
+}
+
+/* 'break' as variable name rejected */
+TEST(test_break_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my break = 1", &node, &err), "break as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'continue' as variable name rejected */
+TEST(test_continue_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my continue = 1", &node, &err), "continue as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete() for break/continue */
+TEST(test_is_complete_break_in_while) {
+    ASSERT(parser_is_complete("while true do break end"), "break in while is complete");
+    PASS();
+}
+
+TEST(test_is_complete_continue_in_while) {
+    ASSERT(parser_is_complete("while true do continue end"), "continue in while is complete");
+    PASS();
+}
+
+TEST(test_is_complete_break_with_value) {
+    ASSERT(parser_is_complete("while true do break 42 end"), "break with value is complete");
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -1902,6 +2016,27 @@ int main(void) {
     RUN_TEST(test_is_incomplete_while_no_end);
     RUN_TEST(test_is_complete_while);
     RUN_TEST(test_is_complete_while_multiline);
+
+    printf("\nBreak and continue parsing:\n");
+    RUN_TEST(test_break_bare);
+    RUN_TEST(test_break_with_value);
+    RUN_TEST(test_break_with_complex_expr);
+    RUN_TEST(test_break_with_string);
+    RUN_TEST(test_continue_basic);
+    RUN_TEST(test_break_before_newline);
+    RUN_TEST(test_break_before_end);
+    RUN_TEST(test_break_in_if);
+    RUN_TEST(test_break_with_value_in_if);
+    RUN_TEST(test_continue_in_if);
+
+    printf("\nBreak/continue reserved keywords:\n");
+    RUN_TEST(test_break_keyword_reserved);
+    RUN_TEST(test_continue_keyword_reserved);
+
+    printf("\nparser_is_complete() - break/continue:\n");
+    RUN_TEST(test_is_complete_break_in_while);
+    RUN_TEST(test_is_complete_continue_in_while);
+    RUN_TEST(test_is_complete_break_with_value);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_expr_concat_basic);

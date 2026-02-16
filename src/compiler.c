@@ -12,11 +12,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Loop context: tracks state for break/continue compilation.
+ * Each while loop pushes a LoopContext; nested loops form a stack
+ * via the `enclosing` pointer.
+ */
+typedef struct LoopContext {
+    size_t loop_start;     /* Bytecode offset of LOOP_START (for continue and OP_LOOP). */
+    size_t *break_jumps;   /* Dynamic array of forward-jump offsets to patch at BREAK_TARGET. */
+    size_t break_count;    /* Number of recorded break jumps. */
+    size_t break_capacity; /* Capacity of break_jumps array. */
+    struct LoopContext *enclosing; /* Enclosing loop context (for nested loops). */
+} LoopContext;
+
 /* Internal compiler state. */
 typedef struct {
-    Chunk *chunk;      /* The chunk being compiled into. */
-    CompileError *err; /* Where to report errors. */
-    bool had_error;    /* Set to true on first error. */
+    Chunk *chunk;              /* The chunk being compiled into. */
+    CompileError *err;         /* Where to report errors. */
+    bool had_error;            /* Set to true on first error. */
+    LoopContext *current_loop; /* Current innermost loop context (NULL if not in a loop). */
 } Compiler;
 
 /* ---- Helpers ---- */
@@ -379,6 +393,16 @@ static void compile_while(Compiler *c, const AstNode *node) {
     /* LOOP_START: remember this position for the backward jump. */
     size_t loop_start = c->chunk->count;
 
+    /* Set up loop context for break/continue. */
+    LoopContext loop_ctx = {
+        .loop_start = loop_start,
+        .break_jumps = NULL,
+        .break_count = 0,
+        .break_capacity = 0,
+        .enclosing = c->current_loop,
+    };
+    c->current_loop = &loop_ctx;
+
     /* Compile condition. */
     compile_node(c, node->children[0]);
 
@@ -400,6 +424,78 @@ static void compile_while(Compiler *c, const AstNode *node) {
 
     /* Pop the falsy condition. Accumulator is now TOS. */
     emit_byte(c, OP_POP, line);
+
+    /* BREAK_TARGET: patch all break jumps to here.
+     * At this point the stack has the accumulator at TOS, which is
+     * either the last body value (normal exit) or the break value. */
+    for (size_t i = 0; i < loop_ctx.break_count; i++) {
+        patch_jump(c, loop_ctx.break_jumps[i]);
+    }
+    free(loop_ctx.break_jumps);
+
+    /* Restore enclosing loop context. */
+    c->current_loop = loop_ctx.enclosing;
+}
+
+/*
+ * Compile a break expression.
+ *
+ * break [expr]: compile the value (or OP_NOTHING for bare break), then
+ * emit a forward OP_JUMP whose offset will be patched to BREAK_TARGET
+ * after the loop body. The break value becomes the loop's result.
+ */
+static void compile_break(Compiler *c, const AstNode *node) {
+    if (!c->current_loop) {
+        compiler_error(c, "'break' outside of loop");
+        return;
+    }
+
+    int line = (int)node->line;
+
+    /* Compile the break value, or push nothing for bare break. */
+    if (node->left) {
+        compile_node(c, node->left);
+    } else {
+        emit_byte(c, OP_NOTHING, line);
+    }
+
+    /* Emit a forward jump to be patched to BREAK_TARGET. */
+    size_t jump_offset = emit_jump(c, OP_JUMP, line);
+
+    /* Record this jump in the current loop's break_jumps array. */
+    LoopContext *loop = c->current_loop;
+    if (loop->break_count >= loop->break_capacity) {
+        size_t new_cap = loop->break_capacity == 0 ? 4 : loop->break_capacity * 2;
+        size_t *new_arr = realloc(loop->break_jumps, new_cap * sizeof(size_t));
+        if (!new_arr) {
+            compiler_error(c, "memory allocation failed");
+            return;
+        }
+        loop->break_jumps = new_arr;
+        loop->break_capacity = new_cap;
+    }
+    loop->break_jumps[loop->break_count++] = jump_offset;
+}
+
+/*
+ * Compile a continue expression.
+ *
+ * continue: push nothing as the new accumulator (abandoning the current
+ * iteration's value), then jump backward to LOOP_START.
+ */
+static void compile_continue(Compiler *c, const AstNode *node) {
+    if (!c->current_loop) {
+        compiler_error(c, "'continue' outside of loop");
+        return;
+    }
+
+    int line = (int)node->line;
+
+    /* Push nothing as the new accumulator for this iteration. */
+    emit_byte(c, OP_NOTHING, line);
+
+    /* Jump backward to LOOP_START. */
+    emit_loop(c, c->current_loop->loop_start, line);
 }
 
 /* Compile any AST node by dispatching on its type. */
@@ -451,6 +547,12 @@ static void compile_node(Compiler *c, const AstNode *node) {
     case AST_WHILE:
         compile_while(c, node);
         break;
+    case AST_BREAK:
+        compile_break(c, node);
+        break;
+    case AST_CONTINUE:
+        compile_continue(c, node);
+        break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);
         break;
@@ -466,7 +568,7 @@ Chunk *compile(const AstNode *node, CompileError *err) {
     }
     chunk_init(chunk);
 
-    Compiler c = {.chunk = chunk, .err = err, .had_error = false};
+    Compiler c = {.chunk = chunk, .err = err, .had_error = false, .current_loop = NULL};
 
     compile_node(&c, node);
 

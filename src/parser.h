@@ -14,19 +14,21 @@
 #include <stddef.h>
 
 typedef enum {
-    AST_NUMBER,  /* numeric literal */
-    AST_STRING,  /* string literal */
-    AST_IDENT,   /* identifier */
-    AST_BOOL,    /* boolean literal: true, false */
-    AST_NOTHING, /* nothing literal (like nil/null in other languages) */
-    AST_BINOP,   /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >=, and, or */
-    AST_UNARY,   /* unary: - (minus), not */
-    AST_DECL,    /* declaration: my name = expr */
-    AST_ASSIGN,  /* assignment: name = expr */
-    AST_BLOCK,   /* block: sequence of newline-separated expressions */
-    AST_IF,      /* if expression: if cond then body [else body] end */
-    AST_CALL,    /* function call: name(arg1, arg2, ...) */
-    AST_WHILE,   /* while loop: while cond do body end */
+    AST_NUMBER,   /* numeric literal */
+    AST_STRING,   /* string literal */
+    AST_IDENT,    /* identifier */
+    AST_BOOL,     /* boolean literal: true, false */
+    AST_NOTHING,  /* nothing literal (like nil/null in other languages) */
+    AST_BINOP,    /* binary operator: +, -, *, /, **, ==, !=, <, >, <=, >=, and, or */
+    AST_UNARY,    /* unary: - (minus), not */
+    AST_DECL,     /* declaration: my name = expr */
+    AST_ASSIGN,   /* assignment: name = expr */
+    AST_BLOCK,    /* block: sequence of newline-separated expressions */
+    AST_IF,       /* if expression: if cond then body [else body] end */
+    AST_CALL,     /* function call: name(arg1, arg2, ...) */
+    AST_WHILE,    /* while loop: while cond do body end */
+    AST_BREAK,    /* break [expr]: exit innermost loop, optional value */
+    AST_CONTINUE, /* continue: skip to next iteration of innermost loop */
 } AstNodeType;
 
 typedef struct AstNode {
