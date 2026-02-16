@@ -239,6 +239,49 @@ while outer < 3 do
 end
 count               # => 6
 
+# `break` exits the loop immediately.
+my m = 0
+while m < 100 do
+  m = m + 1
+  if m == 5 then break end
+end
+m                   # => 5
+
+# `break` with a value — the loop evaluates to that value.
+my found = while true do
+  break "done"
+end
+found               # => done
+
+# Bare `break` (no value) — the loop evaluates to nothing.
+while true do break end     # => nothing
+
+# `continue` skips the rest of the current iteration.
+my p = 0
+while p < 6 do
+  p = p + 1
+  if p % 2 == 0 then continue end
+  say(p)
+end
+# prints: 1, 3, 5
+
+# In nested loops, break and continue affect the innermost loop only.
+my q = 0
+while q < 3 do
+  q = q + 1
+  my r = 0
+  while r < 3 do
+    r = r + 1
+    if r == 2 then continue end
+    say(q .. "-" .. r)
+  end
+end
+# prints: 1-1, 1-3, 2-1, 2-3, 3-1, 3-3
+
+# break and continue outside a loop are compile errors.
+# break        # => ERR 'break' outside of loop
+# continue     # => ERR 'continue' outside of loop
+
 # ============================================================
 # 9. say() for output
 # ============================================================
