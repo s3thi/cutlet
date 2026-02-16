@@ -333,7 +333,8 @@ static bool is_reserved_keyword(const Token *t) {
     return token_is_keyword(t, "true") || token_is_keyword(t, "false") ||
            token_is_keyword(t, "nothing") || token_is_keyword(t, "and") ||
            token_is_keyword(t, "or") || token_is_keyword(t, "not") || token_is_keyword(t, "if") ||
-           token_is_keyword(t, "then") || token_is_keyword(t, "else") || token_is_keyword(t, "end");
+           token_is_keyword(t, "then") || token_is_keyword(t, "else") ||
+           token_is_keyword(t, "end") || token_is_keyword(t, "while") || token_is_keyword(t, "do");
 }
 
 /* ============================================================
@@ -344,6 +345,7 @@ static bool is_reserved_keyword(const Token *t) {
 static AstNode *parse_assignment(Parser *p);
 static AstNode *parse_expr(Parser *p, int min_prec);
 static AstNode *parse_if(Parser *p);
+static AstNode *parse_while(Parser *p);
 static void skip_newlines(Parser *p);
 static void free_expr_array(PtrArray *arr);
 
@@ -422,6 +424,11 @@ static AstNode *parse_atom(Parser *p) {
     /* If expression */
     if (token_is_keyword(&t, "if")) {
         return parse_if(p);
+    }
+
+    /* While loop expression */
+    if (token_is_keyword(&t, "while")) {
+        return parse_while(p);
     }
 
     /* "not" prefix operator: precedence 3, binds looser than comparisons */
@@ -983,6 +990,161 @@ static AstNode *parse_if(Parser *p) {
     return if_node;
 }
 
+/*
+ * Create a while loop AST node.
+ * Uses children array: children[0]=condition, children[1]=body.
+ * Takes ownership of condition and body.
+ */
+static AstNode *make_while(AstNode *condition, AstNode *body, size_t line) {
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node)
+        return NULL;
+
+    AstNode **children = (AstNode **)malloc(2 * sizeof(AstNode *));
+    if (!children) {
+        free(node);
+        return NULL;
+    }
+
+    children[0] = condition;
+    children[1] = body;
+
+    node->type = AST_WHILE;
+    node->value = NULL;
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->line = line;
+    node->children = children;
+    node->child_count = 2;
+    return node;
+}
+
+/*
+ * Parse a while loop expression.
+ * Syntax: while condition do body end
+ *
+ * The body can contain multiple newline-separated expressions.
+ * Returns the last body value as the loop result.
+ */
+static AstNode *parse_while(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    Token while_tok = p->current;
+
+    /* Consume 'while' keyword (already verified by caller) */
+    advance(p);
+    skip_newlines(p);
+
+    /* Parse condition - stops at 'do' keyword */
+    if (token_is_keyword(&p->current, "do")) {
+        parser_error(p, p->current.line, p->current.col, "expected condition after 'while'");
+        return NULL;
+    }
+
+    AstNode *condition = parse_assignment(p);
+    if (!condition)
+        return NULL;
+
+    skip_newlines(p);
+
+    /* Expect 'do' */
+    if (!token_is_keyword(&p->current, "do")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'do' after condition");
+        ast_free(condition);
+        return NULL;
+    }
+    advance(p);
+    skip_newlines(p);
+
+    /* Parse body: collect expressions until 'end' */
+    if (token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected expression in 'while' body");
+        ast_free(condition);
+        return NULL;
+    }
+
+    PtrArray body_exprs;
+    if (!ptr_array_init(&body_exprs, 4)) {
+        parser_error(p, while_tok.line, while_tok.col, "memory allocation failed");
+        ast_free(condition);
+        return NULL;
+    }
+
+    /* Parse first body expression */
+    AstNode *expr = parse_assignment(p);
+    if (!expr) {
+        ast_free(condition);
+        ptr_array_destroy(&body_exprs);
+        return NULL;
+    }
+    ptr_array_push(&body_exprs, expr);
+
+    /* Parse additional newline-separated expressions in body */
+    while (!p->has_error && p->current.type == TOK_NEWLINE) {
+        skip_newlines(p);
+        if (token_is_keyword(&p->current, "end"))
+            break;
+        if (p->current.type == TOK_EOF)
+            break;
+
+        expr = parse_assignment(p);
+        if (!expr) {
+            ast_free(condition);
+            free_expr_array(&body_exprs);
+            return NULL;
+        }
+        if (!ptr_array_push(&body_exprs, expr)) {
+            ast_free(expr);
+            ast_free(condition);
+            free_expr_array(&body_exprs);
+            parser_error(p, while_tok.line, while_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    /* Build body: unwrap if single expression */
+    AstNode *body;
+    if (body_exprs.count == 1) {
+        body = (AstNode *)body_exprs.items[0];
+        ptr_array_destroy(&body_exprs);
+    } else {
+        size_t count = body_exprs.count;
+        AstNode **children = (AstNode **)ptr_array_release(&body_exprs);
+        body = make_block(children, count, while_tok.line);
+        if (!body) {
+            for (size_t i = 0; i < count; i++)
+                ast_free(children[i]);
+            ptr_array_free_raw((void *)children);
+            ast_free(condition);
+            parser_error(p, while_tok.line, while_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    skip_newlines(p);
+
+    /* Expect 'end' */
+    if (!token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'end' to close 'while'");
+        ast_free(condition);
+        ast_free(body);
+        return NULL;
+    }
+    advance(p);
+
+    AstNode *while_node = make_while(condition, body, while_tok.line);
+    if (!while_node) {
+        ast_free(condition);
+        ast_free(body);
+        parser_error(p, while_tok.line, while_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    return while_node;
+}
+
 /* ============================================================
  * Public API
  * ============================================================ */
@@ -1205,6 +1367,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "IF";
     case AST_CALL:
         return "CALL";
+    case AST_WHILE:
+        return "WHILE";
     default:
         return "UNKNOWN";
     }
@@ -1429,6 +1593,35 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    if (node->type == AST_WHILE) {
+        /* While: [WHILE cond body]
+         * children[0] = condition
+         * children[1] = body */
+        if (node->child_count < 2)
+            return NULL;
+
+        char *cond_str = ast_format_node(node->children[0]);
+        char *body_str = ast_format_node(node->children[1]);
+        if (!cond_str || !body_str) {
+            free(cond_str);
+            free(body_str);
+            return NULL;
+        }
+
+        size_t len = 1 + strlen(type_str) + 1 + strlen(cond_str) + 1 + strlen(body_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(cond_str);
+            free(body_str);
+            return NULL;
+        }
+
+        snprintf(buf, len, "[%s %s %s]", type_str, cond_str, body_str);
+        free(cond_str);
+        free(body_str);
+        return buf;
+    }
+
     return NULL;
 }
 
@@ -1557,7 +1750,12 @@ bool parser_is_complete(const char *input) {
     }
 
     if (strstr(msg, "expected 'end'") != NULL) {
-        /* if/else without end - incomplete */
+        /* if/else/while without end - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'do'") != NULL) {
+        /* while without do - incomplete */
         return false;
     }
 

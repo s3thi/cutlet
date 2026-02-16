@@ -612,6 +612,32 @@ TEST(test_bool_false_eval_line) {
 }
 
 /* ============================================================
+ * While loop tests
+ * ============================================================ */
+
+TEST(test_while_repl_basic) {
+    /* While loop via eval_line: loop runs and returns last body value */
+    ASSERT(eval_value_matches("my wh_r1 = 0\nwhile wh_r1 < 3 do\n  wh_r1 = wh_r1 + 1\nend", "3"),
+           "while loop returns last body value");
+    PASS();
+}
+
+TEST(test_while_repl_multiline) {
+    /* Multiline while loop in REPL */
+    ASSERT(eval_value_matches("while false do\n  42\nend", "nothing"),
+           "while that never runs returns nothing");
+    PASS();
+}
+
+TEST(test_while_repl_as_expression) {
+    /* While used as expression in assignment */
+    ASSERT(eval_value_matches(
+               "my wh_r2 = 0\nmy wh_r3 = while wh_r2 < 2 do\n  wh_r2 = wh_r2 + 1\nend\nwh_r3", "2"),
+           "while as expression in REPL");
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -736,6 +762,11 @@ int main(void) {
     RUN_TEST(test_eval_line_with_ast);
     RUN_TEST(test_eval_line_with_both_debug);
     RUN_TEST(test_eval_line_tokens_on_error);
+
+    printf("\nWhile loop:\n");
+    RUN_TEST(test_while_repl_basic);
+    RUN_TEST(test_while_repl_multiline);
+    RUN_TEST(test_while_repl_as_expression);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_concat_basic);

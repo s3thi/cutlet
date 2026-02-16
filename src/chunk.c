@@ -148,6 +148,8 @@ const char *opcode_name(OpCode op) {
         return "OP_JUMP_IF_FALSE";
     case OP_JUMP_IF_TRUE:
         return "OP_JUMP_IF_TRUE";
+    case OP_LOOP:
+        return "OP_LOOP";
     case OP_POP:
         return "OP_POP";
     case OP_CALL:
@@ -218,13 +220,21 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
         return offset + 2;
     }
 
-    /* 2-byte jump offset operand */
+    /* 2-byte jump offset operand (forward jumps) */
     case OP_JUMP:
     case OP_JUMP_IF_FALSE:
     case OP_JUMP_IF_TRUE: {
         uint16_t jump = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
         printf("%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
                offset + 3 + (size_t)jump);
+        return offset + 3;
+    }
+
+    /* 2-byte jump offset operand (backward jump for loops) */
+    case OP_LOOP: {
+        uint16_t jump = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+        printf("%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
+               offset + 3 - (size_t)jump);
         return offset + 3;
     }
 

@@ -194,7 +194,53 @@ my result = if 1 < 2 then "yes" else "no" end
 result          # => yes
 
 # ============================================================
-# 8. say() for output
+# 8. While loops
+# ============================================================
+
+# while...do...end is a loop expression.
+my i = 0
+while i < 5 do
+  i = i + 1
+end                 # => 5 (last body value)
+
+# A loop that never runs returns nothing.
+while false do 42 end   # => nothing
+
+# Single-line form:
+my j = 10
+while j > 0 do j = j - 1 end   # => 0
+
+# Multi-expression body:
+my k = 0
+while k < 3 do
+  say(k)
+  k = k + 1
+end
+# prints: 0, 1, 2
+# => 3
+
+# while is an expression — you can use it in assignments.
+my n = 0
+my total = while n < 4 do
+  n = n + 1
+end
+total               # => 4
+
+# Nested loops work as expected.
+my outer = 0
+my count = 0
+while outer < 3 do
+  my inner = 0
+  while inner < 2 do
+    count = count + 1
+    inner = inner + 1
+  end
+  outer = outer + 1
+end
+count               # => 6
+
+# ============================================================
+# 9. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -205,7 +251,7 @@ say(true)       # prints: true
 say(nothing)    # prints: nothing
 
 # ============================================================
-# 9. Running Cutlet programs
+# 10. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -226,7 +272,7 @@ say(nothing)    # prints: nothing
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 10. The REPL
+# 11. The REPL
 # ============================================================
 
 # Start an interactive REPL:

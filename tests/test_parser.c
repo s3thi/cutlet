@@ -1471,6 +1471,128 @@ TEST(test_expr_modulo_left_assoc) {
 }
 
 /* ============================================================
+ * While loop parsing tests
+ * ============================================================ */
+
+/* Basic while: while true do 1 end */
+TEST(test_while_basic) {
+    ASSERT(ast_matches("while true do 1 end", "AST [WHILE [BOOL true] [NUMBER 1]]"),
+           "basic while loop");
+    PASS();
+}
+
+/* While with comparison condition */
+TEST(test_while_with_comparison) {
+    ASSERT(
+        ast_matches("while x < 5 do x end", "AST [WHILE [BINOP < [IDENT x] [NUMBER 5]] [IDENT x]]"),
+        "while with comparison");
+    PASS();
+}
+
+/* Nested while loops */
+TEST(test_while_nested) {
+    ASSERT(ast_matches("while true do while false do 1 end end",
+                       "AST [WHILE [BOOL true] [WHILE [BOOL false] [NUMBER 1]]]"),
+           "nested while loops");
+    PASS();
+}
+
+/* While with multi-expression body */
+TEST(test_while_multiline_body) {
+    ASSERT(ast_matches("while true do\n  1\n  2\nend",
+                       "AST [WHILE [BOOL true] [BLOCK [NUMBER 1] [NUMBER 2]]]"),
+           "while with multi-expression body");
+    PASS();
+}
+
+/* While as expression in assignment */
+TEST(test_while_in_assignment) {
+    ASSERT(ast_matches("my x = while true do 1 end", "AST [DECL x [WHILE [BOOL true] [NUMBER 1]]]"),
+           "while in assignment");
+    PASS();
+}
+
+/* Single-line while */
+TEST(test_while_single_line) {
+    ASSERT(
+        ast_matches("while x > 0 do x end", "AST [WHILE [BINOP > [IDENT x] [NUMBER 0]] [IDENT x]]"),
+        "single-line while");
+    PASS();
+}
+
+/* 'while' as variable name rejected */
+TEST(test_while_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my while = 1", &node, &err), "while as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'do' as variable name rejected */
+TEST(test_do_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my do = 1", &node, &err), "do as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* While missing 'do' → parse error */
+TEST(test_while_missing_do) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("while true 1 end", &node, &err), "while without do should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* While missing 'end' → parse error */
+TEST(test_while_missing_end) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("while true do 1", &node, &err), "while without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* While missing body → parse error */
+TEST(test_while_missing_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("while true do end", &node, &err), "while with empty body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete() for while: incomplete cases */
+TEST(test_is_incomplete_while_no_do) {
+    ASSERT(!parser_is_complete("while true"), "while without do should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_while_no_body) {
+    ASSERT(!parser_is_complete("while true do"), "while do without body should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_while_no_end) {
+    ASSERT(!parser_is_complete("while true do 1"), "while without end should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete() for while: complete cases */
+TEST(test_is_complete_while) {
+    ASSERT(parser_is_complete("while true do 1 end"), "complete while should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_while_multiline) {
+    ASSERT(parser_is_complete("while true do\n  1\nend"), "multiline while should be complete");
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -1758,6 +1880,28 @@ int main(void) {
     RUN_TEST(test_expr_modulo);
     RUN_TEST(test_expr_modulo_precedence);
     RUN_TEST(test_expr_modulo_left_assoc);
+
+    printf("\nWhile loop parsing:\n");
+    RUN_TEST(test_while_basic);
+    RUN_TEST(test_while_with_comparison);
+    RUN_TEST(test_while_nested);
+    RUN_TEST(test_while_multiline_body);
+    RUN_TEST(test_while_in_assignment);
+    RUN_TEST(test_while_single_line);
+
+    printf("\nWhile loop error cases:\n");
+    RUN_TEST(test_while_keyword_reserved);
+    RUN_TEST(test_do_keyword_reserved);
+    RUN_TEST(test_while_missing_do);
+    RUN_TEST(test_while_missing_end);
+    RUN_TEST(test_while_missing_body);
+
+    printf("\nparser_is_complete() - while loops:\n");
+    RUN_TEST(test_is_incomplete_while_no_do);
+    RUN_TEST(test_is_incomplete_while_no_body);
+    RUN_TEST(test_is_incomplete_while_no_end);
+    RUN_TEST(test_is_complete_while);
+    RUN_TEST(test_is_complete_while_multiline);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_expr_concat_basic);
