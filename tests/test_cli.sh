@@ -831,6 +831,24 @@ test_run_file "concat strings" 'say("hello" .. " world")' "hello world"
 test_run_file "concat auto-coerce" 'say("score: " .. 42)' "score: 42"
 test_run_file "concat chained" 'say("a" .. "b" .. "c")' "abc"
 
+# While loop in file execution
+test_run_file "while loop basic" 'my i = 0
+while i < 5 do
+  i = i + 1
+end
+say(i)' "5"
+
+test_run_file "while loop with say" 'my j = 0
+while j < 3 do
+  say(j)
+  j = j + 1
+end' "0
+1
+2"
+
+test_run_file "while never runs" 'my result = while false do 42 end
+say(result)' "nothing"
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

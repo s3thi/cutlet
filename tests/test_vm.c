@@ -944,6 +944,74 @@ TEST(test_mod_string_error) { assert_vm_error("\"hello\" % 3", "arithmetic requi
 TEST(test_mod_bool_error) { assert_vm_error("true % 2", "arithmetic requires numbers"); }
 
 /* ============================================================
+ * While loop tests
+ * ============================================================ */
+
+/* Loop that runs N times: returns last body value */
+TEST(test_while_runs_n_times) {
+    /* i starts at 0, loop increments i each time. After 5 iterations, i==5. */
+    assert_vm_number("my wh_i1 = 0\nwhile wh_i1 < 5 do\n  wh_i1 = wh_i1 + 1\nend", 5.0,
+                     "while loop runs N times");
+}
+
+/* Loop that never runs: returns nothing */
+TEST(test_while_never_runs) {
+    assert_vm_nothing("while false do 42 end", "while that never runs returns nothing");
+}
+
+/* Last body value is returned */
+TEST(test_while_last_body_value) {
+    /* Loop runs once (condition is true, body sets x=false to exit). */
+    assert_vm_number("my wh_x1 = 0\nwhile wh_x1 == 0 do\n  wh_x1 = 1\n  42\nend", 42.0,
+                     "while returns last body value");
+}
+
+/* Loop with say() side effects */
+TEST(test_while_with_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v =
+        run_input("my wh_j1 = 0\nwhile wh_j1 < 3 do\n  say(wh_j1)\n  wh_j1 = wh_j1 + 1\nend", &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NUMBER, "loop result should be number", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "0\n1\n2\n", "say output from loop", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Nested while loops */
+TEST(test_while_nested) {
+    assert_vm_number("my wh_outer = 0\nmy wh_sum1 = 0\n"
+                     "while wh_outer < 3 do\n"
+                     "  my wh_inner = 0\n"
+                     "  while wh_inner < 2 do\n"
+                     "    wh_sum1 = wh_sum1 + 1\n"
+                     "    wh_inner = wh_inner + 1\n"
+                     "  end\n"
+                     "  wh_outer = wh_outer + 1\n"
+                     "end\n"
+                     "wh_sum1",
+                     6.0, "nested while loops");
+}
+
+/* While used as expression in assignment */
+TEST(test_while_as_expression) {
+    assert_vm_number("my wh_n1 = 0\n"
+                     "my wh_result1 = while wh_n1 < 3 do\n"
+                     "  wh_n1 = wh_n1 + 1\n"
+                     "end\n"
+                     "wh_result1",
+                     3.0, "while as expression in assignment");
+}
+
+/* While loop that never runs, used as expression → nothing */
+TEST(test_while_never_runs_expr) {
+    assert_vm_nothing("my wh_result2 = while false do 42 end\nwh_result2",
+                      "while never runs as expression returns nothing");
+}
+
+/* ============================================================
  * String concatenation operator (..)
  * ============================================================ */
 
@@ -1194,6 +1262,15 @@ int main(void) {
     RUN_TEST(test_mod_by_zero);
     RUN_TEST(test_mod_string_error);
     RUN_TEST(test_mod_bool_error);
+
+    printf("\nWhile loop:\n");
+    RUN_TEST(test_while_runs_n_times);
+    RUN_TEST(test_while_never_runs);
+    RUN_TEST(test_while_last_body_value);
+    RUN_TEST(test_while_with_say);
+    RUN_TEST(test_while_nested);
+    RUN_TEST(test_while_as_expression);
+    RUN_TEST(test_while_never_runs_expr);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_concat_strings);

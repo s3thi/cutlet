@@ -60,6 +60,7 @@ typedef enum {
     OP_JUMP,          /* Unconditional jump. Operand: 2-byte offset */
     OP_JUMP_IF_FALSE, /* Jump if TOS is falsy (does NOT pop) */
     OP_JUMP_IF_TRUE,  /* Jump if TOS is truthy (does NOT pop) */
+    OP_LOOP,          /* Backward jump. Operand: 2-byte offset to subtract from IP */
 
     /* Stack management */
     OP_POP, /* Discard TOS */

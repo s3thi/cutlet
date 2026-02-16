@@ -668,6 +668,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_LOOP: {
+            /* Backward jump: subtract offset from instruction pointer. */
+            uint16_t offset = read_short(&vm);
+            vm.ip -= offset;
+            break;
+        }
+
         case OP_POP: {
             Value v;
             if (!vm_pop(&vm, &v)) {

@@ -92,6 +92,23 @@ static void patch_jump(Compiler *c, size_t offset) {
     c->chunk->code[offset + 1] = (uint8_t)(jump & 0xFF);
 }
 
+/*
+ * Emit a backward jump (OP_LOOP) to loop_start.
+ * The offset is calculated as the distance from the current position
+ * back to loop_start, including the 3 bytes for the OP_LOOP instruction itself.
+ */
+static void emit_loop(Compiler *c, size_t loop_start, int line) {
+    emit_byte(c, OP_LOOP, line);
+    /* +2 for the two offset bytes we're about to emit */
+    size_t offset = c->chunk->count - loop_start + 2;
+    if (offset > UINT16_MAX) {
+        compiler_error(c, "loop body too large");
+        return;
+    }
+    emit_byte(c, (uint8_t)((offset >> 8) & 0xFF), line);
+    emit_byte(c, (uint8_t)(offset & 0xFF), line);
+}
+
 /* ---- AST node compilation ---- */
 
 /* Forward declaration: compile any AST node. */
@@ -329,6 +346,62 @@ static void compile_if(Compiler *c, const AstNode *node) {
     patch_jump(c, end_jump);
 }
 
+/*
+ * Compile a while loop expression.
+ *
+ * children[0] = condition
+ * children[1] = body
+ *
+ * Bytecode layout (accumulator pattern):
+ *   OP_NOTHING              ; initial accumulator (result if loop never runs)
+ *   LOOP_START:
+ *     <condition>           ; push condition value
+ *     OP_JUMP_IF_FALSE → LOOP_EXIT
+ *     OP_POP                ; pop truthy condition
+ *     OP_POP                ; pop old accumulator
+ *     <body>                ; push new accumulator (body result)
+ *     OP_LOOP → LOOP_START  ; backward jump
+ *   LOOP_EXIT:
+ *     OP_POP                ; pop falsy condition
+ *                           ; accumulator is TOS (the loop result)
+ */
+static void compile_while(Compiler *c, const AstNode *node) {
+    if (node->child_count < 2) {
+        compiler_error(c, "malformed while expression");
+        return;
+    }
+
+    int line = (int)node->line;
+
+    /* Push initial accumulator (nothing — result if loop never executes). */
+    emit_byte(c, OP_NOTHING, line);
+
+    /* LOOP_START: remember this position for the backward jump. */
+    size_t loop_start = c->chunk->count;
+
+    /* Compile condition. */
+    compile_node(c, node->children[0]);
+
+    /* If condition is false, jump to LOOP_EXIT. */
+    size_t exit_jump = emit_jump(c, OP_JUMP_IF_FALSE, line);
+
+    /* Condition was truthy: pop condition, pop old accumulator. */
+    emit_byte(c, OP_POP, line);
+    emit_byte(c, OP_POP, line);
+
+    /* Compile body (pushes new accumulator). */
+    compile_node(c, node->children[1]);
+
+    /* Jump back to LOOP_START. */
+    emit_loop(c, loop_start, line);
+
+    /* LOOP_EXIT: patch the forward jump to here. */
+    patch_jump(c, exit_jump);
+
+    /* Pop the falsy condition. Accumulator is now TOS. */
+    emit_byte(c, OP_POP, line);
+}
+
 /* Compile any AST node by dispatching on its type. */
 static void compile_node(Compiler *c, const AstNode *node) {
     if (c->had_error)
@@ -374,6 +447,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_IF:
         compile_if(c, node);
+        break;
+    case AST_WHILE:
+        compile_while(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);
