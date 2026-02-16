@@ -20,6 +20,11 @@ Cutlet is a dynamic programming language written in C. It aims to be a small
 2 * 3       # => 6
 7 / 2       # => 3.5
 
+# Modulo with % (Python-style: result has the sign of the divisor).
+10 % 3      # => 1
+-7 % 3      # => 2   (not -1 like C)
+7 % -3      # => -2  (not 1 like C)
+
 # Exponentiation with ** (right-associative).
 2 ** 10     # => 1024
 2 ** 3 ** 2 # => 512 (2 ** (3 ** 2) = 2 ** 9)
@@ -28,13 +33,14 @@ Cutlet is a dynamic programming language written in C. It aims to be a small
 -3          # => -3
 -(-3)       # => 3
 
-# Standard precedence: ** > unary - > * / > + -
+# Standard precedence: ** > unary - > * / % > + -
 1 + 2 * 3   # => 7    (not 9)
 (1 + 2) * 3 # => 9    (parentheses override)
 -2 ** 2     # => -4   (-(2 ** 2), not (-2) ** 2)
 
-# Division by zero is a runtime error.
+# Division and modulo by zero are runtime errors.
 # 1 / 0     # => ERR division by zero
+# 1 % 0     # => ERR modulo by zero
 
 # ============================================================
 # 2. Strings
