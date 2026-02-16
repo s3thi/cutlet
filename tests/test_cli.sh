@@ -2,8 +2,10 @@
 #
 # test_cli.sh - Integration tests for the Cutlet CLI
 #
-# Tests the cutlet repl command end-to-end using the JSON protocol.
-# Default mode is server (--listen). Tests use --listen + --connect.
+# Tests the cutlet repl command end-to-end:
+#   - Local REPL (default mode, no networking)
+#   - TCP server/client (--listen + --connect)
+#   - File execution (cutlet run)
 # Exit code: 0 if all tests pass, 1 otherwise.
 #
 
@@ -190,12 +192,12 @@ fi
 stop_server
 
 # ============================================================
-# Default mode starts server
+# Default mode / --listen server
 # ============================================================
 echo
-echo "Default mode:"
+echo "TCP server mode (--listen):"
 
-# cutlet repl (no --listen) should start a server on default port
+# --listen (explicit) should start a server on default port
 SERVER_OUT_DEF=$(mktemp)
 "$CUTLET" repl --listen > "$SERVER_OUT_DEF" 2>&1 &
 SERVER_PID_DEF=$!
@@ -508,6 +510,131 @@ else
 fi
 
 stop_server
+
+# ============================================================
+# Local REPL (default mode, no networking)
+# ============================================================
+echo
+echo "Local REPL (default mode):"
+
+# Helper: pipe input to local REPL and check output.
+# Usage: test_local_repl <name> <input> <expected> [extra_flags]
+test_local_repl() {
+    name="$1"
+    input="$2"
+    expected="$3"
+    flags="$4"
+
+    # shellcheck disable=SC2086
+    actual=$(printf '%s' "$input" | "$CUTLET" repl $flags 2>/dev/null)
+
+    if [ "$actual" = "$expected" ]; then
+        echo "  PASS: $name"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name"
+        echo "    Input:    $input"
+        echo "    Expected: $expected"
+        echo "    Got:      $actual"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
+# Helper: check output contains expected string.
+test_local_repl_contains() {
+    name="$1"
+    input="$2"
+    expected="$3"
+    flags="$4"
+
+    # shellcheck disable=SC2086
+    actual=$(printf '%s' "$input" | "$CUTLET" repl $flags 2>/dev/null)
+
+    if echo "$actual" | grep -qF "$expected"; then
+        echo "  PASS: $name"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name"
+        echo "    Input:    $input"
+        echo "    Expected to contain: $expected"
+        echo "    Got:      $actual"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
+# Basic expressions
+test_local_repl "number" "42" "42"
+test_local_repl "string" '"hello"' "hello"
+test_local_repl "addition" "1 + 2" "3"
+test_local_repl "precedence" "1 + 2 * 3" "7"
+
+# Multiple lines (each evaluated separately)
+test_local_repl "multiple lines" "$(printf '42\n1 + 2\n"hi"')" "42
+3
+hi"
+
+# Multiline expression (if/then/end spans multiple lines)
+test_local_repl "multiline if" "$(printf 'if true then\n  42\nend')" "42"
+
+# say() output appears before result
+test_local_repl "say output" 'say("hello")' "hello
+nothing"
+
+# say() with number
+test_local_repl "say number" 'say(42)' "42
+nothing"
+
+# Multiple say() calls
+test_local_repl "multiple say" "$(printf 'say("a")\nsay("b")')" "a
+nothing
+b
+nothing"
+
+# say() then expression
+test_local_repl "say then expr" "$(printf 'say("hi")\n1 + 2')" "hi
+nothing
+3"
+
+# Error output
+test_local_repl_contains "error expression" '"unterminated' "ERR"
+test_local_repl_contains "division by zero" '1 / 0' "ERR"
+
+# Variables work across lines (my x = 10 returns 10, not nothing)
+test_local_repl "variables across lines" "$(printf 'my x = 10\nmy y = 20\nsay(x + y)')" "10
+20
+30
+nothing"
+
+# Empty input produces no output
+test_local_repl "empty input" "" ""
+
+# --tokens flag in local mode
+test_local_repl_contains "local --tokens" "42" "TOKENS" "--tokens"
+
+# --ast flag in local mode
+test_local_repl_contains "local --ast" "1 + 2" "AST" "--ast"
+
+# --tokens --ast combined in local mode
+local_both=$(printf '42' | "$CUTLET" repl --tokens --ast 2>/dev/null)
+if echo "$local_both" | grep -q "TOKENS" && echo "$local_both" | grep -q "AST"; then
+    echo "  PASS: local --tokens --ast combined"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: local --tokens --ast combined"
+    echo "    Got: $local_both"
+    FAIL=$((FAIL + 1))
+fi
+
+# Default mode (no flags) should NOT start a TCP server
+# (verify by checking that it doesn't print "Listening on")
+default_out=$(echo "42" | "$CUTLET" repl 2>&1)
+if echo "$default_out" | grep -q "Listening on"; then
+    echo "  FAIL: default mode should not start TCP server"
+    FAIL=$((FAIL + 1))
+else
+    echo "  PASS: default mode is local (no TCP)"
+    PASS=$((PASS + 1))
+fi
 
 # ============================================================
 # cutlet run <file> — file execution

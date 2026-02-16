@@ -20,7 +20,7 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 - **If/else expressions**: `if cond then body [else body] end`. Expression form (returns value). `else if` special case (single `end`). Only taken branch evaluated. No-else returns `nothing`.
 - **Variables**: `my x = expr` declares, `x = expr` assigns. Linked-list environment with thread-safe get/define/assign.
 - **Runtime**: Global pthread rwlock serializes eval.
-- **REPL/CLI**: TCP server (thread-per-client), TCP client with isocline for rich line editing and multiline input. `--tokens` and `--ast` debug flags. LSP-style JSON framing with request IDs. nREPL-style multi-frame responses: `say()` sends output frames (`{"type": "output", ...}`) before the terminal result frame (`{"type": "result", ...}`). Client reads frames in a loop. History persistence (`~/.cutlet/history`). `parser_is_complete()` drives continuation prompts.
+- **REPL/CLI**: Local in-process REPL as default mode (`cutlet repl`). TCP server (`--listen`, thread-per-client) and TCP client (`--connect`) with isocline for rich line editing and multiline input. `--tokens` and `--ast` debug flags. Shared `print_repl_result()` formatting helper for both local and TCP modes. LSP-style JSON framing with request IDs for TCP mode. nREPL-style multi-frame responses: `say()` sends output frames (`{"type": "output", ...}`) before the terminal result frame (`{"type": "result", ...}`). Client reads frames in a loop. History persistence (`~/.cutlet/history`). `parser_is_complete()` drives continuation prompts and multiline accumulation (both interactive and pipe modes).
 - **File execution**: `cutlet run <file>` reads and evaluates a `.cutlet` file. Output via `say()` only (final expression not printed). Exit code 0 on success, 1 on error.
 - **Comments**: `#` to end of line.
 - **Function calls**: `name(arg1, arg2, ...)` syntax parsed as `AST_CALL`. Zero or more comma-separated arguments. Parsed as postfix after identifier.
@@ -35,7 +35,7 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 | `src/parser.c/h` | Pratt parser, AST types, `parser_is_complete()` |
 | `src/eval.c/h` | Evaluator, Value types, `EvalContext` |
 | `src/runtime.c/h` | Global lock, variable environment |
-| `src/main.c` | CLI entry, TCP server/client with isocline, `run` subcommand |
+| `src/main.c` | CLI entry, local REPL, TCP server/client with isocline, `run` subcommand |
 | `src/repl.c/h` | REPL core (`repl_eval_line()`) |
 | `src/repl_server.c/h` | REPL server |
 | `src/json.c/h` | JSON protocol framing (result + output frames) |
@@ -61,6 +61,12 @@ Create example `.cutlet` programs in `examples/` with matching `.expected` files
 4. Implement the feature.
 5. Run `make test` and `make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
+
+---
+
+## Next task
+
+(No task currently queued.)
 
 ---
 End of handoff.

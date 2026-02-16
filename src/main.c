@@ -2,21 +2,19 @@
  * main.c - Cutlet CLI entry point
  *
  * Usage:
- *   cutlet repl [--tokens] [--ast]                    start TCP REPL server (default)
+ *   cutlet repl [--tokens] [--ast]                       local REPL (default)
  *   cutlet repl --listen [HOST:PORT] [--tokens] [--ast]  start TCP REPL server
  *   cutlet repl --connect [HOST:PORT] [--tokens] [--ast] connect to running server
- *   cutlet run <file> [--tokens] [--ast]              execute a file directly
+ *   cutlet run <file> [--tokens] [--ast]                 execute a file directly
  *
- * The default mode starts a TCP server. There is no local-only eval mode.
+ * The default mode starts a local in-process REPL (no networking).
+ * Use --listen to start a TCP REPL server, --connect to connect to one.
  *
  * Debug flags:
  *   --tokens  Enable token debug output
  *   --ast     Enable AST debug output
  *
- * Both flags can be combined. Server emits debug output only if started
- * with the corresponding flag. Client prints debug output only if started
- * with the flag. If the server sends debug fields the client didn't request,
- * the client warns once on stderr and ignores them.
+ * Both flags can be combined.
  */
 
 #include "json.h"
@@ -63,9 +61,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  %s run <file> [--tokens] [--ast]\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Commands:\n");
-    fprintf(
-        stderr,
-        "  repl                        Start the TCP REPL server (default, same as --listen)\n");
+    fprintf(stderr, "  repl                        Start a local interactive REPL (default)\n");
     fprintf(stderr, "  repl --listen [HOST:PORT]   Start a TCP REPL server (default: %s:%d)\n",
             DEFAULT_HOST, DEFAULT_PORT);
     fprintf(stderr,
@@ -224,6 +220,54 @@ static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
 #define ANSI_RESET "\033[0m"
 
 /*
+ * Print a REPL result (tokens, ast, value/error) to stdout.
+ *
+ * Shared formatting logic used by both the TCP client (send_and_print)
+ * and the local REPL (run_local_repl). Handles color/prefix formatting
+ * based on whether stdout is a TTY.
+ *
+ * When use_color is true (stdout is a TTY):
+ *   - Debug output: dim "# TOKENS ..." / "# AST ..."
+ *   - Results: green "=> value"
+ *   - Errors: "ERR message"
+ * When use_color is false (pipe/redirect):
+ *   - All output is raw, no ANSI codes, no prefixes.
+ *
+ * ok/value/error/tokens/ast correspond to ReplResult or JsonResponse fields.
+ */
+static void print_repl_result(bool ok, const char *value, const char *error, const char *tokens,
+                              const char *ast, bool want_tokens, bool want_ast, bool use_color) {
+    /* Print output in order: tokens, ast, value/error. */
+    if (want_tokens && tokens) {
+        if (use_color)
+            printf(ANSI_DIM "# %s" ANSI_RESET "\n", tokens);
+        else
+            puts(tokens);
+    }
+    if (want_ast && ast) {
+        if (use_color)
+            printf(ANSI_DIM "# %s" ANSI_RESET "\n", ast);
+        else
+            puts(ast);
+    }
+
+    if (ok) {
+        if (value) {
+            if (use_color)
+                printf(ANSI_GREEN "=> %s" ANSI_RESET "\n", value);
+            else
+                puts(value);
+        }
+        /* value==NULL means blank input; print nothing. */
+    } else {
+        if (error) {
+            printf("ERR %s\n", error);
+        }
+    }
+    fflush(stdout);
+}
+
+/*
  * Helper: send an expression to the server and print the response.
  * Reads frames in a loop (nREPL-style): output frames from say() are
  * printed to stdout immediately, and the terminal result frame is
@@ -308,34 +352,8 @@ static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool
                 *warned_extra_ast = true;
             }
 
-            /* Print output in order: tokens, ast, value/error. */
-            if (want_tokens && resp.tokens) {
-                if (use_color)
-                    printf(ANSI_DIM "# %s" ANSI_RESET "\n", resp.tokens);
-                else
-                    puts(resp.tokens);
-            }
-            if (want_ast && resp.ast) {
-                if (use_color)
-                    printf(ANSI_DIM "# %s" ANSI_RESET "\n", resp.ast);
-                else
-                    puts(resp.ast);
-            }
-
-            if (resp.ok) {
-                if (resp.value) {
-                    if (use_color)
-                        printf(ANSI_GREEN "=> %s" ANSI_RESET "\n", resp.value);
-                    else
-                        puts(resp.value);
-                }
-                /* value==NULL means blank input; print nothing. */
-            } else {
-                if (resp.error) {
-                    printf("ERR %s\n", resp.error);
-                }
-            }
-            fflush(stdout);
+            print_repl_result(resp.ok, resp.value, resp.error, resp.tokens, resp.ast, want_tokens,
+                              want_ast, use_color);
 
             json_response_free(&resp);
             return true;
@@ -617,6 +635,176 @@ static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
     return exit_code;
 }
 
+/*
+ * Run the local REPL in interactive mode (TTY) using isocline.
+ * Same multiline support as the TCP client's interactive mode,
+ * but evaluates directly via repl_eval_line() — no networking.
+ */
+static int run_local_repl_interactive(bool enable_tokens, bool enable_ast) {
+    bool use_color = isatty(fileno(stdout));
+
+    /* Initialize isocline */
+    char *history_path = get_history_path();
+    if (history_path) {
+        ic_set_history(history_path, 200);
+        free(history_path);
+    }
+
+    /* Disable isocline's built-in multiline mode; we handle continuation ourselves
+     * using parser_is_complete() to auto-detect when an expression is finished. */
+    ic_enable_multiline(false);
+
+    /* Disable default file completion — not useful for a language REPL */
+    ic_set_default_completer(NULL, NULL);
+
+    /* Create an EvalContext that writes say() output directly to stdout. */
+    EvalContext ctx = {.write_fn = stdout_write_fn, .userdata = NULL};
+
+    /* Buffer for accumulating multiline input */
+    char *input_buf = malloc(MAX_INPUT_BUF);
+    if (!input_buf) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        return 1;
+    }
+    input_buf[0] = '\0';
+    size_t input_len = 0;
+    bool continuing = false;
+
+    while (1) {
+        ic_set_prompt_marker(continuing ? "    ... " : "cutlet> ", NULL);
+        char *line = ic_readline(NULL);
+
+        if (!line) {
+            /* EOF (Ctrl+D) or error */
+            if (input_len > 0) {
+                /* Send any accumulated incomplete input to get error message */
+                ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
+                print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens,
+                                  enable_ast, use_color);
+                repl_result_free(&r);
+            }
+            break;
+        }
+
+        /* Append line to input buffer, adding newline if continuing */
+        size_t line_len = strlen(line);
+        if (input_len + line_len + 2 >= MAX_INPUT_BUF) {
+            fprintf(stderr, "Error: input too long\n");
+            ic_free(line);
+            input_buf[0] = '\0';
+            input_len = 0;
+            continuing = false;
+            continue;
+        }
+
+        if (continuing && input_len > 0) {
+            input_buf[input_len++] = '\n';
+        }
+        memcpy(input_buf + input_len, line, line_len);
+        input_len += line_len;
+        input_buf[input_len] = '\0';
+        ic_free(line);
+
+        /* Check if input is complete */
+        if (parser_is_complete(input_buf)) {
+            ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
+            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
+                              use_color);
+            repl_result_free(&r);
+
+            /* Reset buffer for next expression */
+            input_buf[0] = '\0';
+            input_len = 0;
+            continuing = false;
+        } else {
+            continuing = true;
+        }
+    }
+
+    free(input_buf);
+    return 0;
+}
+
+/*
+ * Run the local REPL in pipe mode (stdin is not a TTY).
+ * Reads line by line, accumulating multiline input using
+ * parser_is_complete() (like Python's stdin behavior).
+ * Evaluates directly via repl_eval_line() — no networking.
+ */
+static int run_local_repl_pipe(bool enable_tokens, bool enable_ast) {
+    bool use_color = isatty(fileno(stdout));
+    EvalContext ctx = {.write_fn = stdout_write_fn, .userdata = NULL};
+
+    char line[MAX_LINE_LEN];
+
+    /* Buffer for accumulating multiline input */
+    char *input_buf = malloc(MAX_INPUT_BUF);
+    if (!input_buf) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        return 1;
+    }
+    input_buf[0] = '\0';
+    size_t input_len = 0;
+
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        /* Strip trailing newline/CRLF. */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        /* Append line to input buffer */
+        if (input_len + len + 2 >= MAX_INPUT_BUF) {
+            fprintf(stderr, "Error: input too long\n");
+            input_buf[0] = '\0';
+            input_len = 0;
+            continue;
+        }
+
+        if (input_len > 0) {
+            input_buf[input_len++] = '\n';
+        }
+        memcpy(input_buf + input_len, line, len);
+        input_len += len;
+        input_buf[input_len] = '\0';
+
+        /* Check if input is complete */
+        if (parser_is_complete(input_buf)) {
+            ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
+            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
+                              use_color);
+            repl_result_free(&r);
+
+            /* Reset buffer for next expression */
+            input_buf[0] = '\0';
+            input_len = 0;
+        }
+        /* If not complete, continue accumulating lines */
+    }
+
+    /* Flush any remaining incomplete input (EOF reached mid-expression) */
+    if (input_len > 0) {
+        ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
+        print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
+                          use_color);
+        repl_result_free(&r);
+    }
+
+    free(input_buf);
+    return 0;
+}
+
+/*
+ * Run the local REPL (no networking).
+ * Dispatches to interactive (TTY) or pipe mode based on stdin.
+ */
+static int run_local_repl(bool enable_tokens, bool enable_ast) {
+    if (isatty(fileno(stdin))) {
+        return run_local_repl_interactive(enable_tokens, enable_ast);
+    }
+    return run_local_repl_pipe(enable_tokens, enable_ast);
+}
+
 int main(int argc, char *argv[]) {
     if (!runtime_init()) {
         fprintf(stderr, "Error: failed to initialize runtime\n");
@@ -673,8 +861,12 @@ int main(int argc, char *argv[]) {
             return run_connect(flag_tokens, flag_ast, connect_addr);
         }
 
-        /* Default: start server (--listen is optional). */
-        return run_listen(flag_tokens, flag_ast, listen_addr);
+        if (flag_listen) {
+            return run_listen(flag_tokens, flag_ast, listen_addr);
+        }
+
+        /* Default: start local REPL (no networking). */
+        return run_local_repl(flag_tokens, flag_ast);
     } else if (strcmp(cmd, "run") == 0) {
         /* Parse: cutlet run <file> [--tokens] [--ast] */
         if (argc < 3) {

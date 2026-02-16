@@ -34,8 +34,9 @@ make clean      # remove all build artifacts
 ## Running
 
 ```sh
-./build/cutlet repl                 # start the REPL server
-./build/cutlet repl --connect       # connect to a running REPL
+./build/cutlet repl                 # start a local interactive REPL
+./build/cutlet repl --listen        # start a TCP REPL server
+./build/cutlet repl --connect       # connect to a running TCP REPL server
 ./build/cutlet run script.cutlet    # execute a source file
 ```
 
