@@ -17,7 +17,22 @@ VENDOR_DIR = vendor
 # Isocline expects: include/ for public header, src/ for implementation
 ISOCLINE_DIR = $(VENDOR_DIR)/isocline
 ISOCLINE_SRC = $(ISOCLINE_DIR)/src/isocline.c
-ISOCLINE_CFLAGS = -I$(ISOCLINE_DIR)/include -I$(ISOCLINE_DIR)/src
+ISOCLINE_INCLUDES = -I$(ISOCLINE_DIR)/include -I$(ISOCLINE_DIR)/src
+
+# Upstream-recommended build flags for isocline (C99, not C23).
+# Source: vendor/isocline/CMakeLists.txt lines 103-106 (AppleClang/Clang flags).
+# -Wno-shorten-64-to-32: upstream narrowing bug in term.c:1036 on 64-bit macOS.
+ISOCLINE_BUILD_CFLAGS = -std=c99 -g \
+	-Wall -Wextra -Wpedantic \
+	-Wno-unknown-pragmas -Wno-unused-function -Wno-padded \
+	-Wno-missing-field-initializers \
+	-Wimplicit-int-conversion -Wsign-conversion \
+	-Wno-shorten-64-to-32
+
+# Sanitizer-instrumented build flags for isocline.
+ISOCLINE_SANITIZE_BUILD_CFLAGS = $(ISOCLINE_BUILD_CFLAGS) \
+	-O1 -fno-omit-frame-pointer \
+	-fsanitize=address,undefined -fno-sanitize-recover=all
 
 # Library source files (everything except main.c)
 LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/compiler.c $(SRC_DIR)/vm.c
@@ -70,9 +85,14 @@ $(BUILD_DIR):
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Build the main cutlet binary (includes isocline for REPL multiline support)
-$(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(ISOCLINE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) $(LDFLAGS) -pthread -lm
+# Compile isocline separately with upstream-recommended C99 flags.
+ISOCLINE_OBJ = $(BUILD_DIR)/isocline.o
+$(ISOCLINE_OBJ): $(ISOCLINE_SRC) | $(BUILD_DIR)
+	$(CC) $(ISOCLINE_BUILD_CFLAGS) $(ISOCLINE_INCLUDES) -c -o $@ $<
+
+# Build the main cutlet binary (link pre-compiled isocline object).
+$(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_OBJ) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(ISOCLINE_INCLUDES) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_OBJ) $(LDFLAGS) -pthread -lm
 
 # Build and run all tests
 .PHONY: test
@@ -241,9 +261,14 @@ SANITIZE_TEST_VM_BIN = $(SANITIZE_BUILD_DIR)/test_vm
 $(SANITIZE_BUILD_DIR):
 	mkdir -p $(SANITIZE_BUILD_DIR)
 
-# Build sanitizer-instrumented binaries.
-$(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) $(ISOCLINE_CFLAGS) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SRC) $(SANITIZE_LDFLAGS) -pthread -lm
+# Compile isocline separately under sanitizers with upstream-recommended C99 flags.
+ISOCLINE_SANITIZE_OBJ = $(SANITIZE_BUILD_DIR)/isocline.o
+$(ISOCLINE_SANITIZE_OBJ): $(ISOCLINE_SRC) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(ISOCLINE_SANITIZE_BUILD_CFLAGS) $(ISOCLINE_INCLUDES) -c -o $@ $<
+
+# Build sanitizer-instrumented binaries (link pre-compiled isocline object).
+$(SANITIZE_BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SANITIZE_OBJ) | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) $(ISOCLINE_INCLUDES) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_SANITIZE_OBJ) $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(SANITIZE_LDFLAGS)

@@ -76,4 +76,12 @@ Added `..` binary operator for string concatenation with auto-coercion. Right-as
 **Files touched**: `src/parser.c` (precedence renumbering 5→6, 6→7, 7→8, 8→9; `..` at prec 5; `is_right_assoc`; unary minus prec 7→8), `src/chunk.h` (`OP_CONCAT`), `src/chunk.c` (disassembler), `src/compiler.c` (`".."` → `OP_CONCAT`), `src/vm.c` (`OP_CONCAT` implementation), `tests/test_tokenizer.c` (3 tests), `tests/test_parser.c` (6 tests), `tests/test_vm.c` (14 tests), `tests/test_repl.c` (5 tests), `tests/test_cli.sh` (3 tests).
 
 ---
+
+## Completed: Isolate vendor code from project build flags and code-quality tools
+
+Isocline is now compiled as a separate `.o` with upstream-recommended C99 flags (`ISOCLINE_BUILD_CFLAGS` and `ISOCLINE_SANITIZE_BUILD_CFLAGS`) instead of the project's C23 flags. `ISOCLINE_CFLAGS` renamed to `ISOCLINE_INCLUDES`. `vendor/.clang-tidy` and `vendor/.clang-format` sentinel files prevent IDE linting/formatting of vendor code. Added `-Wno-shorten-64-to-32` to suppress an upstream narrowing bug in `term.c:1036` on 64-bit macOS.
+
+**Files touched**: `Makefile` (renamed `ISOCLINE_CFLAGS` → `ISOCLINE_INCLUDES`, added `ISOCLINE_BUILD_CFLAGS`/`ISOCLINE_SANITIZE_BUILD_CFLAGS`, separate isocline `.o` compile rules, updated `$(BIN)` and `$(SANITIZE_BIN)` to link `.o`), `vendor/.clang-tidy` (new), `vendor/.clang-format` (new).
+
+---
 End of handoff.
