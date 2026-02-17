@@ -6,6 +6,7 @@
  */
 
 #include "chunk.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -161,19 +162,82 @@ const char *opcode_name(OpCode op) {
     }
 }
 
+/* ============================================================
+ * Dynamic buffer for building disassembly strings
+ * ============================================================ */
+
+/* Simple growable string buffer used by the disassembler. */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} DynBuf;
+
+/* Initialize a dynamic buffer with an initial capacity. */
+static bool dynbuf_init(DynBuf *b, size_t initial_cap) {
+    b->data = malloc(initial_cap);
+    if (!b->data)
+        return false;
+    b->data[0] = '\0';
+    b->len = 0;
+    b->cap = initial_cap;
+    return true;
+}
+
+/* Append a formatted string to the buffer. Grows as needed. */
+__attribute__((format(printf, 2, 3))) static bool dynbuf_printf(DynBuf *b, const char *fmt, ...) {
+    va_list ap;
+
+    /* First attempt: try writing into remaining space. */
+    va_start(ap, fmt);
+    size_t avail = b->cap - b->len;
+    int n = vsnprintf(b->data + b->len, avail, fmt, ap);
+    va_end(ap);
+
+    if (n < 0)
+        return false;
+
+    /* If it fit, advance len and return. */
+    if ((size_t)n < avail) {
+        b->len += (size_t)n;
+        return true;
+    }
+
+    /* Grow the buffer and retry. */
+    size_t needed = b->len + (size_t)n + 1;
+    size_t new_cap = b->cap;
+    while (new_cap < needed)
+        new_cap *= 2;
+    char *new_data = realloc(b->data, new_cap);
+    if (!new_data)
+        return false;
+    b->data = new_data;
+    b->cap = new_cap;
+
+    va_start(ap, fmt);
+    vsnprintf(b->data + b->len, b->cap - b->len, fmt, ap);
+    va_end(ap);
+    b->len += (size_t)n;
+    return true;
+}
+
+/* ============================================================
+ * Buffer-based instruction disassembler
+ * ============================================================ */
+
 /*
- * Disassemble a single instruction starting at offset.
- * Returns the offset of the next instruction.
+ * Disassemble a single instruction starting at offset into the
+ * dynamic buffer. Returns the offset of the next instruction.
  */
-static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
-    printf("%04zu ", offset);
+static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size_t offset) {
+    dynbuf_printf(b, "%04zu ", offset);
 
     /* Print line number: show it if different from previous byte's line,
      * otherwise show "|" to indicate same line. */
     if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
-        printf("   | ");
+        dynbuf_printf(b, "   | ");
     } else {
-        printf("%4d ", chunk->lines[offset]);
+        dynbuf_printf(b, "%4d ", chunk->lines[offset]);
     }
 
     uint8_t instruction = chunk->code[offset];
@@ -199,7 +263,7 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_NOT:
     case OP_POP:
     case OP_RETURN:
-        printf("%s\n", opcode_name((OpCode)instruction));
+        dynbuf_printf(b, "%s\n", opcode_name((OpCode)instruction));
         return offset + 1;
 
     /* 1-byte constant index operand */
@@ -208,15 +272,15 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_GET_GLOBAL:
     case OP_SET_GLOBAL: {
         uint8_t idx = chunk->code[offset + 1];
-        printf("%-20s %4d '", opcode_name((OpCode)instruction), idx);
+        dynbuf_printf(b, "%-20s %4d '", opcode_name((OpCode)instruction), idx);
         if (idx < chunk->const_count) {
             char *s = value_format(&chunk->constants[idx]);
             if (s) {
-                printf("%s", s);
+                dynbuf_printf(b, "%s", s);
                 free(s);
             }
         }
-        printf("'\n");
+        dynbuf_printf(b, "'\n");
         return offset + 2;
     }
 
@@ -225,16 +289,16 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_JUMP_IF_FALSE:
     case OP_JUMP_IF_TRUE: {
         uint16_t jump = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-        printf("%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
-               offset + 3 + (size_t)jump);
+        dynbuf_printf(b, "%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
+                      offset + 3 + (size_t)jump);
         return offset + 3;
     }
 
     /* 2-byte jump offset operand (backward jump for loops) */
     case OP_LOOP: {
         uint16_t jump = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-        printf("%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
-               offset + 3 - (size_t)jump);
+        dynbuf_printf(b, "%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
+                      offset + 3 - (size_t)jump);
         return offset + 3;
     }
 
@@ -242,28 +306,46 @@ static size_t disassemble_instruction(const Chunk *chunk, size_t offset) {
     case OP_CALL: {
         uint8_t name_idx = chunk->code[offset + 1];
         uint8_t argc = chunk->code[offset + 2];
-        printf("%-20s %4d '", opcode_name((OpCode)instruction), name_idx);
+        dynbuf_printf(b, "%-20s %4d '", opcode_name((OpCode)instruction), name_idx);
         if (name_idx < chunk->const_count) {
             char *s = value_format(&chunk->constants[name_idx]);
             if (s) {
-                printf("%s", s);
+                dynbuf_printf(b, "%s", s);
                 free(s);
             }
         }
-        printf("' argc=%d\n", argc);
+        dynbuf_printf(b, "' argc=%d\n", argc);
         return offset + 3;
     }
 
     default:
-        printf("Unknown opcode %d\n", instruction);
+        dynbuf_printf(b, "Unknown opcode %d\n", instruction);
         return offset + 1;
     }
 }
 
-void chunk_disassemble(const Chunk *chunk, const char *name) {
-    printf("== %s ==\n", name);
+/* ============================================================
+ * Public disassembly API
+ * ============================================================ */
+
+char *chunk_disassemble_to_string(const Chunk *chunk, const char *name) {
+    DynBuf b;
+    if (!dynbuf_init(&b, 256))
+        return NULL;
+
+    dynbuf_printf(&b, "== %s ==\n", name);
     size_t offset = 0;
     while (offset < chunk->count) {
-        offset = disassemble_instruction(chunk, offset);
+        offset = disassemble_instruction_to_buf(&b, chunk, offset);
+    }
+
+    return b.data; /* Caller owns the buffer. */
+}
+
+void chunk_disassemble(const Chunk *chunk, const char *name) {
+    char *s = chunk_disassemble_to_string(chunk, name);
+    if (s) {
+        fputs(s, stdout);
+        free(s);
     }
 }

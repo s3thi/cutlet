@@ -114,6 +114,8 @@ char *json_encode_request(const JsonRequest *req) {
 
     pos += (size_t)sprintf(buf + pos, ",\"want_tokens\":%s", req->want_tokens ? "true" : "false");
     pos += (size_t)sprintf(buf + pos, ",\"want_ast\":%s", req->want_ast ? "true" : "false");
+    pos +=
+        (size_t)sprintf(buf + pos, ",\"want_bytecode\":%s", req->want_bytecode ? "true" : "false");
     buf[pos++] = '}';
     buf[pos] = '\0';
     return buf;
@@ -125,7 +127,8 @@ char *json_encode_response(const JsonResponse *resp) {
     size_t err_esc = resp->error ? json_escaped_len(resp->error) : 0;
     size_t tok_esc = resp->tokens ? json_escaped_len(resp->tokens) : 0;
     size_t ast_esc = resp->ast ? json_escaped_len(resp->ast) : 0;
-    size_t cap = 256 + val_esc + err_esc + tok_esc + ast_esc;
+    size_t bc_esc = resp->bytecode ? json_escaped_len(resp->bytecode) : 0;
+    size_t cap = 256 + val_esc + err_esc + tok_esc + ast_esc + bc_esc;
     char *buf = malloc(cap);
     if (!buf)
         return NULL;
@@ -145,6 +148,9 @@ char *json_encode_response(const JsonResponse *resp) {
     }
     if (resp->ast) {
         append_str_field(buf, &pos, "ast", resp->ast, true);
+    }
+    if (resp->bytecode) {
+        append_str_field(buf, &pos, "bytecode", resp->bytecode, true);
     }
 
     buf[pos++] = '}';
@@ -369,6 +375,15 @@ bool json_parse_request(const char *json, size_t len, JsonRequest *req) {
                 free(key);
                 return false;
             }
+        } else if (strcmp(key, "want_bytecode") == 0) {
+            if (match_literal(json, len, &pos, "true"))
+                req->want_bytecode = true;
+            else if (match_literal(json, len, &pos, "false"))
+                req->want_bytecode = false;
+            else {
+                free(key);
+                return false;
+            }
         } else {
             /* Unknown key: skip value. */
             if (json[pos] == '"') {
@@ -450,6 +465,8 @@ bool json_parse_response(const char *json, size_t len, JsonResponse *resp) {
             resp->tokens = parse_json_string(json, len, &pos);
         } else if (strcmp(key, "ast") == 0) {
             resp->ast = parse_json_string(json, len, &pos);
+        } else if (strcmp(key, "bytecode") == 0) {
+            resp->bytecode = parse_json_string(json, len, &pos);
         } else {
             /* Unknown key: skip value. */
             if (json[pos] == '"') {
@@ -630,10 +647,12 @@ void json_response_free(JsonResponse *resp) {
     free(resp->error);
     free(resp->tokens);
     free(resp->ast);
+    free(resp->bytecode);
     resp->value = NULL;
     resp->error = NULL;
     resp->tokens = NULL;
     resp->ast = NULL;
+    resp->bytecode = NULL;
 }
 
 void json_output_frame_free(JsonOutputFrame *frame) {

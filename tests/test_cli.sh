@@ -880,6 +880,45 @@ test_run_file_error "break outside loop" 'break' "break"
 
 test_run_file_error "continue outside loop" 'continue' "continue"
 
+# --bytecode flag shows bytecode disassembly output
+bc_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' '42' > "$bc_tmpfile"
+bc_result=$("$CUTLET" run "$bc_tmpfile" --bytecode 2>/dev/null)
+if echo "$bc_result" | grep -q "OP_CONSTANT" && echo "$bc_result" | grep -q "OP_RETURN"; then
+    echo "  PASS: --bytecode shows bytecode output (run)"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows bytecode output (run)"
+    echo "    Got: $bc_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_tmpfile"
+
+# --bytecode via local REPL pipe mode
+bc_repl_result=$(printf '42' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_repl_result" | grep -q "OP_CONSTANT" && echo "$bc_repl_result" | grep -q "OP_RETURN"; then
+    echo "  PASS: --bytecode shows bytecode output (repl pipe)"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows bytecode output (repl pipe)"
+    echo "    Got: $bc_repl_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode --tokens --ast combined
+bc_all_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' '1 + 2' > "$bc_all_tmpfile"
+bc_all_result=$("$CUTLET" run "$bc_all_tmpfile" --tokens --ast --bytecode 2>/dev/null)
+if echo "$bc_all_result" | grep -q "TOKENS" && echo "$bc_all_result" | grep -q "AST" && echo "$bc_all_result" | grep -q "OP_"; then
+    echo "  PASS: --tokens --ast --bytecode combined"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --tokens --ast --bytecode combined"
+    echo "    Got: $bc_all_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_all_tmpfile"
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

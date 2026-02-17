@@ -13,14 +13,15 @@
  *
  *   Request (client → server):
  *     { "type":"eval", "id":<uint>, "expr":"<input>",
- *       "want_tokens":bool, "want_ast":bool }
+ *       "want_tokens":bool, "want_ast":bool, "want_bytecode":bool }
  *
  *   Response (server → client):
  *     { "type":"result", "id":<uint>, "ok":bool,
- *       "value":"...",    // if ok=true
- *       "error":"...",    // if ok=false
- *       "tokens":"...",   // optional debug
- *       "ast":"..."       // optional debug
+ *       "value":"...",      // if ok=true
+ *       "error":"...",      // if ok=false
+ *       "tokens":"...",     // optional debug
+ *       "ast":"...",        // optional debug
+ *       "bytecode":"..."    // optional debug
  *     }
  *
  *   Debug fields are included only when the server was started with
@@ -58,7 +59,7 @@ typedef struct ReplServer ReplServer;
  * On failure, if err_out is non-NULL, a static error message is stored.
  */
 ReplServer *repl_server_start(const char *host, uint16_t port, bool enable_tokens, bool enable_ast,
-                              const char **err_out);
+                              bool enable_bytecode, const char **err_out);
 
 /*
  * Get the port the server is actually listening on.

@@ -2,19 +2,20 @@
  * main.c - Cutlet CLI entry point
  *
  * Usage:
- *   cutlet repl [--tokens] [--ast]                       local REPL (default)
- *   cutlet repl --listen [HOST:PORT] [--tokens] [--ast]  start TCP REPL server
- *   cutlet repl --connect [HOST:PORT] [--tokens] [--ast] connect to running server
- *   cutlet run <file> [--tokens] [--ast]                 execute a file directly
+ *   cutlet repl [--tokens] [--ast] [--bytecode]                       local REPL (default)
+ *   cutlet repl --listen [HOST:PORT] [--tokens] [--ast] [--bytecode]  start TCP REPL server
+ *   cutlet repl --connect [HOST:PORT] [--tokens] [--ast] [--bytecode] connect to running server
+ *   cutlet run <file> [--tokens] [--ast] [--bytecode]                 execute a file directly
  *
  * The default mode starts a local in-process REPL (no networking).
  * Use --listen to start a TCP REPL server, --connect to connect to one.
  *
  * Debug flags:
- *   --tokens  Enable token debug output
- *   --ast     Enable AST debug output
+ *   --tokens    Enable token debug output
+ *   --ast       Enable AST debug output
+ *   --bytecode  Enable bytecode disassembly output
  *
- * Both flags can be combined.
+ * All flags can be combined.
  */
 
 #include "json.h"
@@ -56,9 +57,11 @@
  */
 static void print_usage(const char *prog) {
     fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "  %s repl [--tokens] [--ast] [--listen [HOST:PORT] | --connect [HOST:PORT]]\n",
+    fprintf(stderr,
+            "  %s repl [--tokens] [--ast] [--bytecode] [--listen [HOST:PORT] | --connect "
+            "[HOST:PORT]]\n",
             prog);
-    fprintf(stderr, "  %s run <file> [--tokens] [--ast]\n", prog);
+    fprintf(stderr, "  %s run <file> [--tokens] [--ast] [--bytecode]\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  repl                        Start a local interactive REPL (default)\n");
@@ -71,6 +74,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "\nDebug flags:\n");
     fprintf(stderr, "  --tokens    Show tokenizer output for each expression\n");
     fprintf(stderr, "  --ast       Show AST output for each expression\n");
+    fprintf(stderr, "  --bytecode  Show bytecode disassembly for each expression\n");
 }
 
 /*
@@ -185,7 +189,7 @@ static void handle_sigint(int sig) {
 /*
  * Run the TCP REPL server.
  */
-static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
+static int run_listen(bool enable_tokens, bool enable_ast, bool enable_bytecode, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -195,7 +199,7 @@ static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
     }
 
     const char *err = NULL;
-    g_server = repl_server_start(host, port, enable_tokens, enable_ast, &err);
+    g_server = repl_server_start(host, port, enable_tokens, enable_ast, enable_bytecode, &err);
     if (!g_server) {
         fprintf(stderr, "Error: failed to start server: %s\n", err ? err : "unknown");
         return 1;
@@ -236,8 +240,9 @@ static int run_listen(bool enable_tokens, bool enable_ast, const char *addr) {
  * ok/value/error/tokens/ast correspond to ReplResult or JsonResponse fields.
  */
 static void print_repl_result(bool ok, const char *value, const char *error, const char *tokens,
-                              const char *ast, bool want_tokens, bool want_ast, bool use_color) {
-    /* Print output in order: tokens, ast, value/error. */
+                              const char *ast, const char *bytecode, bool want_tokens,
+                              bool want_ast, bool want_bytecode, bool use_color) {
+    /* Print output in order: tokens, ast, bytecode, value/error. */
     if (want_tokens && tokens) {
         if (use_color)
             printf(ANSI_DIM "# %s" ANSI_RESET "\n", tokens);
@@ -249,6 +254,12 @@ static void print_repl_result(bool ok, const char *value, const char *error, con
             printf(ANSI_DIM "# %s" ANSI_RESET "\n", ast);
         else
             puts(ast);
+    }
+    if (want_bytecode && bytecode) {
+        if (use_color)
+            printf(ANSI_DIM "# %s" ANSI_RESET "\n", bytecode);
+        else
+            puts(bytecode);
     }
 
     if (ok) {
@@ -283,8 +294,8 @@ static void print_repl_result(bool ok, const char *value, const char *error, con
  * Returns true on success, false if connection is lost.
  */
 static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool want_tokens,
-                           bool want_ast, bool *warned_extra_tokens, bool *warned_extra_ast,
-                           bool use_color) {
+                           bool want_ast, bool want_bytecode, bool *warned_extra_tokens,
+                           bool *warned_extra_ast, bool *warned_extra_bytecode, bool use_color) {
     (*req_id)++;
     /* Cast expr to char* for JsonRequest; we don't call json_request_free so it's safe */
     JsonRequest req = {
@@ -292,6 +303,7 @@ static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool
         .expr = (char *)expr,
         .want_tokens = want_tokens,
         .want_ast = want_ast,
+        .want_bytecode = want_bytecode,
     };
     char *req_json = json_encode_request(&req);
     if (!req_json) {
@@ -351,9 +363,13 @@ static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool
                 fprintf(stderr, "Warning: server sent AST debug output (not requested)\n");
                 *warned_extra_ast = true;
             }
+            if (!want_bytecode && resp.bytecode && !*warned_extra_bytecode) {
+                fprintf(stderr, "Warning: server sent bytecode debug output (not requested)\n");
+                *warned_extra_bytecode = true;
+            }
 
-            print_repl_result(resp.ok, resp.value, resp.error, resp.tokens, resp.ast, want_tokens,
-                              want_ast, use_color);
+            print_repl_result(resp.ok, resp.value, resp.error, resp.tokens, resp.ast, resp.bytecode,
+                              want_tokens, want_ast, want_bytecode, use_color);
 
             json_response_free(&resp);
             return true;
@@ -368,10 +384,11 @@ static bool send_and_print(int fd, const char *expr, unsigned long *req_id, bool
  * Run the REPL client in interactive mode (TTY) using isocline.
  * Supports multiline input with continuation prompts.
  */
-static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
+static int run_connect_interactive(int fd, bool want_tokens, bool want_ast, bool want_bytecode) {
     unsigned long req_id = 0;
     bool warned_extra_tokens = false;
     bool warned_extra_ast = false;
+    bool warned_extra_bytecode = false;
     bool use_color = isatty(fileno(stdout));
 
     /* Initialize isocline */
@@ -409,8 +426,9 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
             /* EOF (Ctrl+D) or error */
             if (input_len > 0) {
                 /* Send any accumulated incomplete input to get error message */
-                if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast,
-                                    &warned_extra_tokens, &warned_extra_ast, use_color)) {
+                if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast, want_bytecode,
+                                    &warned_extra_tokens, &warned_extra_ast, &warned_extra_bytecode,
+                                    use_color)) {
                     free(input_buf);
                     return 1;
                 }
@@ -441,8 +459,9 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
         /* Check if input is complete */
         if (parser_is_complete(input_buf)) {
             /* Input is complete (or has a real error), send to server */
-            if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast, &warned_extra_tokens,
-                                &warned_extra_ast, use_color)) {
+            if (!send_and_print(fd, input_buf, &req_id, want_tokens, want_ast, want_bytecode,
+                                &warned_extra_tokens, &warned_extra_ast, &warned_extra_bytecode,
+                                use_color)) {
                 free(input_buf);
                 return 1;
             }
@@ -464,11 +483,12 @@ static int run_connect_interactive(int fd, bool want_tokens, bool want_ast) {
  * Run the REPL client in non-interactive mode (pipe/file).
  * Reads line by line without accumulation (original behavior).
  */
-static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
+static int run_connect_pipe(int fd, bool want_tokens, bool want_ast, bool want_bytecode) {
     char line[MAX_LINE_LEN];
     unsigned long req_id = 0;
     bool warned_extra_tokens = false;
     bool warned_extra_ast = false;
+    bool warned_extra_bytecode = false;
     bool use_color = isatty(fileno(stdout));
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
@@ -478,8 +498,9 @@ static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
             line[--len] = '\0';
         }
 
-        if (!send_and_print(fd, line, &req_id, want_tokens, want_ast, &warned_extra_tokens,
-                            &warned_extra_ast, use_color)) {
+        if (!send_and_print(fd, line, &req_id, want_tokens, want_ast, want_bytecode,
+                            &warned_extra_tokens, &warned_extra_ast, &warned_extra_bytecode,
+                            use_color)) {
             return 1;
         }
     }
@@ -494,7 +515,7 @@ static int run_connect_pipe(int fd, bool want_tokens, bool want_ast) {
  *
  * Uses isocline for interactive input with multiline support when stdin is a TTY.
  */
-static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
+static int run_connect(bool want_tokens, bool want_ast, bool want_bytecode, const char *addr) {
     char host[256];
     uint16_t port;
 
@@ -527,9 +548,9 @@ static int run_connect(bool want_tokens, bool want_ast, const char *addr) {
 
     int result;
     if (isatty(fileno(stdin))) {
-        result = run_connect_interactive(fd, want_tokens, want_ast);
+        result = run_connect_interactive(fd, want_tokens, want_ast, want_bytecode);
     } else {
-        result = run_connect_pipe(fd, want_tokens, want_ast);
+        result = run_connect_pipe(fd, want_tokens, want_ast, want_bytecode);
     }
 
     close(fd);
@@ -557,7 +578,8 @@ static void stdout_write_fn(void *userdata, const char *data, size_t len) {
  *
  * Returns 0 on success, 1 on error.
  */
-static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
+static int run_file(const char *filename, bool enable_tokens, bool enable_ast,
+                    bool enable_bytecode) {
     /* Open and read the file. */
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -607,7 +629,7 @@ static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
 
     /* Evaluate the file contents. repl_eval_line() handles parsing
      * as a block (multi-line) and evaluation in one call. */
-    ReplResult r = repl_eval_line(source, enable_tokens, enable_ast, &ctx);
+    ReplResult r = repl_eval_line(source, enable_tokens, enable_ast, enable_bytecode, &ctx);
     free(source);
 
     /* Print debug output if requested. */
@@ -616,6 +638,9 @@ static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
     }
     if (enable_ast && r.ast) {
         printf("%s\n", r.ast);
+    }
+    if (enable_bytecode && r.bytecode) {
+        printf("%s\n", r.bytecode);
     }
 
     int exit_code = 0;
@@ -640,7 +665,7 @@ static int run_file(const char *filename, bool enable_tokens, bool enable_ast) {
  * Same multiline support as the TCP client's interactive mode,
  * but evaluates directly via repl_eval_line() — no networking.
  */
-static int run_local_repl_interactive(bool enable_tokens, bool enable_ast) {
+static int run_local_repl_interactive(bool enable_tokens, bool enable_ast, bool enable_bytecode) {
     bool use_color = isatty(fileno(stdout));
 
     /* Initialize isocline */
@@ -678,9 +703,10 @@ static int run_local_repl_interactive(bool enable_tokens, bool enable_ast) {
             /* EOF (Ctrl+D) or error */
             if (input_len > 0) {
                 /* Send any accumulated incomplete input to get error message */
-                ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
-                print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens,
-                                  enable_ast, use_color);
+                ReplResult r =
+                    repl_eval_line(input_buf, enable_tokens, enable_ast, enable_bytecode, &ctx);
+                print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, r.bytecode,
+                                  enable_tokens, enable_ast, enable_bytecode, use_color);
                 repl_result_free(&r);
             }
             break;
@@ -707,9 +733,10 @@ static int run_local_repl_interactive(bool enable_tokens, bool enable_ast) {
 
         /* Check if input is complete */
         if (parser_is_complete(input_buf)) {
-            ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
-            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
-                              use_color);
+            ReplResult r =
+                repl_eval_line(input_buf, enable_tokens, enable_ast, enable_bytecode, &ctx);
+            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, r.bytecode, enable_tokens,
+                              enable_ast, enable_bytecode, use_color);
             repl_result_free(&r);
 
             /* Reset buffer for next expression */
@@ -731,7 +758,7 @@ static int run_local_repl_interactive(bool enable_tokens, bool enable_ast) {
  * parser_is_complete() (like Python's stdin behavior).
  * Evaluates directly via repl_eval_line() — no networking.
  */
-static int run_local_repl_pipe(bool enable_tokens, bool enable_ast) {
+static int run_local_repl_pipe(bool enable_tokens, bool enable_ast, bool enable_bytecode) {
     bool use_color = isatty(fileno(stdout));
     EvalContext ctx = {.write_fn = stdout_write_fn, .userdata = NULL};
 
@@ -770,9 +797,10 @@ static int run_local_repl_pipe(bool enable_tokens, bool enable_ast) {
 
         /* Check if input is complete */
         if (parser_is_complete(input_buf)) {
-            ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
-            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
-                              use_color);
+            ReplResult r =
+                repl_eval_line(input_buf, enable_tokens, enable_ast, enable_bytecode, &ctx);
+            print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, r.bytecode, enable_tokens,
+                              enable_ast, enable_bytecode, use_color);
             repl_result_free(&r);
 
             /* Reset buffer for next expression */
@@ -784,9 +812,9 @@ static int run_local_repl_pipe(bool enable_tokens, bool enable_ast) {
 
     /* Flush any remaining incomplete input (EOF reached mid-expression) */
     if (input_len > 0) {
-        ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, &ctx);
-        print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, enable_tokens, enable_ast,
-                          use_color);
+        ReplResult r = repl_eval_line(input_buf, enable_tokens, enable_ast, enable_bytecode, &ctx);
+        print_repl_result(r.ok, r.value, r.error, r.tokens, r.ast, r.bytecode, enable_tokens,
+                          enable_ast, enable_bytecode, use_color);
         repl_result_free(&r);
     }
 
@@ -798,11 +826,11 @@ static int run_local_repl_pipe(bool enable_tokens, bool enable_ast) {
  * Run the local REPL (no networking).
  * Dispatches to interactive (TTY) or pipe mode based on stdin.
  */
-static int run_local_repl(bool enable_tokens, bool enable_ast) {
+static int run_local_repl(bool enable_tokens, bool enable_ast, bool enable_bytecode) {
     if (isatty(fileno(stdin))) {
-        return run_local_repl_interactive(enable_tokens, enable_ast);
+        return run_local_repl_interactive(enable_tokens, enable_ast, enable_bytecode);
     }
-    return run_local_repl_pipe(enable_tokens, enable_ast);
+    return run_local_repl_pipe(enable_tokens, enable_ast, enable_bytecode);
 }
 
 int main(int argc, char *argv[]) {
@@ -820,9 +848,10 @@ int main(int argc, char *argv[]) {
     const char *cmd = argv[1];
 
     if (strcmp(cmd, "repl") == 0) {
-        /* Parse flags: --tokens, --ast, --listen, --connect (order-independent). */
+        /* Parse flags: --tokens, --ast, --bytecode, --listen, --connect (order-independent). */
         bool flag_tokens = false;
         bool flag_ast = false;
+        bool flag_bytecode = false;
         bool flag_listen = false;
         bool flag_connect = false;
         const char *listen_addr = NULL;
@@ -833,6 +862,8 @@ int main(int argc, char *argv[]) {
                 flag_tokens = true;
             } else if (strcmp(argv[i], "--ast") == 0) {
                 flag_ast = true;
+            } else if (strcmp(argv[i], "--bytecode") == 0) {
+                flag_bytecode = true;
             } else if (strcmp(argv[i], "--listen") == 0) {
                 flag_listen = true;
                 /* Next arg is optional address if it doesn't start with --. */
@@ -858,15 +889,15 @@ int main(int argc, char *argv[]) {
         }
 
         if (flag_connect) {
-            return run_connect(flag_tokens, flag_ast, connect_addr);
+            return run_connect(flag_tokens, flag_ast, flag_bytecode, connect_addr);
         }
 
         if (flag_listen) {
-            return run_listen(flag_tokens, flag_ast, listen_addr);
+            return run_listen(flag_tokens, flag_ast, flag_bytecode, listen_addr);
         }
 
         /* Default: start local REPL (no networking). */
-        return run_local_repl(flag_tokens, flag_ast);
+        return run_local_repl(flag_tokens, flag_ast, flag_bytecode);
     } else if (strcmp(cmd, "run") == 0) {
         /* Parse: cutlet run <file> [--tokens] [--ast] */
         if (argc < 3) {
@@ -879,12 +910,15 @@ int main(int argc, char *argv[]) {
         const char *filename = argv[2];
         bool flag_tokens = false;
         bool flag_ast = false;
+        bool flag_bytecode = false;
 
         for (int i = 3; i < argc; i++) {
             if (strcmp(argv[i], "--tokens") == 0) {
                 flag_tokens = true;
             } else if (strcmp(argv[i], "--ast") == 0) {
                 flag_ast = true;
+            } else if (strcmp(argv[i], "--bytecode") == 0) {
+                flag_bytecode = true;
             } else {
                 fprintf(stderr, "Unknown run option: %s\n", argv[i]);
                 print_usage(argv[0]);
@@ -893,7 +927,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        int result = run_file(filename, flag_tokens, flag_ast);
+        int result = run_file(filename, flag_tokens, flag_ast, flag_bytecode);
         runtime_destroy();
         return result;
     } else if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {

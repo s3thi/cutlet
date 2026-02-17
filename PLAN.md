@@ -1,7 +1,7 @@
 # Cutlet Plan (Session Handoff)
 
 ## Project snapshot
-Cutlet is a dynamic programming language (Python/Ruby/Lua/JS-like) written in C23 with no external deps beyond platform libs and POSIX `make`. Targets Linux and macOS.
+Cutlet is a dynamic programming language (Python/Ruby/Lua/JS-like) written in C23. Targets Linux and macOS. Build requirements: C23 compiler + POSIX `make`. Dev tooling (analysis scripts, linters) may use standard tools like `ctags`, `cscope`, `python3`, `clang-format`, `clang-tidy`. Libraries are vendored in `vendor/` when possible. See `AGENTS.md` for the full dependency policy.
 
 See `AGENTS.md` for project conventions and instructions that must be followed.
 
@@ -53,9 +53,9 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 ---
 
-## Deferred: Example programs and example test runner
+## Deferred: Example test runner with `.expected` files
 
-Create example `.cutlet` programs in `examples/` with matching `.expected` files, and a test that runs `cutlet run` on each and compares stdout. Integrate into `make test`. Deferred until the language has more features (e.g. loops).
+The `examples/` directory now contains one `.cutlet` file per language feature (created as part of the understanding tools work below). A future step is to add matching `.expected` files and a test harness that runs `cutlet run` on each example and compares stdout. Integrate into `make test`.
 
 ---
 
@@ -99,6 +99,246 @@ Added `while cond do body end` as a loop expression. The loop evaluates its body
 Added `break` and `continue` keywords that control loop iteration. `break` exits the innermost loop immediately, with an optional value (`break expr` or bare `break` → nothing). `continue` skips to the next iteration, setting the accumulator to nothing. Both produce compile errors outside loops. The parser peeks at the next token to determine whether `break` has a value expression.
 
 **Files touched**: `src/parser.h` (`AST_BREAK`, `AST_CONTINUE` in enum), `src/parser.c` (`parse_atom()` for break/continue, `is_reserved_keyword()`, `ast_node_type_str()`, `ast_format_node()`), `src/compiler.c` (`LoopContext` struct, `compile_break()`, `compile_continue()`, updated `compile_while()` with break jump patching, `Compiler` struct gets `current_loop` field, `compile_node()` dispatch), `tests/test_parser.c` (15 tests), `tests/test_vm.c` (11 tests), `tests/test_repl.c` (3 tests), `tests/test_cli.sh` (6 tests).
+
+---
+
+## Next: Codebase understanding tools
+
+Build three analysis scripts that help coding agents (and humans) understand the codebase. All scripts live in `scripts/`, are written in Python 3, and output markdown to stdout. Symbol indexing uses Universal Ctags, call graphs use cscope, and the pipeline tracer uses the cutlet interpreter itself. A `make understand` target runs all of them.
+
+**Dev tool requirements**: `python3`, `ctags` (Universal Ctags), `cscope`. These are standard dev tools available in every package manager (`brew install universal-ctags cscope` / `apt install universal-ctags cscope`).
+
+### Step 1 (completed): Add `--bytecode` debug flag to REPL
+
+Added `--bytecode` debug flag alongside existing `--tokens` and `--ast` flags. Refactored `chunk_disassemble()` into a `chunk_disassemble_to_string()` function that returns a heap-allocated string (using a `DynBuf` dynamic buffer internally). Threaded `want_bytecode` through `repl_eval_line()`, `ReplServer`, JSON protocol, and all CLI paths. Updated AGENTS.md documentation.
+
+**Files touched**: `src/chunk.h` (`chunk_disassemble_to_string()` declaration), `src/chunk.c` (`DynBuf` helpers, `disassemble_instruction_to_buf()`, `chunk_disassemble_to_string()`, refactored `chunk_disassemble()`), `src/repl.h` (`bytecode` field in `ReplResult`, `want_bytecode` parameter), `src/repl.c` (bytecode capture + free), `src/main.c` (`--bytecode` flag parsing, threading through all run functions, `print_repl_result()`), `src/repl_server.h` (`enable_bytecode` field + parameter), `src/repl_server.c` (threading), `src/json.h` (`want_bytecode`/`bytecode` fields), `src/json.c` (encode/decode), `tests/test_chunk.c` (4 tests for `chunk_disassemble_to_string()`), `tests/test_repl.c` (5 bytecode tests), `tests/test_repl_server.c` (updated signatures), `tests/test_runtime.c` (updated signatures), `tests/test_cli.sh` (3 CLI tests), `AGENTS.md` (REPL debug flags section).
+
+---
+
+### Step 2: Symbol index script
+
+**No dependencies on other steps. Can be done in parallel with step 1.**
+
+Create `scripts/symbol_index.py` — uses Universal Ctags to extract all public symbols from `src/*.h` and produces a markdown reference.
+
+**What to do:**
+
+1. Create `scripts/symbol_index.py`. The script should:
+   - Run `ctags --output-format=json --fields=+Sn --kinds-c=+fpsgeutd -f - src/*.h` to get structured JSON output. Each line is a JSON object with fields: `name`, `path`, `line`, `kind` (function/struct/enum/typedef/member), `signature` (if `+S` requested), etc.
+   - Parse the JSON lines, group by file, then by kind (types vs. functions).
+   - Output a markdown document to stdout with a table per header file.
+   - Include type definitions (enums, structs/typedefs) and function prototypes.
+
+2. **Output format** (same as before):
+   ```markdown
+   # Symbol Index
+
+   Generated: 2026-02-17
+
+   ## src/tokenizer.h
+
+   ### Types
+   | Name | Kind | Line |
+   |------|------|------|
+   | TokenType | enum | 24 |
+   | Token | struct | 46 |
+   | Tokenizer | opaque struct | 61 |
+
+   ### Functions
+   | Name | Signature | Line |
+   |------|-----------|------|
+   | tokenizer_create | `Tokenizer *tokenizer_create(const char *input)` | 68 |
+   | tokenizer_destroy | `void tokenizer_destroy(Tokenizer *tok)` | 74 |
+   ...
+   ```
+
+3. Implementation notes:
+   - Universal Ctags' `--output-format=json` produces one JSON object per line (JSON Lines format). Python's `json.loads()` handles this trivially — no need for external Python packages.
+   - Use `subprocess.run()` to invoke ctags.
+   - If ctags is not installed, print a clear error message with install instructions and exit non-zero.
+   - Only scan `src/*.h` (not `vendor/`).
+
+4. Add to `Makefile`: `symbol-index` target that runs `python3 scripts/symbol_index.py`.
+
+**Files to create**: `scripts/symbol_index.py`.
+**Files to touch**: `Makefile` (add target).
+
+---
+
+### Step 3: Call graph script
+
+**No dependencies on other steps. Can be done in parallel with steps 1 and 2.**
+
+Create `scripts/call_graph.py` — uses cscope to find callers and callees for every public function, producing a markdown cross-reference.
+
+**What to do:**
+
+1. Create `scripts/call_graph.py`. The script should:
+   - Build the cscope database: run `cscope -Rb -s src/` (recursive, build only, source dir). This creates `cscope.out` in the current directory.
+   - Extract public function names from `src/*.h` using ctags (same approach as step 2, but only function names).
+   - For each public function, query cscope:
+     - `cscope -d -L3 funcname` — find callers (cscope query type 3: "functions calling this function"). Each output line has format: `file function line text`.
+     - `cscope -d -L2 funcname` — find callees (cscope query type 2: "functions called by this function").
+   - Group results by function. For each function, show: definition location, callers (with file:line and calling function name), callees, and test references.
+   - Clean up `cscope.out` and related files after running.
+   - Output markdown to stdout.
+
+2. **Output format** (example):
+   ```markdown
+   # Call Graph
+
+   Generated: 2026-02-17
+
+   ## tokenizer_create
+
+   Defined: src/tokenizer.c:42
+
+   ### Called by
+   - src/repl.c:49 — build_tokens_string()
+   - tests/test_tokenizer.c:18 — test_single_number()
+   - tests/test_tokenizer.c:34 — test_single_string()
+
+   ### Calls
+   - malloc
+   - tokenizer_reset
+
+   ## compile
+
+   Defined: src/compiler.c:562
+
+   ### Called by
+   - src/repl.c:138 — repl_eval_line()
+   - tests/test_compiler.c:22 — compile_helper()
+
+   ### Calls
+   - chunk_init
+   - compile_node
+   - chunk_free
+   ...
+   ```
+
+3. Implementation notes:
+   - Parse cscope output with Python: each line is space-separated `file function line text`. `line.split(None, 3)` handles it.
+   - Use `subprocess.run()` to invoke cscope. Run with `-d` (don't rebuild) after the initial `-Rb` build.
+   - Exclude vendor files from the cscope source list.
+   - If cscope is not installed, print a clear error message with install instructions and exit non-zero.
+   - Clean up generated files (`cscope.out`, `cscope.in.out`, `cscope.po.out`) in a `finally` block.
+
+4. Add to `Makefile`: `call-graph` target that runs `python3 scripts/call_graph.py`.
+
+**Files to create**: `scripts/call_graph.py`.
+**Files to touch**: `Makefile` (add target).
+
+---
+
+### Step 4: Example programs in `examples/`
+
+**No dependencies. Can be done in parallel with steps 1-3.**
+
+Create small `.cutlet` programs that each exercise one language feature in isolation. These serve three purposes: (1) input to the pipeline tracer, (2) documentation/examples for users of the language, (3) a lightweight test suite exercising each feature.
+
+**What to do:**
+
+Create `examples/` directory with one `.cutlet` file per feature:
+
+- `arithmetic.cutlet` — `(2 + 3) * 4 - 1` (exercises NUMBER, BINOP, +, -, *, grouping)
+- `modulo-power.cutlet` — `10 % 3` and `2 ** 8` (exercises %, **)
+- `strings.cutlet` — `"hello" .. " " .. "world"` (exercises STRING, ..)
+- `booleans.cutlet` — `true and false or not true` (exercises BOOL, and, or, not, short-circuit)
+- `nothing.cutlet` — `nothing == nothing` (exercises NOTHING, ==)
+- `comparison.cutlet` — `3 < 5` and `"a" >= "b"` (exercises <, >, <=, >=, ==, !=)
+- `variables.cutlet` — `my x = 10` then `x = x + 1` then `x` (exercises DECL, ASSIGN, IDENT, GET/SET_GLOBAL)
+- `if-else.cutlet` — `if true then 1 else 2 end` (exercises IF, JUMP_IF_FALSE, JUMP)
+- `while-loop.cutlet` — count to 5 with accumulator (exercises WHILE, LOOP, JUMP_IF_FALSE)
+- `break-continue.cutlet` — while loop with break value and continue (exercises BREAK, CONTINUE)
+- `function-call.cutlet` — `say("hello")` (exercises CALL, built-in dispatch)
+- `unary.cutlet` — `-42` and `not true` (exercises UNARY, NEGATE, NOT)
+
+Each file should be small (1-5 lines), self-contained, and exercise the feature clearly. Add a comment at the top of each file naming the feature: `# Feature: while loops`. Since these double as user-facing examples, write them to be readable and instructive — use `say()` to print results so users can run them with `cutlet run` and see output.
+
+**Files to create**: `examples/*.cutlet` (12 files).
+
+---
+
+### Step 5: Pipeline tracer script
+
+**Depends on step 1 (`--bytecode` flag) and step 4 (example programs).**
+
+Create `scripts/pipeline_trace.py` — the main analysis tool. Takes a `.cutlet` file and produces a complete trace through every pipeline stage with source location cross-references.
+
+**What to do:**
+
+1. Create `scripts/pipeline_trace.py`. The script takes one argument: a `.cutlet` file. It:
+
+   a. **Prints the input program** as a fenced code block.
+
+   b. **Captures tokens**: Runs `build/cutlet repl --tokens < file.cutlet` via `subprocess.run()` (pipe mode, non-interactive). Parses the `TOKENS [TYPE value] ...` output line. Extracts unique token types and keyword identifiers (IDENTs that are reserved words: `if`, `then`, `else`, `end`, `while`, `do`, `my`, `true`, `false`, `nothing`, `and`, `or`, `not`, `break`, `continue`). Prints the full token stream and a summary of keywords used.
+
+   c. **Captures AST**: Runs with `--ast`. Parses the `AST [...]` output line. Extracts unique AST node type names (the uppercase words in the S-expression: `NUMBER`, `BINOP`, `WHILE`, etc.). Prints the full AST and a summary of node types.
+
+   d. **Captures bytecode**: Runs with `--bytecode`. Extracts unique `OP_*` opcode names from the disassembly output using regex. Prints the full disassembly and a summary of opcodes used.
+
+   e. **Maps to source locations** using cscope for accurate cross-references:
+      - Build cscope database (or reuse if already built).
+      - **Parser**: For each keyword found in (b), use `subprocess` + `grep -n` on `src/parser.c` for `strcmp.*"keyword"` to find where the parser recognizes it. For each AST node type from (c), use cscope query type 0 (find symbol) to locate where `AST_TYPE` appears in `src/parser.c`.
+      - **Compiler**: For each AST node type from (c), grep `src/compiler.c` for `case AST_TYPE:` to find the dispatch, and use cscope to find the `compile_*` function definition.
+      - **VM**: For each opcode from (d), grep `src/vm.c` for `case OP_NAME:` to find the execution handler.
+      - **Tests**: Use cscope or grep to find references to the relevant AST types and opcodes in `tests/`.
+
+   f. **Formats everything as markdown** and writes to stdout.
+
+2. **Output format** — see the detailed example earlier in this conversation. Key sections: Input Program, Token Stream, AST, Bytecode Disassembly, Source Locations (Parser / Compiler / VM / Tests).
+
+3. Implementation notes:
+   - Run all three debug flags in a single interpreter invocation: `build/cutlet repl --tokens --ast --bytecode < file.cutlet`. Parse the combined output (tokens line, AST line, bytecode block, then the result value).
+   - Use `subprocess.run(capture_output=True, text=True)` throughout.
+   - Ensure `build/cutlet` exists by checking and printing a helpful error ("run `make` first") rather than trying to build from within the script.
+   - Edge case: if compilation fails (parse error), bytecode won't be available. Handle gracefully and note "bytecode not available (parse error)" in the output.
+   - Clean up any cscope temp files.
+
+4. Add to `Makefile`: `pipeline-trace` target that runs the tracer on all `examples/*.cutlet` files.
+
+**Files to create**: `scripts/pipeline_trace.py`.
+**Files to touch**: `Makefile` (add target).
+
+---
+
+### Step 6: `make understand` target and combined output
+
+**Depends on steps 2, 3, and 5.**
+
+Add a `make understand` target that runs all three analysis tools and combines their output.
+
+**What to do:**
+
+1. Add to `Makefile`:
+   ```makefile
+   understand: symbol-index call-graph pipeline-trace
+   ```
+   Each sub-target runs its script and prints to stdout. The `understand` target runs all three in sequence.
+
+2. The individual targets should be:
+   ```makefile
+   symbol-index:
+   	@python3 scripts/symbol_index.py
+
+   call-graph:
+   	@python3 scripts/call_graph.py
+
+   pipeline-trace: $(BIN)
+   	@for f in examples/*.cutlet; do \
+   		python3 scripts/pipeline_trace.py "$$f"; \
+   		echo ""; \
+   	done
+   ```
+   Note: `pipeline-trace` depends on `$(BIN)` because it runs the interpreter.
+
+3. Output is NOT committed to git. Add a comment in the Makefile noting this. Users/agents run `make understand` to generate fresh analysis. Add `examples/*.cutlet` and `scripts/*.py` to git (they're source, not generated output).
+
+4. Add `cscope.out`, `cscope.in.out`, `cscope.po.out` to `.gitignore` (generated by cscope, cleaned up by the scripts but just in case).
+
+**Files to touch**: `Makefile`, `.gitignore`.
 
 ---
 End of handoff.

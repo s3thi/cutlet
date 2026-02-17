@@ -35,8 +35,9 @@
 struct ReplServer {
     int listen_fd;
     uint16_t port;
-    bool enable_tokens; /* Server capability: can produce token debug output. */
-    bool enable_ast;    /* Server capability: can produce AST debug output. */
+    bool enable_tokens;   /* Server capability: can produce token debug output. */
+    bool enable_ast;      /* Server capability: can produce AST debug output. */
+    bool enable_bytecode; /* Server capability: can produce bytecode debug output. */
     pthread_t accept_thread;
     volatile bool shutdown; /* Signals accept loop and client threads to stop. */
 };
@@ -122,6 +123,7 @@ static int handle_json_request(int fd, ReplServer *srv) {
     /* Intersect client's wants with server capabilities. */
     bool want_tokens = req.want_tokens && srv->enable_tokens;
     bool want_ast = req.want_ast && srv->enable_ast;
+    bool want_bytecode = req.want_bytecode && srv->enable_bytecode;
 
     /* Build an EvalContext that streams say() output as JSON output
      * frames back to the client. The callback fires inside eval(),
@@ -129,7 +131,7 @@ static int handle_json_request(int fd, ReplServer *srv) {
      * its fd exclusively, so no contention on the socket write. */
     ServerOutputCtx out_ctx = {.fd = fd, .request_id = req.id};
     EvalContext eval_ctx = {.write_fn = server_output_write, .userdata = &out_ctx};
-    ReplResult rr = repl_eval_line(req.expr, want_tokens, want_ast, &eval_ctx);
+    ReplResult rr = repl_eval_line(req.expr, want_tokens, want_ast, want_bytecode, &eval_ctx);
 
     /* Build the response. */
     JsonResponse resp = {0};
@@ -142,6 +144,7 @@ static int handle_json_request(int fd, ReplServer *srv) {
     }
     resp.tokens = rr.tokens;
     resp.ast = rr.ast;
+    resp.bytecode = rr.bytecode;
 
     char *resp_json = json_encode_response(&resp);
     bool send_ok = false;
@@ -240,7 +243,7 @@ static void *accept_loop(void *arg) {
  * ============================================================ */
 
 ReplServer *repl_server_start(const char *host, uint16_t port, bool enable_tokens, bool enable_ast,
-                              const char **err_out) {
+                              bool enable_bytecode, const char **err_out) {
     ReplServer *srv = calloc(1, sizeof(ReplServer));
     if (!srv) {
         if (err_out)
@@ -250,6 +253,7 @@ ReplServer *repl_server_start(const char *host, uint16_t port, bool enable_token
     srv->listen_fd = -1;
     srv->enable_tokens = enable_tokens;
     srv->enable_ast = enable_ast;
+    srv->enable_bytecode = enable_bytecode;
 
     srv->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (srv->listen_fd < 0) {

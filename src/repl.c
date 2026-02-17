@@ -6,6 +6,7 @@
  */
 
 #include "repl.h"
+#include "chunk.h"
 #include "compiler.h"
 #include "parser.h"
 #include "runtime.h"
@@ -92,7 +93,8 @@ static char *build_tokens_string(const char *input) {
     return buf;
 }
 
-ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, EvalContext *ctx) {
+ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, bool want_bytecode,
+                          EvalContext *ctx) {
     /* Serialize evaluation across threads. */
     runtime_eval_lock();
 
@@ -102,11 +104,13 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, Ev
     if (is_blank(input)) {
         r.ok = true;
         /* value stays NULL for blank input. */
-        /* Still produce tokens/ast if requested (they'll be just the prefix). */
+        /* Still produce debug strings if requested (they'll be just the prefix). */
         if (want_tokens)
             r.tokens = strdup("TOKENS");
         if (want_ast)
             r.ast = strdup("AST");
+        if (want_bytecode)
+            r.bytecode = strdup("BYTECODE");
         goto out;
     }
 
@@ -124,7 +128,7 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, Ev
         char buf[320];
         snprintf(buf, sizeof(buf), "%zu:%zu %s", perr.line, perr.col, perr.message);
         r.error = strdup(buf);
-        /* AST not available on parse error. */
+        /* AST and bytecode not available on parse error. */
         goto out;
     }
 
@@ -142,6 +146,25 @@ ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, Ev
         r.ok = false;
         r.error = strdup(cerr.message);
         goto out;
+    }
+
+    /* Capture bytecode disassembly after successful compilation,
+     * before execution. This way bytecode is available even if VM
+     * execution fails (the bytecode itself compiled successfully). */
+    if (want_bytecode) {
+        /* Build "BYTECODE\n<disassembly>" string. */
+        char *disasm = chunk_disassemble_to_string(chunk, "bytecode");
+        if (disasm) {
+            size_t prefix_len = strlen("BYTECODE\n");
+            size_t disasm_len = strlen(disasm);
+            char *full = malloc(prefix_len + disasm_len + 1);
+            if (full) {
+                memcpy(full, "BYTECODE\n", prefix_len);
+                memcpy(full + prefix_len, disasm, disasm_len + 1);
+                r.bytecode = full;
+            }
+            free(disasm);
+        }
     }
 
     /* Execute the bytecode via the VM. */
@@ -180,8 +203,10 @@ void repl_result_free(ReplResult *r) {
     free(r->error);
     free(r->tokens);
     free(r->ast);
+    free(r->bytecode);
     r->value = NULL;
     r->error = NULL;
     r->tokens = NULL;
     r->ast = NULL;
+    r->bytecode = NULL;
 }

@@ -211,7 +211,7 @@ static bool send_eval(int fd, unsigned long id, const char *expr, bool want_toke
 
 TEST(test_start_and_stop) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server should start");
     ASSERT(repl_server_port(srv) > 0, "port should be assigned");
     repl_server_stop(srv);
@@ -219,7 +219,7 @@ TEST(test_start_and_stop) {
 }
 
 TEST(test_start_null_err_out) {
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, NULL);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, NULL);
     ASSERT_NOT_NULL(srv, "server should start with NULL err_out");
     repl_server_stop(srv);
     PASS();
@@ -236,7 +236,7 @@ TEST(test_stop_null_is_safe) {
 
 TEST(test_eval_number) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -260,7 +260,7 @@ TEST(test_eval_number) {
 
 TEST(test_eval_string) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -279,7 +279,7 @@ TEST(test_eval_string) {
 
 TEST(test_eval_expression) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -298,7 +298,7 @@ TEST(test_eval_expression) {
 
 TEST(test_eval_blank_input) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -321,7 +321,7 @@ TEST(test_eval_blank_input) {
 
 TEST(test_eval_parse_error) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -341,7 +341,7 @@ TEST(test_eval_parse_error) {
 
 TEST(test_eval_div_by_zero) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -365,7 +365,7 @@ TEST(test_eval_div_by_zero) {
 
 TEST(test_multiple_requests_one_connection) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -395,7 +395,7 @@ TEST(test_multiple_requests_one_connection) {
 
 TEST(test_connection_stays_open) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -451,7 +451,7 @@ static void *client_thread_fn(void *arg) {
 
 TEST(test_two_concurrent_clients) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -479,7 +479,7 @@ TEST(test_two_concurrent_clients) {
 
 TEST(test_client_connects_and_disconnects_immediately) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -511,7 +511,7 @@ TEST(test_client_connects_and_disconnects_immediately) {
 TEST(test_tokens_enabled) {
     /* Server started with enable_tokens=true. Client requests want_tokens. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -535,7 +535,7 @@ TEST(test_tokens_enabled) {
 TEST(test_tokens_not_requested) {
     /* Server has tokens enabled but client doesn't request them. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -555,7 +555,7 @@ TEST(test_tokens_not_requested) {
 TEST(test_tokens_server_disabled) {
     /* Server doesn't have tokens enabled; client requests them. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -578,7 +578,7 @@ TEST(test_tokens_server_disabled) {
 
 TEST(test_ast_enabled) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -601,7 +601,7 @@ TEST(test_ast_enabled) {
 
 TEST(test_ast_not_requested) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, true, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -624,7 +624,7 @@ TEST(test_ast_not_requested) {
 
 TEST(test_both_debug_flags) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, true, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, true, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -652,7 +652,7 @@ TEST(test_both_debug_flags) {
 TEST(test_shared_state_across_clients) {
     /* Client 1 declares a variable; client 2 reads it. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -684,7 +684,7 @@ TEST(test_shared_state_across_clients) {
 TEST(test_shared_state_concurrent_writers) {
     /* Two clients write to different variables concurrently, then verify. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -735,7 +735,7 @@ TEST(test_shared_state_concurrent_writers) {
 
 TEST(test_tokens_on_tokenizer_error) {
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, true, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -833,7 +833,7 @@ TEST(test_server_survives_idle_period) {
      * It serves as a regression test that the plumbing is correct.)
      */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -910,7 +910,7 @@ TEST(test_incomplete_header_then_close) {
     /* Send a partial header then close. Server should not crash
      * and should still accept new connections afterward. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -940,7 +940,7 @@ TEST(test_missing_content_length) {
      * json_frame_read returns NULL. Server should close that client
      * but remain alive. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -970,7 +970,7 @@ TEST(test_content_length_zero) {
     /* Content-Length: 0 is treated as error by json_frame_read.
      * Server should survive and accept next connection. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -998,7 +998,7 @@ TEST(test_content_length_exceeds_max) {
     /* Content-Length exceeds JSON_MAX_FRAME_SIZE (65536).
      * Server should drop the client but stay alive. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1030,7 +1030,7 @@ TEST(test_garbage_json_body) {
     /* Valid frame with body that isn't valid JSON. Server should send
      * error response and keep connection open. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1065,7 +1065,7 @@ TEST(test_empty_json_object) {
     /* Valid frame with body "{}". The parser succeeds but expr is NULL.
      * Server should handle it gracefully. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1094,7 +1094,7 @@ TEST(test_empty_json_object) {
 TEST(test_json_missing_expr) {
     /* Valid JSON with type/id but no expr key. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1124,7 +1124,7 @@ TEST(test_truncated_json_body) {
     /* Send Content-Length: 100 but only 20 bytes, then close.
      * recv_exact will fail. Server should not crash. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1161,7 +1161,7 @@ TEST(test_ten_concurrent_clients) {
     /* Spawn 10 threads, each sending a unique expression.
      * Verify every thread got the correct result. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1196,7 +1196,7 @@ TEST(test_rapid_connect_disconnect) {
     /* Connect and immediately close 20 times, then verify server
      * still works. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1263,7 +1263,7 @@ TEST(test_concurrent_shared_state_stress) {
     /* Pre-declare counter = 0. Spawn 4 threads doing 50 increments each.
      * Final value must be exactly 200 (serialized by global write lock). */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
     uint16_t port = repl_server_port(srv);
 
@@ -1315,7 +1315,7 @@ TEST(test_response_id_matches_request) {
     /* Send 5 requests with IDs [7, 42, 0, 999, 1]. Verify each
      * response's id field matches exactly. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1343,7 +1343,7 @@ TEST(test_say_produces_output_frame) {
     /* say("hello") should produce one output frame with "hello\n"
      * followed by a result frame with ok=true, value="nothing". */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1367,7 +1367,7 @@ TEST(test_say_produces_output_frame) {
 TEST(test_say_multiple_calls) {
     /* Two say() calls should produce two output frames before the result. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1393,7 +1393,7 @@ TEST(test_say_output_id_matches_request) {
      * by checking that send_eval_full correctly correlates frames. Also
      * use a non-trivial request ID. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1414,7 +1414,7 @@ TEST(test_say_output_id_matches_request) {
 TEST(test_no_output_frames_for_regular_expr) {
     /* A regular expression (no say()) should produce zero output frames. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1436,7 +1436,7 @@ TEST(test_no_output_frames_for_regular_expr) {
 TEST(test_say_with_number) {
     /* say() with a number argument should format the number. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));
@@ -1458,7 +1458,7 @@ TEST(test_say_followed_by_expression) {
     /* say() followed by an expression: output frame from say,
      * result frame from the last expression. */
     const char *err = NULL;
-    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, &err);
+    ReplServer *srv = repl_server_start("127.0.0.1", 0, false, false, false, &err);
     ASSERT_NOT_NULL(srv, "server start");
 
     int fd = connect_to(repl_server_port(srv));

@@ -147,7 +147,7 @@ TEST(test_concurrent_runtime_init) {
 static void *thread_eval_line(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        ReplResult r = repl_eval_line("42", false, false, &noop_ctx);
+        ReplResult r = repl_eval_line("42", false, false, false, &noop_ctx);
         repl_result_free(&r);
     }
     return NULL;
@@ -194,7 +194,7 @@ TEST(test_serialized_eval_line) {
 static void *thread_eval_line_with_ast(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        ReplResult r = repl_eval_line("42", false, true, &noop_ctx);
+        ReplResult r = repl_eval_line("42", false, true, false, &noop_ctx);
         repl_result_free(&r);
     }
     return NULL;
@@ -238,7 +238,7 @@ TEST(test_serialized_eval_line_with_ast) {
 static void *thread_mixed_even(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        ReplResult r = repl_eval_line("hello", false, false, &noop_ctx);
+        ReplResult r = repl_eval_line("hello", false, false, false, &noop_ctx);
         repl_result_free(&r);
     }
     return NULL;
@@ -247,7 +247,7 @@ static void *thread_mixed_even(void *arg) {
 static void *thread_mixed_odd(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        ReplResult r = repl_eval_line("hello", false, true, &noop_ctx);
+        ReplResult r = repl_eval_line("hello", false, true, false, &noop_ctx);
         repl_result_free(&r);
     }
     return NULL;
@@ -294,7 +294,7 @@ static atomic_int result_errors = 0;
 static void *thread_check_result(void *arg) {
     (void)arg;
     for (int i = 0; i < ITERS_PER_THREAD; i++) {
-        ReplResult r = repl_eval_line("42", false, false, &noop_ctx);
+        ReplResult r = repl_eval_line("42", false, false, false, &noop_ctx);
         if (!r.ok || !r.value || strcmp(r.value, "42") != 0) {
             atomic_fetch_add(&result_errors, 1);
         }

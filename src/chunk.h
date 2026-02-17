@@ -124,6 +124,15 @@ int chunk_find_or_add_constant(Chunk *chunk, Value value);
 void chunk_disassemble(const Chunk *chunk, const char *name);
 
 /*
+ * Return a heap-allocated string with a human-readable disassembly
+ * of the chunk. Format matches chunk_disassemble() output.
+ * The string starts with "== name ==\n" followed by one line per
+ * instruction. Caller must free the returned string.
+ * Returns NULL on allocation failure.
+ */
+char *chunk_disassemble_to_string(const Chunk *chunk, const char *name);
+
+/*
  * Return a human-readable name for an opcode.
  */
 const char *opcode_name(OpCode op);

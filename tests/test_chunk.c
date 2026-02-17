@@ -254,6 +254,73 @@ TEST(test_chunk_call_bytecode) {
 }
 
 /* ============================================================
+ * chunk_disassemble_to_string() tests
+ * ============================================================ */
+
+TEST(test_disassemble_to_string_header) {
+    /* Verify the returned string contains the "== name ==" header. */
+    Chunk c;
+    chunk_init(&c);
+    int idx = chunk_add_constant(&c, make_number(42.0));
+    chunk_write(&c, OP_CONSTANT, 1);
+    chunk_write(&c, (uint8_t)idx, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test_chunk");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "== test_chunk ==") != NULL, "should contain header");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_to_string_opcodes) {
+    /* Verify the returned string contains expected opcode names. */
+    Chunk c;
+    chunk_init(&c);
+    int idx = chunk_add_constant(&c, make_number(42.0));
+    chunk_write(&c, OP_CONSTANT, 1);
+    chunk_write(&c, (uint8_t)idx, 1);
+    chunk_write(&c, OP_NEGATE, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "bytecode");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CONSTANT") != NULL, "should contain OP_CONSTANT");
+    ASSERT(strstr(s, "OP_NEGATE") != NULL, "should contain OP_NEGATE");
+    ASSERT(strstr(s, "OP_RETURN") != NULL, "should contain OP_RETURN");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_to_string_constant_value) {
+    /* Verify the returned string shows the constant's value. */
+    Chunk c;
+    chunk_init(&c);
+    int idx = chunk_add_constant(&c, make_number(3.14));
+    chunk_write(&c, OP_CONSTANT, 1);
+    chunk_write(&c, (uint8_t)idx, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "constants");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "3.14") != NULL, "should contain constant value 3.14");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_to_string_empty_chunk) {
+    /* An empty chunk should still produce the header. */
+    Chunk c;
+    chunk_init(&c);
+    char *s = chunk_disassemble_to_string(&c, "empty");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "== empty ==") != NULL, "should contain header");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -285,6 +352,12 @@ int main(void) {
     printf("\nUtilities:\n");
     RUN_TEST(test_opcode_names);
     RUN_TEST(test_chunk_disassemble_runs);
+
+    printf("\nDisassemble to string:\n");
+    RUN_TEST(test_disassemble_to_string_header);
+    RUN_TEST(test_disassemble_to_string_opcodes);
+    RUN_TEST(test_disassemble_to_string_constant_value);
+    RUN_TEST(test_disassemble_to_string_empty_chunk);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

@@ -17,11 +17,14 @@ focus on REPL-driven development.
 - [clang-format](https://clang.llvm.org/docs/ClangFormat.html) — auto-format source files
 - [clang-tidy](https://clang.llvm.org/extra/clang-tidy/) — static analysis
 - [bear](https://github.com/rizsotto/Bear) — generates `compile_commands.json` for clang-tidy and IDE integration
+- [Universal Ctags](https://ctags.io/) — symbol indexing for codebase analysis scripts
+- [cscope](http://cscope.sourceforge.net/) — call graph analysis for codebase analysis scripts
+- Python 3 — runs the analysis scripts in `scripts/`
 
 On macOS with Homebrew:
 
 ```sh
-brew install llvm bear
+brew install llvm bear universal-ctags cscope python3
 ```
 
 ## Building
@@ -55,6 +58,37 @@ LeakSanitizer:
 
 ```sh
 make test-sanitize
+```
+
+## Debug Flags
+
+The REPL and `run` subcommand support debug flags that show internal pipeline
+stages. All flags can be combined:
+
+```sh
+./build/cutlet repl --tokens               # show token stream
+./build/cutlet repl --ast                  # show AST
+./build/cutlet repl --bytecode             # show bytecode disassembly
+./build/cutlet run script.cutlet --ast     # debug flags work with file execution too
+```
+
+## Codebase Analysis
+
+Analysis scripts in `scripts/` use ctags, cscope, and the cutlet interpreter to
+produce markdown reports about the codebase. Useful for understanding the code
+before making changes.
+
+```sh
+make understand       # run all three analysis tools
+make symbol-index     # list all public functions and types with signatures
+make call-graph       # show callers and callees for every public function
+make pipeline-trace   # trace example programs through tokenizer → parser → compiler → VM
+```
+
+Output goes to stdout. Pipe to a file for reference:
+
+```sh
+make pipeline-trace > /tmp/traces.md
 ```
 
 ## Code Quality

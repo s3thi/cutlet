@@ -30,10 +30,11 @@
  */
 typedef struct {
     bool ok;
-    char *value;  /* plain value string (e.g. "42", "hello"), NULL for blank input */
-    char *error;  /* error string (e.g. "1:5 unterminated string") */
-    char *tokens; /* debug: token dump, e.g. "TOKENS [NUMBER 42]" */
-    char *ast;    /* debug: AST dump, e.g. "AST [NUMBER 42]" */
+    char *value;    /* plain value string (e.g. "42", "hello"), NULL for blank input */
+    char *error;    /* error string (e.g. "1:5 unterminated string") */
+    char *tokens;   /* debug: token dump, e.g. "TOKENS [NUMBER 42]" */
+    char *ast;      /* debug: AST dump, e.g. "AST [NUMBER 42]" */
+    char *bytecode; /* debug: bytecode disassembly, e.g. "BYTECODE\n== ..." */
 } ReplResult;
 
 /*
@@ -54,7 +55,8 @@ typedef struct {
  *
  * If input is NULL, treats it as empty string.
  */
-ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, EvalContext *ctx);
+ReplResult repl_eval_line(const char *input, bool want_tokens, bool want_ast, bool want_bytecode,
+                          EvalContext *ctx);
 
 /*
  * Free all heap-allocated fields in a ReplResult.

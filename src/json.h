@@ -45,6 +45,7 @@ typedef struct {
     char *expr; /* owned when parsed, NULL to free; borrowed when encoding */
     bool want_tokens;
     bool want_ast;
+    bool want_bytecode;
 } JsonRequest;
 
 /*
@@ -53,10 +54,11 @@ typedef struct {
 typedef struct {
     unsigned long id;
     bool ok;
-    char *value;  /* owned, set when ok=true */
-    char *error;  /* owned, set when ok=false */
-    char *tokens; /* owned, optional debug */
-    char *ast;    /* owned, optional debug */
+    char *value;    /* owned, set when ok=true */
+    char *error;    /* owned, set when ok=false */
+    char *tokens;   /* owned, optional debug */
+    char *ast;      /* owned, optional debug */
+    char *bytecode; /* owned, optional debug */
 } JsonResponse;
 
 /*

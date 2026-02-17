@@ -62,7 +62,7 @@ static int tests_failed = 0;
 /* Check that input evaluates successfully to expected_value.
  * Pass NULL for expected_value to check blank/whitespace input. */
 static int eval_value_matches(const char *input, const char *expected_value) {
-    ReplResult r = repl_eval_line(input, false, false, &noop_ctx);
+    ReplResult r = repl_eval_line(input, false, false, false, &noop_ctx);
     int match;
     if (expected_value == NULL) {
         match = r.ok && r.value == NULL;
@@ -80,7 +80,7 @@ static int eval_value_matches(const char *input, const char *expected_value) {
 
 /* Check that input produces an eval/parse error matching expected_error. */
 static int eval_error_matches(const char *input, const char *expected_error) {
-    ReplResult r = repl_eval_line(input, false, false, &noop_ctx);
+    ReplResult r = repl_eval_line(input, false, false, false, &noop_ctx);
     int match = !r.ok && r.error && strcmp(r.error, expected_error) == 0;
     if (!match) {
         printf("\n    Expected: ok=false error=%s\n    Got:      ok=%d error=%s\n", expected_error,
@@ -93,7 +93,7 @@ static int eval_error_matches(const char *input, const char *expected_error) {
 /* Check that input produces the expected AST string.
  * Uses want_ast=true. The eval result (ok/error) is ignored. */
 static int eval_ast_matches(const char *input, const char *expected_ast) {
-    ReplResult r = repl_eval_line(input, false, true, &noop_ctx);
+    ReplResult r = repl_eval_line(input, false, true, false, &noop_ctx);
     int match = r.ast && strcmp(r.ast, expected_ast) == 0;
     if (!match) {
         printf("\n    Expected AST: %s\n    Got:          %s\n", expected_ast,
@@ -280,7 +280,7 @@ TEST(test_decl_returns_value) {
 
 TEST(test_decl_then_read) {
     /* Declare, then read in separate eval calls (persistent env). */
-    ReplResult r1 = repl_eval_line("my x = 2", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("my x = 2", false, false, false, &noop_ctx);
     ASSERT(r1.ok, "decl ok");
     ASSERT_NOT_NULL(r1.value, "decl value set");
     ASSERT_STR_EQ(r1.value, "2", "decl value");
@@ -298,16 +298,16 @@ TEST(test_decl_expr_precedence) {
 
 TEST(test_assign_returns_value) {
     /* Must declare first, then reassign. */
-    ReplResult r1 = repl_eval_line("my z = 10", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("my z = 10", false, false, false, &noop_ctx);
     repl_result_free(&r1);
     ASSERT(eval_value_matches("z = 20", "20"), "assign returns value");
     PASS();
 }
 
 TEST(test_assign_updates_variable) {
-    ReplResult r1 = repl_eval_line("my w = 5", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("my w = 5", false, false, false, &noop_ctx);
     repl_result_free(&r1);
-    ReplResult r2 = repl_eval_line("w = 99", false, false, &noop_ctx);
+    ReplResult r2 = repl_eval_line("w = 99", false, false, false, &noop_ctx);
     repl_result_free(&r2);
     ASSERT(eval_value_matches("w", "99"), "assign updates var");
     PASS();
@@ -322,7 +322,7 @@ TEST(test_assign_undeclared_error) {
 
 TEST(test_decl_chain) {
     /* my a = my b = 2 → both declared with value 2 */
-    ReplResult r = repl_eval_line("my aa = my bb = 2", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("my aa = my bb = 2", false, false, false, &noop_ctx);
     ASSERT(r.ok, "chain ok");
     ASSERT_NOT_NULL(r.value, "chain value set");
     ASSERT_STR_EQ(r.value, "2", "chain value");
@@ -335,12 +335,12 @@ TEST(test_decl_chain) {
 
 TEST(test_assign_chain) {
     /* Declare p and q, then p = q = 42 */
-    ReplResult r1 = repl_eval_line("my p = 0", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("my p = 0", false, false, false, &noop_ctx);
     repl_result_free(&r1);
-    ReplResult r2 = repl_eval_line("my q = 0", false, false, &noop_ctx);
+    ReplResult r2 = repl_eval_line("my q = 0", false, false, false, &noop_ctx);
     repl_result_free(&r2);
 
-    ReplResult r3 = repl_eval_line("p = q = 42", false, false, &noop_ctx);
+    ReplResult r3 = repl_eval_line("p = q = 42", false, false, false, &noop_ctx);
     ASSERT(r3.ok, "assign chain ok");
     ASSERT_NOT_NULL(r3.value, "assign chain value set");
     ASSERT_STR_EQ(r3.value, "42", "chain value");
@@ -359,7 +359,7 @@ TEST(test_unknown_ident_still_errors) {
 
 TEST(test_invalid_lhs_error) {
     /* 1 = 2 should be a parse error */
-    ReplResult r = repl_eval_line("1 = 2", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("1 = 2", false, false, false, &noop_ctx);
     ASSERT(!r.ok, "should be error");
     ASSERT_NOT_NULL(r.error, "error set");
     ASSERT(strstr(r.error, "invalid assignment target") != NULL, "error message");
@@ -368,7 +368,7 @@ TEST(test_invalid_lhs_error) {
 }
 
 TEST(test_decl_string_value) {
-    ReplResult r1 = repl_eval_line("my greeting = \"hello\"", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("my greeting = \"hello\"", false, false, false, &noop_ctx);
     ASSERT(r1.ok, "decl string ok");
     ASSERT_NOT_NULL(r1.value, "decl string value set");
     ASSERT_STR_EQ(r1.value, "hello", "decl string value");
@@ -440,7 +440,7 @@ TEST(test_ast_unary) {
 
 TEST(test_ast_error) {
     /* Parse error: AST is not available (parsing failed). */
-    ReplResult r = repl_eval_line("(", false, true, &noop_ctx);
+    ReplResult r = repl_eval_line("(", false, true, false, &noop_ctx);
     ASSERT(!r.ok, "should be error");
     ASSERT(r.ast == NULL, "no AST on parse error");
     ASSERT_NOT_NULL(r.error, "error set");
@@ -453,8 +453,8 @@ TEST(test_ast_error) {
  * ============================================================ */
 
 TEST(test_result_is_heap_allocated) {
-    ReplResult r1 = repl_eval_line("42", false, false, &noop_ctx);
-    ReplResult r2 = repl_eval_line("7", false, false, &noop_ctx);
+    ReplResult r1 = repl_eval_line("42", false, false, false, &noop_ctx);
+    ReplResult r2 = repl_eval_line("7", false, false, false, &noop_ctx);
     ASSERT(r1.ok, "first ok");
     ASSERT(r2.ok, "second ok");
     ASSERT_NOT_NULL(r1.value, "first value set");
@@ -471,7 +471,7 @@ TEST(test_result_is_heap_allocated) {
  * ============================================================ */
 
 TEST(test_eval_line_blank) {
-    ReplResult r = repl_eval_line("", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok for blank");
     ASSERT(r.value == NULL, "no value for blank");
     ASSERT(r.error == NULL, "no error");
@@ -482,7 +482,7 @@ TEST(test_eval_line_blank) {
 }
 
 TEST(test_eval_line_null) {
-    ReplResult r = repl_eval_line(NULL, false, false, &noop_ctx);
+    ReplResult r = repl_eval_line(NULL, false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok for null");
     ASSERT(r.value == NULL, "no value for null");
     repl_result_free(&r);
@@ -490,7 +490,7 @@ TEST(test_eval_line_null) {
 }
 
 TEST(test_eval_line_number) {
-    ReplResult r = repl_eval_line("42", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("42", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value set");
     ASSERT_STR_EQ(r.value, "42", "plain number value");
@@ -500,7 +500,7 @@ TEST(test_eval_line_number) {
 }
 
 TEST(test_eval_line_string) {
-    ReplResult r = repl_eval_line("\"hello\"", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("\"hello\"", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "hello", "plain string value");
     repl_result_free(&r);
@@ -508,7 +508,7 @@ TEST(test_eval_line_string) {
 }
 
 TEST(test_eval_line_expression) {
-    ReplResult r = repl_eval_line("1 + 2 * 3", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("1 + 2 * 3", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "7", "expression eval");
     repl_result_free(&r);
@@ -516,7 +516,7 @@ TEST(test_eval_line_expression) {
 }
 
 TEST(test_eval_line_parse_error) {
-    ReplResult r = repl_eval_line("\"unterminated", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("\"unterminated", false, false, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT(r.value == NULL, "no value on error");
     ASSERT_NOT_NULL(r.error, "error set");
@@ -526,7 +526,7 @@ TEST(test_eval_line_parse_error) {
 }
 
 TEST(test_eval_line_eval_error) {
-    ReplResult r = repl_eval_line("1 / 0", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("1 / 0", false, false, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT_NOT_NULL(r.error, "error set");
     ASSERT(strstr(r.error, "division by zero") != NULL, "error message");
@@ -535,7 +535,7 @@ TEST(test_eval_line_eval_error) {
 }
 
 TEST(test_eval_line_with_tokens) {
-    ReplResult r = repl_eval_line("42", true, false, &noop_ctx);
+    ReplResult r = repl_eval_line("42", true, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "42", "value");
     ASSERT_NOT_NULL(r.tokens, "tokens present");
@@ -547,7 +547,7 @@ TEST(test_eval_line_with_tokens) {
 }
 
 TEST(test_eval_line_with_ast) {
-    ReplResult r = repl_eval_line("1 + 2", false, true, &noop_ctx);
+    ReplResult r = repl_eval_line("1 + 2", false, true, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "3", "value");
     ASSERT_NOT_NULL(r.ast, "ast present");
@@ -559,7 +559,7 @@ TEST(test_eval_line_with_ast) {
 }
 
 TEST(test_eval_line_with_both_debug) {
-    ReplResult r = repl_eval_line("42", true, true, &noop_ctx);
+    ReplResult r = repl_eval_line("42", true, true, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_STR_EQ(r.value, "42", "value");
     ASSERT_NOT_NULL(r.tokens, "tokens present");
@@ -570,7 +570,7 @@ TEST(test_eval_line_with_both_debug) {
 
 TEST(test_eval_line_tokens_on_error) {
     /* Best-effort: tokens should still be produced even on parse error. */
-    ReplResult r = repl_eval_line("42foo", true, false, &noop_ctx);
+    ReplResult r = repl_eval_line("42foo", true, false, false, &noop_ctx);
     ASSERT(!r.ok, "not ok");
     ASSERT_NOT_NULL(r.tokens, "tokens present despite error");
     ASSERT(strstr(r.tokens, "TOKENS") != NULL, "tokens prefix");
@@ -594,7 +594,7 @@ TEST(test_bool_false_value) {
 }
 
 TEST(test_bool_true_eval_line) {
-    ReplResult r = repl_eval_line("true", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("true", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value present");
     ASSERT_STR_EQ(r.value, "true", "value is true");
@@ -603,7 +603,7 @@ TEST(test_bool_true_eval_line) {
 }
 
 TEST(test_bool_false_eval_line) {
-    ReplResult r = repl_eval_line("false", false, false, &noop_ctx);
+    ReplResult r = repl_eval_line("false", false, false, false, &noop_ctx);
     ASSERT(r.ok, "ok");
     ASSERT_NOT_NULL(r.value, "value present");
     ASSERT_STR_EQ(r.value, "false", "value is false");
@@ -689,6 +689,77 @@ TEST(test_concat_auto_coerce_nothing) {
 
 TEST(test_concat_chained_repl) {
     ASSERT(eval_value_matches("\"a\" .. \"b\" .. \"c\"", "abc"), "chained concat");
+    PASS();
+}
+
+/* ============================================================
+ * Bytecode debug output tests
+ * ============================================================ */
+
+TEST(test_eval_line_with_bytecode) {
+    /* want_bytecode=true should produce non-NULL bytecode containing "BYTECODE" and "OP_" */
+    ReplResult r = repl_eval_line("42", false, false, true, &noop_ctx);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "42", "value");
+    ASSERT_NOT_NULL(r.bytecode, "bytecode present");
+    ASSERT(strstr(r.bytecode, "BYTECODE") != NULL, "bytecode prefix");
+    ASSERT(strstr(r.bytecode, "OP_") != NULL, "bytecode contains opcodes");
+    ASSERT(r.tokens == NULL, "no tokens");
+    ASSERT(r.ast == NULL, "no ast");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_without_bytecode) {
+    /* want_bytecode=false should produce NULL bytecode. */
+    ReplResult r = repl_eval_line("42", false, false, false, &noop_ctx);
+    ASSERT(r.ok, "ok");
+    ASSERT(r.bytecode == NULL, "no bytecode when not requested");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_bytecode_on_parse_error) {
+    /* want_bytecode=true on parse error should produce NULL bytecode (can't compile). */
+    ReplResult r = repl_eval_line("(", false, false, true, &noop_ctx);
+    ASSERT(!r.ok, "should be error");
+    ASSERT(r.bytecode == NULL, "no bytecode on parse error");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_bytecode_blank_input) {
+    /* Blank input with want_bytecode=true should produce "BYTECODE" string. */
+    ReplResult r = repl_eval_line("", false, false, true, &noop_ctx);
+    ASSERT(r.ok, "ok for blank");
+    ASSERT(r.value == NULL, "no value for blank");
+    ASSERT_NOT_NULL(r.bytecode, "bytecode present for blank");
+    ASSERT_STR_EQ(r.bytecode, "BYTECODE", "blank bytecode");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_bytecode_with_expression) {
+    /* want_bytecode=true with a real expression should contain OP_CONSTANT and OP_RETURN. */
+    ReplResult r = repl_eval_line("1 + 2", false, false, true, &noop_ctx);
+    ASSERT(r.ok, "ok");
+    ASSERT_STR_EQ(r.value, "3", "value");
+    ASSERT_NOT_NULL(r.bytecode, "bytecode present");
+    ASSERT(strstr(r.bytecode, "OP_CONSTANT") != NULL, "contains OP_CONSTANT");
+    ASSERT(strstr(r.bytecode, "OP_ADD") != NULL, "contains OP_ADD");
+    ASSERT(strstr(r.bytecode, "OP_RETURN") != NULL, "contains OP_RETURN");
+    repl_result_free(&r);
+    PASS();
+}
+
+TEST(test_eval_line_all_three_debug) {
+    /* All three debug flags at once. */
+    ReplResult r = repl_eval_line("42", true, true, true, &noop_ctx);
+    ASSERT(r.ok, "ok");
+    ASSERT_NOT_NULL(r.tokens, "tokens present");
+    ASSERT_NOT_NULL(r.ast, "ast present");
+    ASSERT_NOT_NULL(r.bytecode, "bytecode present");
+    repl_result_free(&r);
     PASS();
 }
 
@@ -798,6 +869,14 @@ int main(void) {
     RUN_TEST(test_break_repl_basic);
     RUN_TEST(test_break_repl_with_value);
     RUN_TEST(test_continue_repl_basic);
+
+    printf("\nBytecode debug output:\n");
+    RUN_TEST(test_eval_line_with_bytecode);
+    RUN_TEST(test_eval_line_without_bytecode);
+    RUN_TEST(test_eval_line_bytecode_on_parse_error);
+    RUN_TEST(test_eval_line_bytecode_blank_input);
+    RUN_TEST(test_eval_line_bytecode_with_expression);
+    RUN_TEST(test_eval_line_all_three_debug);
 
     printf("\nString concatenation operator (..):\n");
     RUN_TEST(test_concat_basic);
