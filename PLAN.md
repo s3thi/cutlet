@@ -109,46 +109,12 @@ Created 12 `.cutlet` example programs, one per language feature: `arithmetic`, `
 
 ---
 
-### Step 5: Pipeline tracer script
+### Step 5 (completed): Pipeline tracer script
 
-**Depends on step 1 (`--bytecode` flag) and step 4 (example programs).**
+Created `scripts/pipeline_trace.py` — takes a `.cutlet` file and produces a complete markdown trace through every pipeline stage (tokens, AST, bytecode) with source location cross-references. Runs the interpreter with `--tokens --ast --bytecode` in a single invocation, parses the combined output, then uses regex-based grep on `src/parser.c`, `src/compiler.c`, and `src/vm.c` to map keywords, AST node types, and opcodes to their source locations. Tests section groups references by file for readability. Handles parse errors gracefully.
 
-Create `scripts/pipeline_trace.py` — the main analysis tool. Takes a `.cutlet` file and produces a complete trace through every pipeline stage with source location cross-references.
-
-**What to do:**
-
-1. Create `scripts/pipeline_trace.py`. The script takes one argument: a `.cutlet` file. It:
-
-   a. **Prints the input program** as a fenced code block.
-
-   b. **Captures tokens**: Runs `build/cutlet repl --tokens < file.cutlet` via `subprocess.run()` (pipe mode, non-interactive). Parses the `TOKENS [TYPE value] ...` output line. Extracts unique token types and keyword identifiers (IDENTs that are reserved words: `if`, `then`, `else`, `end`, `while`, `do`, `my`, `true`, `false`, `nothing`, `and`, `or`, `not`, `break`, `continue`). Prints the full token stream and a summary of keywords used.
-
-   c. **Captures AST**: Runs with `--ast`. Parses the `AST [...]` output line. Extracts unique AST node type names (the uppercase words in the S-expression: `NUMBER`, `BINOP`, `WHILE`, etc.). Prints the full AST and a summary of node types.
-
-   d. **Captures bytecode**: Runs with `--bytecode`. Extracts unique `OP_*` opcode names from the disassembly output using regex. Prints the full disassembly and a summary of opcodes used.
-
-   e. **Maps to source locations** using cscope for accurate cross-references:
-      - Build cscope database (or reuse if already built).
-      - **Parser**: For each keyword found in (b), use `subprocess` + `grep -n` on `src/parser.c` for `strcmp.*"keyword"` to find where the parser recognizes it. For each AST node type from (c), use cscope query type 0 (find symbol) to locate where `AST_TYPE` appears in `src/parser.c`.
-      - **Compiler**: For each AST node type from (c), grep `src/compiler.c` for `case AST_TYPE:` to find the dispatch, and use cscope to find the `compile_*` function definition.
-      - **VM**: For each opcode from (d), grep `src/vm.c` for `case OP_NAME:` to find the execution handler.
-      - **Tests**: Use cscope or grep to find references to the relevant AST types and opcodes in `tests/`.
-
-   f. **Formats everything as markdown** and writes to stdout.
-
-2. **Output format** — see the detailed example earlier in this conversation. Key sections: Input Program, Token Stream, AST, Bytecode Disassembly, Source Locations (Parser / Compiler / VM / Tests).
-
-3. Implementation notes:
-   - Run all three debug flags in a single interpreter invocation: `build/cutlet repl --tokens --ast --bytecode < file.cutlet`. Parse the combined output (tokens line, AST line, bytecode block, then the result value).
-   - Use `subprocess.run(capture_output=True, text=True)` throughout.
-   - Ensure `build/cutlet` exists by checking and printing a helpful error ("run `make` first") rather than trying to build from within the script.
-   - Edge case: if compilation fails (parse error), bytecode won't be available. Handle gracefully and note "bytecode not available (parse error)" in the output.
-   - Clean up any cscope temp files.
-
-4. Add to `Makefile`: `pipeline-trace` target that runs the tracer on all `examples/*.cutlet` files.
-
-**Files to create**: `scripts/pipeline_trace.py`.
-**Files to touch**: `Makefile` (add target).
+**Files created**: `scripts/pipeline_trace.py`.
+**Files touched**: `Makefile` (added `pipeline-trace` target and help entry).
 
 ---
 

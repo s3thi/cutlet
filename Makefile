@@ -332,6 +332,13 @@ symbol-index:
 call-graph:
 	@python3 scripts/call_graph.py
 
+.PHONY: pipeline-trace
+pipeline-trace: $(BIN)
+	@for f in examples/*.cutlet; do \
+		python3 scripts/pipeline_trace.py "$$f"; \
+		echo ""; \
+	done
+
 # Clean build artifacts
 .PHONY: clean
 clean:
@@ -357,5 +364,6 @@ help:
 	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  symbol-index  - Generate symbol index from src/*.h (requires Universal Ctags)"
 	@echo "  call-graph    - Generate call graph for public functions (requires cscope + ctags)"
+	@echo "  pipeline-trace - Trace example programs through tokenizer/parser/compiler/VM"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"
