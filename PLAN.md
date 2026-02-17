@@ -23,7 +23,8 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 - **If/else expressions**: `if cond then body [else body] end`. Expression form (returns value). `else if` special case (single `end`). Only taken branch evaluated. No-else returns `nothing`.
 - **Variables**: `my x = expr` declares, `x = expr` assigns. Linked-list environment with thread-safe get/define/assign.
 - **Runtime**: Global pthread rwlock serializes eval.
-- **REPL/CLI**: Local in-process REPL as default mode (`cutlet repl`). TCP server (`--listen`, thread-per-client) and TCP client (`--connect`) with isocline for rich line editing and multiline input. `--tokens` and `--ast` debug flags. Shared `print_repl_result()` formatting helper for both local and TCP modes. LSP-style JSON framing with request IDs for TCP mode. nREPL-style multi-frame responses: `say()` sends output frames (`{"type": "output", ...}`) before the terminal result frame (`{"type": "result", ...}`). Client reads frames in a loop. History persistence (`~/.cutlet/history`). `parser_is_complete()` drives continuation prompts and multiline accumulation (both interactive and pipe modes).
+- **Vendor isolation**: Isocline compiled as separate `.o` with upstream-recommended C99 flags. `vendor/.clang-tidy` and `vendor/.clang-format` sentinel files prevent IDE linting/formatting of vendor code.
+- **REPL/CLI**: Local in-process REPL as default mode (`cutlet repl`). TCP server (`--listen`, thread-per-client) and TCP client (`--connect`) with isocline for rich line editing and multiline input. `--tokens`, `--ast`, and `--bytecode` debug flags. Shared `print_repl_result()` formatting helper for both local and TCP modes. LSP-style JSON framing with request IDs for TCP mode. nREPL-style multi-frame responses: `say()` sends output frames (`{"type": "output", ...}`) before the terminal result frame (`{"type": "result", ...}`). Client reads frames in a loop. History persistence (`~/.cutlet/history`). `parser_is_complete()` drives continuation prompts and multiline accumulation (both interactive and pipe modes).
 - **File execution**: `cutlet run <file>` reads and evaluates a `.cutlet` file. Output via `say()` only (final expression not printed). Exit code 0 on success, 1 on error.
 - **Comments**: `#` to end of line.
 - **Function calls**: `name(arg1, arg2, ...)` syntax parsed as `AST_CALL`. Zero or more comma-separated arguments. Parsed as postfix after identifier.
@@ -70,49 +71,15 @@ The `examples/` directory now contains one `.cutlet` file per language feature (
 
 ---
 
-## Completed: String concatenation with `..` operator
-
-Added `..` binary operator for string concatenation with auto-coercion. Right-associative at precedence 5 (between comparison and `+`/`-`). Both operands coerced to strings via `value_format()`. `+` with strings remains an error.
-
-**Files touched**: `src/parser.c` (precedence renumbering 5→6, 6→7, 7→8, 8→9; `..` at prec 5; `is_right_assoc`; unary minus prec 7→8), `src/chunk.h` (`OP_CONCAT`), `src/chunk.c` (disassembler), `src/compiler.c` (`".."` → `OP_CONCAT`), `src/vm.c` (`OP_CONCAT` implementation), `tests/test_tokenizer.c` (3 tests), `tests/test_parser.c` (6 tests), `tests/test_vm.c` (14 tests), `tests/test_repl.c` (5 tests), `tests/test_cli.sh` (3 tests).
-
----
-
-## Completed: Isolate vendor code from project build flags and code-quality tools
-
-Isocline is now compiled as a separate `.o` with upstream-recommended C99 flags (`ISOCLINE_BUILD_CFLAGS` and `ISOCLINE_SANITIZE_BUILD_CFLAGS`) instead of the project's C23 flags. `ISOCLINE_CFLAGS` renamed to `ISOCLINE_INCLUDES`. `vendor/.clang-tidy` and `vendor/.clang-format` sentinel files prevent IDE linting/formatting of vendor code. Added `-Wno-shorten-64-to-32` to suppress an upstream narrowing bug in `term.c:1036` on 64-bit macOS.
-
-**Files touched**: `Makefile` (renamed `ISOCLINE_CFLAGS` → `ISOCLINE_INCLUDES`, added `ISOCLINE_BUILD_CFLAGS`/`ISOCLINE_SANITIZE_BUILD_CFLAGS`, separate isocline `.o` compile rules, updated `$(BIN)` and `$(SANITIZE_BIN)` to link `.o`), `vendor/.clang-tidy` (new), `vendor/.clang-format` (new).
-
----
-
-## Completed: While loop expression (`while...do...end`)
-
-Added `while cond do body end` as a loop expression. The loop evaluates its body repeatedly while `cond` is truthy. Returns the last value produced by the body, or `nothing` if the loop body never executes. Uses an accumulator-based bytecode pattern with a new `OP_LOOP` backward jump opcode.
-
-**Files touched**: `src/parser.h` (`AST_WHILE`), `src/parser.c` (`parse_while()`, `is_reserved_keyword()` for `while`/`do`, `ast_node_type_str()`, `ast_format_node()`, `parser_is_complete()`), `src/chunk.h` (`OP_LOOP`), `src/chunk.c` (disassembler + `opcode_name()`), `src/compiler.c` (`emit_loop()` helper, `compile_while()`, dispatch), `src/vm.c` (`OP_LOOP` execution), `tests/test_parser.c` (17 tests), `tests/test_vm.c` (7 tests), `tests/test_repl.c` (3 tests), `tests/test_cli.sh` (3 tests).
-
----
-
-## Completed: `break` and `continue` for while loops
-
-Added `break` and `continue` keywords that control loop iteration. `break` exits the innermost loop immediately, with an optional value (`break expr` or bare `break` → nothing). `continue` skips to the next iteration, setting the accumulator to nothing. Both produce compile errors outside loops. The parser peeks at the next token to determine whether `break` has a value expression.
-
-**Files touched**: `src/parser.h` (`AST_BREAK`, `AST_CONTINUE` in enum), `src/parser.c` (`parse_atom()` for break/continue, `is_reserved_keyword()`, `ast_node_type_str()`, `ast_format_node()`), `src/compiler.c` (`LoopContext` struct, `compile_break()`, `compile_continue()`, updated `compile_while()` with break jump patching, `Compiler` struct gets `current_loop` field, `compile_node()` dispatch), `tests/test_parser.c` (15 tests), `tests/test_vm.c` (11 tests), `tests/test_repl.c` (3 tests), `tests/test_cli.sh` (6 tests).
-
----
-
 ## Next: Codebase understanding tools
 
 Build three analysis scripts that help coding agents (and humans) understand the codebase. All scripts live in `scripts/`, are written in Python 3, and output markdown to stdout. Symbol indexing uses Universal Ctags, call graphs use cscope, and the pipeline tracer uses the cutlet interpreter itself. A `make understand` target runs all of them.
 
 **Dev tool requirements**: `python3`, `ctags` (Universal Ctags), `cscope`. These are standard dev tools available in every package manager (`brew install universal-ctags cscope` / `apt install universal-ctags cscope`).
 
-### Step 1 (completed): Add `--bytecode` debug flag to REPL
+### Step 1 (completed): `--bytecode` debug flag
 
-Added `--bytecode` debug flag alongside existing `--tokens` and `--ast` flags. Refactored `chunk_disassemble()` into a `chunk_disassemble_to_string()` function that returns a heap-allocated string (using a `DynBuf` dynamic buffer internally). Threaded `want_bytecode` through `repl_eval_line()`, `ReplServer`, JSON protocol, and all CLI paths. Updated AGENTS.md documentation.
-
-**Files touched**: `src/chunk.h` (`chunk_disassemble_to_string()` declaration), `src/chunk.c` (`DynBuf` helpers, `disassemble_instruction_to_buf()`, `chunk_disassemble_to_string()`, refactored `chunk_disassemble()`), `src/repl.h` (`bytecode` field in `ReplResult`, `want_bytecode` parameter), `src/repl.c` (bytecode capture + free), `src/main.c` (`--bytecode` flag parsing, threading through all run functions, `print_repl_result()`), `src/repl_server.h` (`enable_bytecode` field + parameter), `src/repl_server.c` (threading), `src/json.h` (`want_bytecode`/`bytecode` fields), `src/json.c` (encode/decode), `tests/test_chunk.c` (4 tests for `chunk_disassemble_to_string()`), `tests/test_repl.c` (5 bytecode tests), `tests/test_repl_server.c` (updated signatures), `tests/test_runtime.c` (updated signatures), `tests/test_cli.sh` (3 CLI tests), `AGENTS.md` (REPL debug flags section).
+Added `--bytecode` REPL flag with `chunk_disassemble_to_string()`. Threaded through REPL, server, JSON protocol, and CLI.
 
 ---
 
