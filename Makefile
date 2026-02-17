@@ -324,6 +324,9 @@ check: format-check lint
 # ---------- Codebase understanding tools ----------
 # Output goes to stdout (not committed to git). Requires: python3, ctags (Universal Ctags), cscope.
 
+.PHONY: understand
+understand: symbol-index call-graph pipeline-trace
+
 .PHONY: symbol-index
 symbol-index:
 	@python3 scripts/symbol_index.py
@@ -365,5 +368,6 @@ help:
 	@echo "  symbol-index  - Generate symbol index from src/*.h (requires Universal Ctags)"
 	@echo "  call-graph    - Generate call graph for public functions (requires cscope + ctags)"
 	@echo "  pipeline-trace - Trace example programs through tokenizer/parser/compiler/VM"
+	@echo "  understand    - Run all codebase understanding tools (symbol-index + call-graph + pipeline-trace)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"
