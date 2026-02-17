@@ -15,12 +15,35 @@ import sys
 from datetime import date
 
 
-# Reserved words that the parser recognises as keywords (not plain identifiers).
-KEYWORDS = frozenset([
-    "if", "then", "else", "end", "while", "do", "my",
-    "true", "false", "nothing", "and", "or", "not",
-    "break", "continue",
-])
+def extract_keywords_from_parser(parser_path):
+    """Extract reserved keywords from parser.c by finding token_is_keyword() calls.
+
+    Greps for token_is_keyword(<anything>, "word") and pulls out the string
+    arguments.  This keeps the keyword list in sync with the parser automatically.
+
+    Returns a frozenset of keyword strings.  Exits with an error if no keywords
+    are found (the language will always have keywords, so zero is always wrong).
+    """
+    pattern = re.compile(r'token_is_keyword\([^,]+,\s*"(\w+)"\)')
+    keywords = set()
+    try:
+        with open(parser_path) as f:
+            for line in f:
+                for m in pattern.finditer(line):
+                    keywords.add(m.group(1))
+    except OSError as e:
+        print(f"Error: cannot read {parser_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not keywords:
+        print(
+            "Error: no keywords extracted from parser.c. "
+            "The token_is_keyword() pattern may have been renamed or replaced.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return frozenset(keywords)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +147,7 @@ def extract_token_types(token_lines):
     return sorted(types)
 
 
-def extract_keywords_used(token_lines):
+def extract_keywords_used(token_lines, keywords):
     """Extract keyword identifiers from TOKENS lines.
 
     Looks for [IDENT word] where word is a reserved keyword.
@@ -134,7 +157,7 @@ def extract_keywords_used(token_lines):
     for line in token_lines:
         for m in re.finditer(r"\[IDENT\s+(\w+)\]", line):
             word = m.group(1)
-            if word in KEYWORDS:
+            if word in keywords:
                 kws.add(word)
     return sorted(kws)
 
@@ -412,8 +435,37 @@ def main():
     # Run the interpreter with all debug flags.
     raw_output = run_interpreter(cutlet_bin, filepath)
 
+    # Extract keywords dynamically from parser.c.
+    keywords = extract_keywords_from_parser(parser_path)
+
     # Parse the combined output.
     token_lines, ast_lines, bytecode_blocks = parse_output(raw_output)
+
+    # Validate each section independently.  If the raw output contains a
+    # section marker but the corresponding parsed list is empty, the output
+    # format has changed and we should fail rather than produce incomplete
+    # output.
+    if "TOKENS" in raw_output and not token_lines:
+        print(
+            "Error: interpreter output contains TOKENS but none were parsed. "
+            "Output format may have changed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "AST" in raw_output and not ast_lines:
+        print(
+            "Error: interpreter output contains AST but none were parsed. "
+            "Output format may have changed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if "BYTECODE" in raw_output and not bytecode_blocks:
+        print(
+            "Error: interpreter output contains BYTECODE but none were parsed. "
+            "Output format may have changed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Handle parse errors: if no tokens/AST/bytecode were captured,
     # note it and exit gracefully.
@@ -438,7 +490,7 @@ def main():
 
     # Extract summaries.
     token_types = extract_token_types(token_lines)
-    keywords_used = extract_keywords_used(token_lines)
+    keywords_used = extract_keywords_used(token_lines, keywords)
     ast_node_types = extract_ast_node_types(ast_lines)
     opcodes = extract_opcodes(bytecode_blocks)
 
@@ -489,6 +541,43 @@ def main():
     # Tests: find test files that reference the relevant AST types and opcodes.
     all_symbols = [f"AST_{t}" for t in ast_node_types] + opcodes
     source_locations["tests"] = find_references_in_tests(all_symbols, test_dir)
+
+    # Validate source location coverage (7c).
+    # Total coverage: if we found AST node types but no source locations in
+    # either parser or compiler, the grep patterns are broken.
+    if ast_node_types and not source_locations["parser"] and not source_locations["compiler"]:
+        print(
+            "Error: found AST node types but no source locations in "
+            "parser.c or compiler.c. Code conventions may have changed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if opcodes and not source_locations["vm"]:
+        print(
+            "Error: found opcodes but no source locations in vm.c. "
+            "Code conventions may have changed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Per-item warnings: warn (but don't exit) for individual AST node types
+    # or opcodes that have no matching source location.
+    for node_type in ast_node_types:
+        case_key = f"case AST_{node_type}"
+        if case_key not in source_locations["compiler"]:
+            print(
+                f"Warning: AST node type {node_type} has no "
+                f"'case AST_{node_type}:' entry in compiler.c",
+                file=sys.stderr,
+            )
+    for opcode in opcodes:
+        case_key = f"case {opcode}"
+        if case_key not in source_locations["vm"]:
+            print(
+                f"Warning: opcode {opcode} has no "
+                f"'case {opcode}:' entry in vm.c",
+                file=sys.stderr,
+            )
 
     # Format and print.
     output = format_markdown(

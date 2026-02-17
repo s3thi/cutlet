@@ -125,4 +125,16 @@ Added `make understand` target that runs all three analysis tools (`symbol-index
 **Files touched**: `Makefile` (added `understand` target and help entry).
 
 ---
+
+### Step 7 (completed): Harden `pipeline_trace.py` against language evolution
+
+Hardened `scripts/pipeline_trace.py` against three fragilities that would produce silently incomplete output when the language or codebase evolves. The script now errors (exit 1) when it detects stale assumptions rather than producing misleading partial output.
+
+- **7a**: Replaced hardcoded `KEYWORDS` frozenset with `extract_keywords_from_parser()` that dynamically extracts keywords from `src/parser.c` by grepping for `token_is_keyword()` calls. Fail-fast if zero keywords found.
+- **7b**: After `parse_output()`, each section (TOKENS, AST, BYTECODE) is validated independently — if the raw output contains the section marker but the parsed list is empty, error with a descriptive message and exit 1.
+- **7c**: After building `source_locations`, total coverage is validated (AST nodes with no parser/compiler locations → error; opcodes with no VM locations → error). Per-item warnings are printed to stderr for individual misses (non-fatal).
+
+**Files modified**: `scripts/pipeline_trace.py`.
+
+---
 End of handoff.
