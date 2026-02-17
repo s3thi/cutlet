@@ -63,6 +63,278 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 
 ---
 
+## Next feature: User-defined functions
+
+### Design
+
+Syntax: `fn name(params) is body end`. Expression form (returns the function as a value). Named form binds the function to a global variable. Anonymous form (`fn(params) is body end`) deferred to a follow-up.
+
+Lexical scope. Functions are first-class values. Recursion works because the named function is bound globally before the body executes at call time.
+
+```cutlet
+fn greet(name) is
+  say("hello " .. name)
+end
+
+greet("world")       # prints: hello world
+
+fn factorial(n) is
+  if n <= 1 then 1
+  else n * factorial(n - 1)
+  end
+end
+
+say(factorial(5))    # prints: 120
+```
+
+### Architecture changes
+
+Currently all variables are global (linked-list environment in `runtime.c`). Function calls use name-based dispatch (`OP_CALL [name_idx] [argc]` → `call_builtin()`). The VM has no call frames.
+
+This feature requires:
+- **New value type**: `VAL_FUNCTION` holding name, arity, parameter names, compiled Chunk, and optional native function pointer (for built-ins like `say`).
+- **Stack-based call convention**: Callee value on stack, then arguments, then `OP_CALL [argc]`. Replaces name-based dispatch.
+- **VM call frames**: `CallFrame` struct tracks function, instruction pointer, and stack window. Call stack as an array.
+- **Local variables**: `OP_GET_LOCAL`/`OP_SET_LOCAL` opcodes. Compiler resolves params and `my` declarations to stack slots inside functions. Globals unchanged outside functions.
+
+### Implementation steps
+
+Each step follows the required process: tests first → confirm failures → implement → `make test && make check`.
+
+#### Step 1: AST_FUNCTION node + parser
+
+Add the `AST_FUNCTION` node type and parse `fn name(params) is body end`.
+
+**AstNode changes** (`parser.h`):
+- Add `AST_FUNCTION` to `AstNodeType` enum.
+- Add `char **params` and `size_t param_count` fields to `AstNode` struct (used only by AST_FUNCTION).
+
+**Parser** (`parser.c`):
+- `fn` triggers a prefix parse rule.
+- Parse: `fn` → identifier (name, stored in `value`) → `(` → comma-separated identifiers (stored in `params`) → `)` → `is` → body (block until `end`) → `end`.
+- Body uses the same block-parsing logic as `if`/`while` (newline-separated expressions).
+- `ast_format()`: `"AST [FN name(a, b) [body]]"`.
+- `ast_free()`: free `params` array and each string in it.
+- `parser_is_complete()`: treat `fn` as an opener that needs `end` (like `if`/`while`).
+
+**Tests** (`tests/test_parser.c`):
+- `fn foo() is 42 end` → correct s-expr.
+- `fn add(a, b) is a + b end` → correct s-expr with params.
+- `fn foo() is\n  42\nend` → multiline body.
+- Missing `is` → parse error.
+- Missing `end` → parse error / incomplete.
+- Missing `)` → parse error.
+- `parser_is_complete("fn foo() is")` → false (incomplete).
+- `parser_is_complete("fn foo() is 42 end")` → true.
+
+**Files touched**: `src/parser.h`, `src/parser.c`, `tests/test_parser.c`.
+
+#### Step 2: VAL_FUNCTION value type
+
+Add `VAL_FUNCTION` to the value system. Introduce `ObjFunction` struct that holds everything needed to call a function.
+
+**ObjFunction** (new, in `value.h`):
+```c
+typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
+
+typedef struct {
+    char *name;          /* Function name (owned, NULL for anonymous). */
+    int arity;           /* Number of parameters. */
+    char **params;       /* Parameter names (owned array of owned strings). */
+    Chunk *chunk;        /* Compiled body (owned, NULL for natives). */
+    NativeFn native;     /* Native function pointer (NULL for user fns). */
+} ObjFunction;
+```
+
+**Value changes** (`value.h`, `value.c`):
+- Add `VAL_FUNCTION` to `ValueType`.
+- Add `ObjFunction *function` field to `Value`.
+- `make_function(ObjFunction *fn)` — takes ownership.
+- `make_native(const char *name, int arity, NativeFn fn)` — creates a native ObjFunction.
+- `value_format()`: `"<fn name>"` for named, `"<fn>"` for anonymous.
+- `value_free()`: free ObjFunction (name, params, chunk if non-NULL).
+- `value_clone()`: deep copy ObjFunction.
+- `is_truthy()`: functions are truthy.
+
+**Tests** (`tests/test_eval.c` or new `tests/test_value.c`):
+- Create a VAL_FUNCTION, format it → `"<fn foo>"`.
+- Clone a VAL_FUNCTION, verify independence.
+- Free a VAL_FUNCTION, no leaks.
+- `is_truthy(VAL_FUNCTION)` → true.
+- Equality: functions are only equal to themselves (identity).
+
+**Files touched**: `src/value.h`, `src/value.c`, `src/chunk.h` (forward declare or include), tests.
+
+#### Step 3: Compile function definitions
+
+Compile `AST_FUNCTION` into bytecode. Each function body gets its own Chunk.
+
+**Compiler** (`compiler.c`):
+- `compile_function()`: create a new Compiler with a fresh Chunk, compile the body into it, emit `OP_RETURN` at the end. Create an `ObjFunction` wrapping the Chunk. Add it as a constant in the *enclosing* Chunk. Emit `OP_CONSTANT` + `OP_DEFINE_GLOBAL` with the function name.
+- For now, the function body is compiled but **cannot be called yet** (call convention change is step 4). The function is just stored as a global variable value.
+
+**Tests** (`tests/test_compiler.c` or `tests/test_eval.c`):
+- Compile `fn foo() is 42 end` → verify bytecode contains OP_CONSTANT + OP_DEFINE_GLOBAL.
+- Eval `fn foo() is 42 end` → verify `foo` is a VAL_FUNCTION in globals.
+- `fn foo() is 42 end\nfoo` → verify evaluating the name returns `<fn foo>`.
+
+**Files touched**: `src/compiler.c`, tests.
+
+#### Step 4: Refactor call convention to stack-based
+
+Change how function calls are compiled and dispatched. This is a **refactor step** — existing behavior (calling `say()`) must keep working.
+
+**Built-in registration** (`runtime.c` or `vm.c`):
+- At startup, register `say` as a native VAL_FUNCTION in the global environment using `make_native("say", 1, native_say)`.
+- Implement `native_say()` matching the `NativeFn` signature.
+
+**Compiler** (`compiler.c`):
+- Change `compile_call()`: instead of emitting `OP_CALL [name_idx] [argc]`, emit `OP_GET_GLOBAL` for the function name, then compile args, then emit the new `OP_CALL [argc]` (1-byte argc only).
+- Update `OP_CALL` encoding in `chunk.h` comment.
+
+**VM** (`vm.c`):
+- Change `OP_CALL` handler: read `argc`, peek at callee at `stack_top[-argc-1]`.
+  - If `VAL_FUNCTION` with `native` != NULL: pop args into a temporary array, call native function, pop callee, push result.
+  - If `VAL_FUNCTION` with `native` == NULL: error for now ("user function calls not yet supported") — actual dispatch comes in step 5.
+  - If not a function: runtime error "cannot call \<type\>".
+- Remove `call_builtin()`.
+
+**Disassembler** (`chunk.c`):
+- Update `chunk_disassemble` for the new `OP_CALL` encoding (1-byte argc, no name index).
+
+**Tests**:
+- All existing `say()` tests pass unchanged.
+- `say("hi")` still prints "hi".
+- `42()` → error "cannot call number".
+
+**Files touched**: `src/compiler.c`, `src/vm.c`, `src/chunk.c`, `src/chunk.h`, `src/runtime.c` or `src/value.c`, tests.
+
+#### Step 5: VM call frames + call/return
+
+Add call frames to the VM so user-defined functions can actually execute.
+
+**VM** (`vm.h`, `vm.c`):
+- Define `CallFrame`:
+  ```c
+  typedef struct {
+      ObjFunction *function;  /* The function being executed. */
+      uint8_t *ip;            /* Instruction pointer into function's chunk. */
+      Value *slots;           /* Pointer into VM stack: base of this frame's window. */
+  } CallFrame;
+  ```
+- Add `CallFrame frames[FRAMES_MAX]` and `int frame_count` to VM. `FRAMES_MAX` = 64.
+- Top-level code runs inside a "script" CallFrame (frame 0) whose function is an `ObjFunction` wrapping the top-level Chunk.
+- Refactor `vm_execute()`: `ip`, `chunk` now come from `frames[frame_count-1]`. All `read_byte()`/`read_short()` and constant access go through the current frame.
+- **OP_CALL** for user functions: validate arity, push new CallFrame, set `ip` to function's chunk, set `slots` to `stack_top - argc - 1`.
+- **OP_RETURN**: pop frame. If `frame_count` reaches 0, return the result (end of program). Otherwise, pop the called function's stack window, push the return value onto the caller's stack, resume caller's frame.
+
+**Tests**:
+- `fn foo() is 42 end\nfoo()` → 42.
+- `fn greet() is say("hi") end\ngreet()` → prints "hi", returns nothing.
+- `fn five() is 2 + 3 end\nsay(five())` → prints 5.
+- Existing tests still pass.
+
+**Files touched**: `src/vm.h`, `src/vm.c`, tests.
+
+#### Step 6: Function parameters (OP_GET_LOCAL)
+
+Add local variable reads so function parameters can be accessed.
+
+**Opcodes** (`chunk.h`):
+- Add `OP_GET_LOCAL` with 1-byte slot index operand.
+
+**Compiler** (`compiler.c`):
+- Add a `Local` struct (name, depth/slot index) and a locals array to the Compiler.
+- Track compilation context: "script" vs "function". In function context, parameters are added as locals 0..N-1 before compiling the body.
+- `compile_ident()`: in function context, check locals first. If found, emit `OP_GET_LOCAL [slot]`. If not found, fall back to `OP_GET_GLOBAL`.
+
+**VM** (`vm.c`):
+- `OP_GET_LOCAL`: read slot index, push clone of `frame->slots[slot]`.
+
+**Disassembler** (`chunk.c`):
+- Format `OP_GET_LOCAL` with slot index.
+
+**Tests**:
+- `fn identity(x) is x end\nidentity(42)` → 42.
+- `fn add(a, b) is a + b end\nadd(1, 2)` → 3.
+- `fn shadow(x) is x end\nmy x = 99\nshadow(1)` → 1 (local shadows global).
+- `fn readglobal() is x end\nmy x = 99\nreadglobal()` → 99 (falls back to global).
+
+**Files touched**: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, tests.
+
+#### Step 7: Local variable declarations (OP_SET_LOCAL + `my` in functions)
+
+Allow `my` declarations and `=` assignment inside functions to use stack slots.
+
+**Opcodes** (`chunk.h`):
+- Add `OP_SET_LOCAL` with 1-byte slot index operand.
+
+**Compiler** (`compiler.c`):
+- `compile_decl()` in function context: add a new local (increment local count), compile the RHS, the value is already at the correct stack slot. Emit `OP_SET_LOCAL` to leave the value as the expression result.
+- `compile_assign()` in function context: if the name resolves to a local, emit `OP_SET_LOCAL [slot]`. Otherwise fall back to `OP_SET_GLOBAL`.
+- Scope: locals declared in inner blocks (e.g., inside `if`) are valid until the function ends (no block scoping yet — matches the current global model).
+
+**VM** (`vm.c`):
+- `OP_SET_LOCAL`: read slot index, free old value at slot, clone TOS into slot (don't pop — value stays as expression result).
+
+**Disassembler** (`chunk.c`):
+- Format `OP_SET_LOCAL` with slot index.
+
+**Tests**:
+- `fn foo(x) is my y = x + 1\ny end\nfoo(10)` → 11.
+- `fn foo() is my a = 1\nmy b = 2\na + b end\nfoo()` → 3.
+- `fn foo(x) is x = x + 1\nx end\nfoo(10)` → 11 (reassign parameter).
+- Local doesn't leak to global scope.
+
+**Files touched**: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, tests.
+
+#### Step 8: Recursion + error handling
+
+Test recursion (should work automatically) and add missing error handling.
+
+**Recursion** (no code changes expected — OP_GET_GLOBAL finds the function at call time):
+- Test: `fn factorial(n) is if n <= 1 then 1 else n * factorial(n - 1) end end\nfactorial(5)` → 120.
+- Test: `fn fib(n) is if n < 2 then n else fib(n - 1) + fib(n - 2) end end\nfib(10)` → 55.
+- Test: mutual recursion (fn even/odd calling each other).
+
+**Error handling**:
+- Wrong arity: `fn foo(a, b) is a end\nfoo(1)` → error "'foo' expects 2 arguments, got 1".
+- Call stack overflow: deeply recursive function → error "stack overflow" (not a segfault).
+- Verify all errors include line numbers.
+
+**Files touched**: `src/vm.c` (error messages), tests.
+
+#### Step 9: Integration + REPL + cleanup
+
+End-to-end integration, REPL multi-line support, and disassembly cleanup.
+
+**REPL** (`src/main.c`):
+- Verify multi-line function definitions work in the local REPL (continuation prompt on `fn ... is` without `end`).
+- Verify `--bytecode` flag shows the function's inner Chunk disassembly.
+
+**CLI integration tests** (`tests/test_cli.sh`):
+- `cutlet run` with a file that defines and calls functions.
+- `echo "fn f() is 42 end\nsay(f())" | cutlet repl` → prints 42.
+
+**Bytecode disassembly** (`src/chunk.c`):
+- When disassembling a Chunk that contains a VAL_FUNCTION constant, recursively disassemble the function's Chunk too.
+
+**Tests**: integration tests covering the full pipeline.
+
+**Files touched**: `src/chunk.c`, `tests/test_cli.sh`, `tests/test_eval.c`, `src/main.c` if needed.
+
+**Post-implementation reminders** (per AGENTS.md):
+- Update `TUTORIAL.md` with a functions section.
+- Add `examples/functions.cutlet` example program.
+
+---
+
+## Deferred: Anonymous functions
+
+After named functions land, add anonymous function syntax: `fn(params) is body end` (no name). The parser already handles `fn` as a prefix — just make the name optional. Anonymous functions are expressions that return a VAL_FUNCTION without binding a global.
+
+---
+
 ## Deferred: Example test runner with `.expected` files
 
 The `examples/` directory now contains one `.cutlet` file per language feature (created as part of the understanding tools work below). A future step is to add matching `.expected` files and a test harness that runs `cutlet run` on each example and compares stdout. Integrate into `make test`.
