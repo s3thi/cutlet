@@ -15,21 +15,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* The five value types in the Cutlet language. */
-typedef enum { VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, VAL_ERROR } ValueType;
+/* Forward declaration of Chunk (defined in chunk.h).
+ * Needed here because ObjFunction owns a compiled Chunk. */
+typedef struct Chunk Chunk;
 
-/* A tagged union representing a Cutlet value.
- * - VAL_NUMBER: number field holds the value.
- * - VAL_STRING: string field holds a heap-allocated string.
- * - VAL_BOOL: boolean field holds the value.
- * - VAL_NOTHING: no payload.
- * - VAL_ERROR: string field holds a heap-allocated error message. */
-typedef struct {
-    ValueType type;
-    double number;
-    bool boolean;
-    char *string; /* owned; also used for error message */
-} Value;
+/* The six value types in the Cutlet language. */
+typedef enum { VAL_NUMBER, VAL_STRING, VAL_BOOL, VAL_NOTHING, VAL_ERROR, VAL_FUNCTION } ValueType;
+
+/* Forward declaration for the Value type (needed by NativeFn). */
+typedef struct Value Value;
 
 /*
  * Write callback type for built-in output functions (e.g. say()).
@@ -49,6 +43,45 @@ typedef struct {
     void *userdata;
 } EvalContext;
 
+/*
+ * Native function pointer type.
+ * Used for built-in functions like say(). Takes argc, an array of
+ * argument Values, and the EvalContext for I/O.
+ */
+typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
+
+/*
+ * ObjFunction - represents a user-defined or native function.
+ *
+ * name:   Function name (heap-allocated, NULL for anonymous functions).
+ * arity:  Number of parameters.
+ * params: Parameter names (heap-allocated array of heap-allocated strings).
+ * chunk:  Compiled body bytecode (heap-allocated, NULL for native functions).
+ * native: Native function pointer (NULL for user-defined functions).
+ */
+typedef struct {
+    char *name;
+    int arity;
+    char **params;
+    Chunk *chunk;
+    NativeFn native;
+} ObjFunction;
+
+/* A tagged union representing a Cutlet value.
+ * - VAL_NUMBER: number field holds the value.
+ * - VAL_STRING: string field holds a heap-allocated string.
+ * - VAL_BOOL: boolean field holds the value.
+ * - VAL_NOTHING: no payload.
+ * - VAL_ERROR: string field holds a heap-allocated error message.
+ * - VAL_FUNCTION: function field holds an owned ObjFunction. */
+struct Value {
+    ValueType type;
+    double number;
+    bool boolean;
+    char *string;          /* owned; also used for error message */
+    ObjFunction *function; /* owned; non-NULL only for VAL_FUNCTION */
+};
+
 /* ---- Value constructors ---- */
 
 /* Create a number Value. */
@@ -66,11 +99,22 @@ Value make_nothing(void);
 /* Create an error Value with a formatted message. */
 Value make_error(const char *fmt, ...);
 
+/* Create a function Value (takes ownership of the ObjFunction). */
+Value make_function(ObjFunction *fn);
+
+/*
+ * Create a native function Value.
+ * Allocates an ObjFunction with native pointer set and chunk NULL.
+ * name is copied (caller retains ownership of the original).
+ */
+Value make_native(const char *name, int arity, NativeFn fn);
+
 /* ---- Value utilities ---- */
 
 /*
  * Free any heap-allocated memory in a Value.
  * Safe to call on zero-initialized Values.
+ * For VAL_FUNCTION, frees the ObjFunction and all its owned data.
  */
 void value_free(Value *v);
 
@@ -84,6 +128,7 @@ void value_free(Value *v);
  * - VAL_BOOL: "true" or "false"
  * - VAL_NOTHING: "nothing"
  * - VAL_ERROR: "ERR <message>"
+ * - VAL_FUNCTION: "<fn name>" for named, "<fn>" for anonymous
  */
 char *value_format(const Value *v);
 
@@ -95,11 +140,13 @@ char *value_format(const Value *v);
  * - empty string "" is falsy, all other strings are truthy
  * - nothing is falsy
  * - errors are falsy
+ * - functions are truthy
  */
 bool is_truthy(const Value *v);
 
 /*
- * Clone a Value, deep-copying any owned string data.
+ * Clone a Value, deep-copying any owned data.
+ * For VAL_FUNCTION, deep-copies the ObjFunction and all its fields.
  * Returns true on success, false on allocation failure.
  */
 bool value_clone(Value *out, const Value *src);

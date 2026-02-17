@@ -79,7 +79,7 @@ typedef enum {
  * constants:  pool of constant values (numbers, strings, identifiers)
  * lines:      source line number per bytecode byte (for error reporting)
  */
-typedef struct {
+typedef struct Chunk {
     uint8_t *code;
     size_t count;
     size_t capacity;

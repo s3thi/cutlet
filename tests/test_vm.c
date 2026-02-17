@@ -1149,6 +1149,129 @@ TEST(test_concat_precedence) { assert_vm_string("1 + 2 .. 3 + 4", "37", "concat 
 TEST(test_add_strings_error) { assert_vm_error("\"a\" + \"b\"", "add strings error"); }
 
 /* ============================================================
+ * VAL_FUNCTION value type
+ * ============================================================ */
+
+/* Helper: create a minimal ObjFunction for testing.
+ * Caller gets a fully heap-allocated ObjFunction suitable for
+ * make_function() (which takes ownership). */
+static ObjFunction *test_make_obj_function(const char *name, int arity, const char **param_names) {
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = name ? strdup(name) : NULL;
+    fn->arity = arity;
+    if (arity > 0 && param_names) {
+        fn->params = (char **)calloc((size_t)arity, sizeof(char *));
+        for (int i = 0; i < arity; i++) {
+            fn->params[i] = strdup(param_names[i]);
+        }
+    }
+    fn->chunk = malloc(sizeof(Chunk));
+    chunk_init(fn->chunk);
+    fn->native = NULL;
+    return fn;
+}
+
+/* Format a named function → "<fn foo>" */
+TEST(test_fn_format_named) {
+    ObjFunction *fn = test_make_obj_function("foo", 0, NULL);
+    Value v = make_function(fn);
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "<fn foo>", "named function format");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* Format an anonymous function → "<fn>" */
+TEST(test_fn_format_anonymous) {
+    ObjFunction *fn = test_make_obj_function(NULL, 0, NULL);
+    Value v = make_function(fn);
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "<fn>", "anonymous function format");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* Clone a function: deep copy with independent ownership */
+TEST(test_fn_clone_independence) {
+    const char *params[] = {"x", "y"};
+    ObjFunction *fn = test_make_obj_function("add", 2, params);
+    Value orig = make_function(fn);
+    Value cloned;
+    bool ok = value_clone(&cloned, &orig);
+    ASSERT(ok, "clone succeeds");
+    ASSERT(cloned.type == VAL_FUNCTION, "clone is function");
+    ASSERT(cloned.function != orig.function, "clone has different pointer");
+    ASSERT(strcmp(cloned.function->name, "add") == 0, "clone name correct");
+    ASSERT(cloned.function->arity == 2, "clone arity correct");
+    ASSERT(strcmp(cloned.function->params[0], "x") == 0, "clone param 0");
+    ASSERT(strcmp(cloned.function->params[1], "y") == 0, "clone param 1");
+    value_free(&orig);
+    value_free(&cloned);
+    PASS();
+}
+
+/* Free a function — sanitizers verify no leaks */
+TEST(test_fn_free_no_leak) {
+    const char *params[] = {"a"};
+    ObjFunction *fn = test_make_obj_function("test", 1, params);
+    Value v = make_function(fn);
+    value_free(&v);
+    /* No crash, no leak (sanitizer will catch). */
+    PASS();
+}
+
+/* Functions are truthy */
+TEST(test_fn_is_truthy) {
+    ObjFunction *fn = test_make_obj_function("t", 0, NULL);
+    Value v = make_function(fn);
+    ASSERT(is_truthy(&v) == true, "functions are truthy");
+    value_free(&v);
+    PASS();
+}
+
+/* make_native creates a function Value with correct properties */
+TEST(test_native_fn_create) {
+    Value v = make_native("say", 1, NULL);
+    ASSERT(v.type == VAL_FUNCTION, "is function");
+    ASSERT(v.function != NULL, "has ObjFunction");
+    ASSERT(strcmp(v.function->name, "say") == 0, "native name");
+    ASSERT(v.function->arity == 1, "native arity");
+    ASSERT(v.function->chunk == NULL, "native has no chunk");
+    value_free(&v);
+    PASS();
+}
+
+/* make_native formats as "<fn name>" */
+TEST(test_native_fn_format) {
+    Value v = make_native("say", 1, NULL);
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "<fn say>", "native function format");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* String concatenation with function auto-coerces */
+TEST(test_fn_concat_coercion) {
+    assert_vm_string("\"val: \" .. true", "val: true", "concat sanity check");
+    /* Once fn defs are compilable, test fn concat too. For now,
+     * verify value_format("<fn foo>") works via direct construction. */
+    ObjFunction *fn = test_make_obj_function("foo", 0, NULL);
+    Value v = make_function(fn);
+    char *s = value_format(&v);
+    ASSERT(s != NULL, "format not null");
+    ASSERT_STR_EQ(s, "<fn foo>", "fn formats for concat");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1400,6 +1523,16 @@ int main(void) {
     RUN_TEST(test_concat_with_var);
     RUN_TEST(test_concat_precedence);
     RUN_TEST(test_add_strings_error);
+
+    printf("\nVAL_FUNCTION value type:\n");
+    RUN_TEST(test_fn_format_named);
+    RUN_TEST(test_fn_format_anonymous);
+    RUN_TEST(test_fn_clone_independence);
+    RUN_TEST(test_fn_free_no_leak);
+    RUN_TEST(test_fn_is_truthy);
+    RUN_TEST(test_native_fn_create);
+    RUN_TEST(test_native_fn_format);
+    RUN_TEST(test_fn_concat_coercion);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

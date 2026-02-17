@@ -113,6 +113,9 @@ static bool values_equal(const Value *a, const Value *b) {
         return a->boolean == b->boolean;
     case VAL_NOTHING:
         return true;
+    case VAL_FUNCTION:
+        /* Identity-based: only equal if pointing to the same ObjFunction. */
+        return a->function == b->function;
     default:
         return false;
     }

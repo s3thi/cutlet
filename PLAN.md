@@ -105,41 +105,9 @@ Each step follows the required process: tests first → confirm failures → imp
 
 Added `AST_FUNCTION` node type and `fn name(params) is body end` parsing. `params`/`param_count` fields on `AstNode`. `fn`/`is` reserved keywords. `parse_fn()` follows `parse_while` pattern. `ast_format` outputs `[FN name(a, b) body]`. `parser_is_complete` handles `fn` as opener needing `end`. 20 new tests (8 success, 5 error, 2 reserved keyword, 5 is_complete). Files: `src/parser.h`, `src/parser.c`, `tests/test_parser.c`.
 
-#### Step 2: VAL_FUNCTION value type
+#### Step 2: VAL_FUNCTION value type ✅
 
-Add `VAL_FUNCTION` to the value system. Introduce `ObjFunction` struct that holds everything needed to call a function.
-
-**ObjFunction** (new, in `value.h`):
-```c
-typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
-
-typedef struct {
-    char *name;          /* Function name (owned, NULL for anonymous). */
-    int arity;           /* Number of parameters. */
-    char **params;       /* Parameter names (owned array of owned strings). */
-    Chunk *chunk;        /* Compiled body (owned, NULL for natives). */
-    NativeFn native;     /* Native function pointer (NULL for user fns). */
-} ObjFunction;
-```
-
-**Value changes** (`value.h`, `value.c`):
-- Add `VAL_FUNCTION` to `ValueType`.
-- Add `ObjFunction *function` field to `Value`.
-- `make_function(ObjFunction *fn)` — takes ownership.
-- `make_native(const char *name, int arity, NativeFn fn)` — creates a native ObjFunction.
-- `value_format()`: `"<fn name>"` for named, `"<fn>"` for anonymous.
-- `value_free()`: free ObjFunction (name, params, chunk if non-NULL).
-- `value_clone()`: deep copy ObjFunction.
-- `is_truthy()`: functions are truthy.
-
-**Tests** (`tests/test_eval.c` or new `tests/test_value.c`):
-- Create a VAL_FUNCTION, format it → `"<fn foo>"`.
-- Clone a VAL_FUNCTION, verify independence.
-- Free a VAL_FUNCTION, no leaks.
-- `is_truthy(VAL_FUNCTION)` → true.
-- Equality: functions are only equal to themselves (identity).
-
-**Files touched**: `src/value.h`, `src/value.c`, `src/chunk.h` (forward declare or include), tests.
+Added `VAL_FUNCTION` to the value system with `ObjFunction` struct (name, arity, params, chunk, native pointer). `NativeFn` typedef for built-in function pointers. `Value` changed from anonymous `typedef struct` to `struct Value` (needed for `NativeFn` forward reference). `Chunk` changed to named struct for forward declaration in `value.h`. Constructors: `make_function()` (takes ownership), `make_native()` (allocates ObjFunction for built-ins). `value_format()`: `"<fn name>"` / `"<fn>"`. `value_free()`: deep-frees ObjFunction. `value_clone()`: deep-copies ObjFunction including chunk bytecode and constants. `is_truthy()`: functions are truthy. `values_equal()` in `vm.c`: identity-based (pointer comparison). 8 new tests in `test_vm.c`. Files: `src/value.h`, `src/value.c`, `src/chunk.h`, `src/vm.c`, `tests/test_vm.c`.
 
 #### Step 3: Compile function definitions
 
