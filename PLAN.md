@@ -92,69 +92,12 @@ Created `scripts/symbol_index.py` — uses Universal Ctags JSON output to extrac
 
 ---
 
-### Step 3: Call graph script
+### Step 3 (completed): Call graph script
 
-**No dependencies on other steps. Can be done in parallel with steps 1 and 2.**
+Created `scripts/call_graph.py` — uses cscope and Universal Ctags to find callers and callees for every public function defined in `src/*.h`, producing a markdown cross-reference. Callers are deduplicated by (file, function) to keep output compact. Builds cscope database in a `try/finally` block that always cleans up temp files. Checks for both cscope and Universal Ctags availability with clear install instructions.
 
-Create `scripts/call_graph.py` — uses cscope to find callers and callees for every public function, producing a markdown cross-reference.
-
-**What to do:**
-
-1. Create `scripts/call_graph.py`. The script should:
-   - Build the cscope database: run `cscope -Rb -s src/` (recursive, build only, source dir). This creates `cscope.out` in the current directory.
-   - Extract public function names from `src/*.h` using ctags (same approach as step 2, but only function names).
-   - For each public function, query cscope:
-     - `cscope -d -L3 funcname` — find callers (cscope query type 3: "functions calling this function"). Each output line has format: `file function line text`.
-     - `cscope -d -L2 funcname` — find callees (cscope query type 2: "functions called by this function").
-   - Group results by function. For each function, show: definition location, callers (with file:line and calling function name), callees, and test references.
-   - Clean up `cscope.out` and related files after running.
-   - Output markdown to stdout.
-
-2. **Output format** (example):
-   ```markdown
-   # Call Graph
-
-   Generated: 2026-02-17
-
-   ## tokenizer_create
-
-   Defined: src/tokenizer.c:42
-
-   ### Called by
-   - src/repl.c:49 — build_tokens_string()
-   - tests/test_tokenizer.c:18 — test_single_number()
-   - tests/test_tokenizer.c:34 — test_single_string()
-
-   ### Calls
-   - malloc
-   - tokenizer_reset
-
-   ## compile
-
-   Defined: src/compiler.c:562
-
-   ### Called by
-   - src/repl.c:138 — repl_eval_line()
-   - tests/test_compiler.c:22 — compile_helper()
-
-   ### Calls
-   - chunk_init
-   - compile_node
-   - chunk_free
-   ...
-   ```
-
-3. Implementation notes:
-   - Parse cscope output with Python: each line is space-separated `file function line text`. `line.split(None, 3)` handles it.
-   - Use `subprocess.run()` to invoke cscope. Run with `-d` (don't rebuild) after the initial `-Rb` build.
-   - Exclude vendor files from the cscope source list.
-   - If cscope is not installed, print a clear error message with install instructions and exit non-zero.
-   - Clean up generated files (`cscope.out`, `cscope.in.out`, `cscope.po.out`) in a `finally` block.
-
-4. Add to `Makefile`: `call-graph` target that runs `python3 scripts/call_graph.py`.
-
-**Files to create**: `scripts/call_graph.py`.
-**Files to touch**: `Makefile` (add target).
+**Files created**: `scripts/call_graph.py`.
+**Files touched**: `Makefile` (added `call-graph` target and help entry), `.gitignore` (added cscope temp files).
 
 ---
 

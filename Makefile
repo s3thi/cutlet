@@ -328,6 +328,10 @@ check: format-check lint
 symbol-index:
 	@python3 scripts/symbol_index.py
 
+.PHONY: call-graph
+call-graph:
+	@python3 scripts/call_graph.py
+
 # Clean build artifacts
 .PHONY: clean
 clean:
@@ -352,5 +356,6 @@ help:
 	@echo "  test-sanitize - Run tests under ASan+UBSan+LSan"
 	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  symbol-index  - Generate symbol index from src/*.h (requires Universal Ctags)"
+	@echo "  call-graph    - Generate call graph for public functions (requires cscope + ctags)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"
