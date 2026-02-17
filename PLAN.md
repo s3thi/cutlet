@@ -116,53 +116,12 @@ Added `--bytecode` debug flag alongside existing `--tokens` and `--ast` flags. R
 
 ---
 
-### Step 2: Symbol index script
+### Step 2 (completed): Symbol index script
 
-**No dependencies on other steps. Can be done in parallel with step 1.**
+Created `scripts/symbol_index.py` — uses Universal Ctags JSON output to extract all public symbols from `src/*.h` and produces a markdown reference with Types and Functions tables per header file. Filters out anonymous compiler names (`__anon*`) and include guard macros. Checks for Universal Ctags availability with clear install instructions on error.
 
-Create `scripts/symbol_index.py` — uses Universal Ctags to extract all public symbols from `src/*.h` and produces a markdown reference.
-
-**What to do:**
-
-1. Create `scripts/symbol_index.py`. The script should:
-   - Run `ctags --output-format=json --fields=+Sn --kinds-c=+fpsgeutd -f - src/*.h` to get structured JSON output. Each line is a JSON object with fields: `name`, `path`, `line`, `kind` (function/struct/enum/typedef/member), `signature` (if `+S` requested), etc.
-   - Parse the JSON lines, group by file, then by kind (types vs. functions).
-   - Output a markdown document to stdout with a table per header file.
-   - Include type definitions (enums, structs/typedefs) and function prototypes.
-
-2. **Output format** (same as before):
-   ```markdown
-   # Symbol Index
-
-   Generated: 2026-02-17
-
-   ## src/tokenizer.h
-
-   ### Types
-   | Name | Kind | Line |
-   |------|------|------|
-   | TokenType | enum | 24 |
-   | Token | struct | 46 |
-   | Tokenizer | opaque struct | 61 |
-
-   ### Functions
-   | Name | Signature | Line |
-   |------|-----------|------|
-   | tokenizer_create | `Tokenizer *tokenizer_create(const char *input)` | 68 |
-   | tokenizer_destroy | `void tokenizer_destroy(Tokenizer *tok)` | 74 |
-   ...
-   ```
-
-3. Implementation notes:
-   - Universal Ctags' `--output-format=json` produces one JSON object per line (JSON Lines format). Python's `json.loads()` handles this trivially — no need for external Python packages.
-   - Use `subprocess.run()` to invoke ctags.
-   - If ctags is not installed, print a clear error message with install instructions and exit non-zero.
-   - Only scan `src/*.h` (not `vendor/`).
-
-4. Add to `Makefile`: `symbol-index` target that runs `python3 scripts/symbol_index.py`.
-
-**Files to create**: `scripts/symbol_index.py`.
-**Files to touch**: `Makefile` (add target).
+**Files created**: `scripts/symbol_index.py`.
+**Files touched**: `Makefile` (added `symbol-index` target and help entry).
 
 ---
 

@@ -321,6 +321,13 @@ test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITI
 .PHONY: check
 check: format-check lint
 
+# ---------- Codebase understanding tools ----------
+# Output goes to stdout (not committed to git). Requires: python3, ctags (Universal Ctags), cscope.
+
+.PHONY: symbol-index
+symbol-index:
+	@python3 scripts/symbol_index.py
+
 # Clean build artifacts
 .PHONY: clean
 clean:
@@ -344,5 +351,6 @@ help:
 	@echo "  lint          - Run clang-tidy static analysis (requires compile-db)"
 	@echo "  test-sanitize - Run tests under ASan+UBSan+LSan"
 	@echo "  check         - Run all required checks (format-check + lint)"
+	@echo "  symbol-index  - Generate symbol index from src/*.h (requires Universal Ctags)"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  help          - Show this help message"
