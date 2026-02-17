@@ -30,6 +30,11 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 - **Function calls**: `name(arg1, arg2, ...)` syntax parsed as `AST_CALL`. Zero or more comma-separated arguments. Parsed as postfix after identifier.
 - **Tests**: Exhaustive C test suites for tokenizer, parser, eval, runtime, REPL client, REPL server, ptr_array, JSON. Integration tests in `test_cli.sh`. Sanitizer builds via `make test-sanitize`. All REPL tests use `repl_eval_line()` (no legacy wrappers).
 - **Documentation**: `TUTORIAL.md` — learnxinyminutes-style tutorial covering all features. `AGENTS.md` — includes language feature checklist reminding agents to prompt users to update tutorial and examples.
+- **Example programs**: 12 `.cutlet` files in `examples/`, one per language feature: arithmetic, modulo-power, strings, booleans, nothing, comparison, variables, if-else, while-loop, break-continue, function-call, unary. Small, self-contained, use `say()` for output. Serve as documentation, pipeline tracer input, and lightweight feature tests.
+- **Codebase understanding tools**: Three Python analysis scripts in `scripts/` help orient agents and humans. `make understand` runs all three. Requires `python3`, Universal Ctags (`ctags`), and `cscope`.
+  - `scripts/symbol_index.py` (`make symbol-index`) — uses Universal Ctags JSON output to extract all public symbols from `src/*.h`, producing markdown with Types and Functions tables per header.
+  - `scripts/call_graph.py` (`make call-graph`) — uses cscope and Universal Ctags to find callers and callees for every public function in `src/*.h`, producing a markdown cross-reference.
+  - `scripts/pipeline_trace.py` (`make pipeline-trace`) — traces a `.cutlet` file through every pipeline stage (tokens, AST, bytecode) with source location cross-references. Dynamically extracts keywords from `parser.c`. Validates output format parsing and source location coverage with fail-fast errors.
 
 ## Key files
 
@@ -51,6 +56,10 @@ See `AGENTS.md` for project conventions and instructions that must be followed.
 | `tests/test_*.c` | Unit tests |
 | `tests/test_cli.sh` | Integration tests |
 | `TUTORIAL.md` | Language tutorial (learnxinyminutes style) |
+| `examples/*.cutlet` | Example programs, one per language feature |
+| `scripts/symbol_index.py` | Public symbol index via Universal Ctags |
+| `scripts/call_graph.py` | Caller/callee cross-reference via cscope |
+| `scripts/pipeline_trace.py` | Pipeline tracer (tokens → AST → bytecode → source locations) |
 
 ---
 
@@ -68,73 +77,6 @@ The `examples/` directory now contains one `.cutlet` file per language feature (
 4. Implement the feature.
 5. Run `make test` and `make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
-
----
-
-## Next: Codebase understanding tools
-
-Build three analysis scripts that help coding agents (and humans) understand the codebase. All scripts live in `scripts/`, are written in Python 3, and output markdown to stdout. Symbol indexing uses Universal Ctags, call graphs use cscope, and the pipeline tracer uses the cutlet interpreter itself. A `make understand` target runs all of them.
-
-**Dev tool requirements**: `python3`, `ctags` (Universal Ctags), `cscope`. These are standard dev tools available in every package manager (`brew install universal-ctags cscope` / `apt install universal-ctags cscope`).
-
-### Step 1 (completed): `--bytecode` debug flag
-
-Added `--bytecode` REPL flag with `chunk_disassemble_to_string()`. Threaded through REPL, server, JSON protocol, and CLI.
-
----
-
-### Step 2 (completed): Symbol index script
-
-Created `scripts/symbol_index.py` — uses Universal Ctags JSON output to extract all public symbols from `src/*.h` and produces a markdown reference with Types and Functions tables per header file. Filters out anonymous compiler names (`__anon*`) and include guard macros. Checks for Universal Ctags availability with clear install instructions on error.
-
-**Files created**: `scripts/symbol_index.py`.
-**Files touched**: `Makefile` (added `symbol-index` target and help entry).
-
----
-
-### Step 3 (completed): Call graph script
-
-Created `scripts/call_graph.py` — uses cscope and Universal Ctags to find callers and callees for every public function defined in `src/*.h`, producing a markdown cross-reference. Callers are deduplicated by (file, function) to keep output compact. Builds cscope database in a `try/finally` block that always cleans up temp files. Checks for both cscope and Universal Ctags availability with clear install instructions.
-
-**Files created**: `scripts/call_graph.py`.
-**Files touched**: `Makefile` (added `call-graph` target and help entry), `.gitignore` (added cscope temp files).
-
----
-
-### Step 4 (completed): Example programs in `examples/`
-
-Created 12 `.cutlet` example programs, one per language feature: `arithmetic`, `modulo-power`, `strings`, `booleans`, `nothing`, `comparison`, `variables`, `if-else`, `while-loop`, `break-continue`, `function-call`, `unary`. Each is small, self-contained, uses `say()` for output, and has a comment header naming the feature. All verified with `cutlet run`.
-
-**Files created**: `examples/*.cutlet` (12 files).
-
----
-
-### Step 5 (completed): Pipeline tracer script
-
-Created `scripts/pipeline_trace.py` — takes a `.cutlet` file and produces a complete markdown trace through every pipeline stage (tokens, AST, bytecode) with source location cross-references. Runs the interpreter with `--tokens --ast --bytecode` in a single invocation, parses the combined output, then uses regex-based grep on `src/parser.c`, `src/compiler.c`, and `src/vm.c` to map keywords, AST node types, and opcodes to their source locations. Tests section groups references by file for readability. Handles parse errors gracefully.
-
-**Files created**: `scripts/pipeline_trace.py`.
-**Files touched**: `Makefile` (added `pipeline-trace` target and help entry).
-
----
-
-### Step 6 (completed): `make understand` target and combined output
-
-Added `make understand` target that runs all three analysis tools (`symbol-index`, `call-graph`, `pipeline-trace`) in sequence. Added help entry. Individual targets and `.gitignore` entries for cscope files were already in place from previous steps.
-
-**Files touched**: `Makefile` (added `understand` target and help entry).
-
----
-
-### Step 7 (completed): Harden `pipeline_trace.py` against language evolution
-
-Hardened `scripts/pipeline_trace.py` against three fragilities that would produce silently incomplete output when the language or codebase evolves. The script now errors (exit 1) when it detects stale assumptions rather than producing misleading partial output.
-
-- **7a**: Replaced hardcoded `KEYWORDS` frozenset with `extract_keywords_from_parser()` that dynamically extracts keywords from `src/parser.c` by grepping for `token_is_keyword()` calls. Fail-fast if zero keywords found.
-- **7b**: After `parse_output()`, each section (TOKENS, AST, BYTECODE) is validated independently — if the raw output contains the section marker but the parsed list is empty, error with a descriptive message and exit 1.
-- **7c**: After building `source_locations`, total coverage is validated (AST nodes with no parser/compiler locations → error; opcodes with no VM locations → error). Per-item warnings are printed to stderr for individual misses (non-fatal).
-
-**Files modified**: `scripts/pipeline_trace.py`.
 
 ---
 End of handoff.
