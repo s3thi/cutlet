@@ -1,0 +1,16 @@
+# Feature: if/else expressions
+# Exercises: IF, JUMP_IF_FALSE, JUMP
+
+say(if true then 1 else 2 end)
+say(if false then 1 else 2 end)
+say(if false then 1 end)
+
+my score = 85
+my grade = if score >= 90 then
+  "A"
+else if score >= 80 then
+  "B"
+else
+  "C"
+end
+say("grade: " .. grade)

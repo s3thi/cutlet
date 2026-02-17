@@ -1,0 +1,16 @@
+# Feature: break and continue
+# Exercises: BREAK, CONTINUE in while loops
+
+# break with a value
+my found = while true do
+  break "done"
+end
+say("break value: " .. found)
+
+# continue to skip even numbers
+my i = 0
+while i < 6 do
+  i = i + 1
+  if i % 2 == 0 then continue end
+  say(i)
+end

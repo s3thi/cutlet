@@ -1,0 +1,8 @@
+# Feature: arithmetic
+# Exercises: NUMBER, BINOP, +, -, *, /, parenthesized grouping
+
+say(1 + 2)
+say(10 - 3)
+say(2 * 3)
+say(7 / 2)
+say((2 + 3) * 4 - 1)

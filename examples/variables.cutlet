@@ -1,0 +1,10 @@
+# Feature: variables
+# Exercises: DECL (my), ASSIGN, IDENT, GET_GLOBAL, SET_GLOBAL
+
+my x = 10
+say(x)
+x = x + 1
+say(x)
+my a = my b = 5
+say(a)
+say(b)

@@ -1,0 +1,9 @@
+# Feature: booleans and logical operators
+# Exercises: BOOL, and, or, not, short-circuit evaluation
+
+say(true and true)
+say(true and false)
+say(false or true)
+say(not true)
+say(1 and 2)
+say(0 or 42)

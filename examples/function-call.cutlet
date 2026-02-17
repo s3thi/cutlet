@@ -1,0 +1,6 @@
+# Feature: function calls
+# Exercises: CALL, built-in function dispatch
+
+say("hello")
+say(1 + 2)
+say("result: " .. (10 * 5))

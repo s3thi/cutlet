@@ -1,0 +1,7 @@
+# Feature: strings and concatenation
+# Exercises: STRING, .. operator, auto-coercion
+
+say("hello" .. " " .. "world")
+say("score: " .. 42)
+say("alive: " .. true)
+say("value: " .. nothing)

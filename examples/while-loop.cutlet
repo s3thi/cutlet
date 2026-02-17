@@ -1,0 +1,11 @@
+# Feature: while loops
+# Exercises: WHILE, LOOP, JUMP_IF_FALSE
+
+my i = 0
+my sum = 0
+while i < 5 do
+  i = i + 1
+  sum = sum + i
+end
+say("sum 1..5: " .. sum)
+say("counted to: " .. i)

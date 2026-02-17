@@ -101,32 +101,11 @@ Created `scripts/call_graph.py` — uses cscope and Universal Ctags to find call
 
 ---
 
-### Step 4: Example programs in `examples/`
+### Step 4 (completed): Example programs in `examples/`
 
-**No dependencies. Can be done in parallel with steps 1-3.**
+Created 12 `.cutlet` example programs, one per language feature: `arithmetic`, `modulo-power`, `strings`, `booleans`, `nothing`, `comparison`, `variables`, `if-else`, `while-loop`, `break-continue`, `function-call`, `unary`. Each is small, self-contained, uses `say()` for output, and has a comment header naming the feature. All verified with `cutlet run`.
 
-Create small `.cutlet` programs that each exercise one language feature in isolation. These serve three purposes: (1) input to the pipeline tracer, (2) documentation/examples for users of the language, (3) a lightweight test suite exercising each feature.
-
-**What to do:**
-
-Create `examples/` directory with one `.cutlet` file per feature:
-
-- `arithmetic.cutlet` — `(2 + 3) * 4 - 1` (exercises NUMBER, BINOP, +, -, *, grouping)
-- `modulo-power.cutlet` — `10 % 3` and `2 ** 8` (exercises %, **)
-- `strings.cutlet` — `"hello" .. " " .. "world"` (exercises STRING, ..)
-- `booleans.cutlet` — `true and false or not true` (exercises BOOL, and, or, not, short-circuit)
-- `nothing.cutlet` — `nothing == nothing` (exercises NOTHING, ==)
-- `comparison.cutlet` — `3 < 5` and `"a" >= "b"` (exercises <, >, <=, >=, ==, !=)
-- `variables.cutlet` — `my x = 10` then `x = x + 1` then `x` (exercises DECL, ASSIGN, IDENT, GET/SET_GLOBAL)
-- `if-else.cutlet` — `if true then 1 else 2 end` (exercises IF, JUMP_IF_FALSE, JUMP)
-- `while-loop.cutlet` — count to 5 with accumulator (exercises WHILE, LOOP, JUMP_IF_FALSE)
-- `break-continue.cutlet` — while loop with break value and continue (exercises BREAK, CONTINUE)
-- `function-call.cutlet` — `say("hello")` (exercises CALL, built-in dispatch)
-- `unary.cutlet` — `-42` and `not true` (exercises UNARY, NEGATE, NOT)
-
-Each file should be small (1-5 lines), self-contained, and exercise the feature clearly. Add a comment at the top of each file naming the feature: `# Feature: while loops`. Since these double as user-facing examples, write them to be readable and instructive — use `say()` to print results so users can run them with `cutlet run` and see output.
-
-**Files to create**: `examples/*.cutlet` (12 files).
+**Files created**: `examples/*.cutlet` (12 files).
 
 ---
 

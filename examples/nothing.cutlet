@@ -1,0 +1,7 @@
+# Feature: nothing
+# Exercises: NOTHING, == with nothing
+
+say(nothing)
+say(nothing == nothing)
+say(nothing == 0)
+say(not nothing)

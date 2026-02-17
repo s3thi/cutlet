@@ -1,0 +1,9 @@
+# Feature: unary operators
+# Exercises: UNARY, NEGATE, NOT
+
+say(-42)
+say(-(-3))
+say(not true)
+say(not false)
+say(not 0)
+say(not "")

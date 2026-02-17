@@ -1,0 +1,10 @@
+# Feature: comparison operators
+# Exercises: <, >, <=, >=, ==, !=
+
+say(3 < 5)
+say(5 > 3)
+say(3 <= 3)
+say(3 >= 4)
+say(1 == 1)
+say(1 != 2)
+say("a" < "b")
