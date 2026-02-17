@@ -98,6 +98,8 @@ static AstNode *make_leaf(AstNodeType type, const char *value, size_t value_len,
     node->line = line;
     node->children = NULL;
     node->child_count = 0;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -123,6 +125,8 @@ static AstNode *make_binop(const char *op, size_t op_len, AstNode *left, AstNode
     node->line = line;
     node->children = NULL;
     node->child_count = 0;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -147,6 +151,8 @@ static AstNode *make_unary(const char *op, size_t op_len, AstNode *operand, size
     node->line = line;
     node->children = NULL;
     node->child_count = 0;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -172,6 +178,8 @@ static AstNode *make_named(AstNodeType type, const char *name, size_t name_len, 
     node->line = line;
     node->children = NULL;
     node->child_count = 0;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -191,6 +199,8 @@ static AstNode *make_block(AstNode **children, size_t count, size_t line) {
     node->line = line;
     node->children = children;
     node->child_count = count;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -226,6 +236,8 @@ static AstNode *make_if(AstNode *condition, AstNode *then_body, AstNode *else_bo
     node->line = line;
     node->children = children;
     node->child_count = count;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -253,6 +265,8 @@ static AstNode *make_call(const char *name, size_t name_len, AstNode **args, siz
     node->line = line;
     node->children = args;
     node->child_count = arg_count;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -336,7 +350,8 @@ static bool is_reserved_keyword(const Token *t) {
            token_is_keyword(t, "then") || token_is_keyword(t, "else") ||
            token_is_keyword(t, "end") || token_is_keyword(t, "while") ||
            token_is_keyword(t, "do") || token_is_keyword(t, "break") ||
-           token_is_keyword(t, "continue");
+           token_is_keyword(t, "continue") || token_is_keyword(t, "fn") ||
+           token_is_keyword(t, "is");
 }
 
 /* ============================================================
@@ -348,6 +363,7 @@ static AstNode *parse_assignment(Parser *p);
 static AstNode *parse_expr(Parser *p, int min_prec);
 static AstNode *parse_if(Parser *p);
 static AstNode *parse_while(Parser *p);
+static AstNode *parse_fn(Parser *p);
 static void skip_newlines(Parser *p);
 static void free_expr_array(PtrArray *arr);
 
@@ -433,6 +449,11 @@ static AstNode *parse_atom(Parser *p) {
         return parse_while(p);
     }
 
+    /* Function definition expression */
+    if (token_is_keyword(&t, "fn")) {
+        return parse_fn(p);
+    }
+
     /* Break expression: break [value]
      * Parsed syntactically anywhere; the compiler enforces loop context.
      * Peek at the next token to decide whether break has a value:
@@ -479,6 +500,8 @@ static AstNode *parse_atom(Parser *p) {
         node->line = t.line;
         node->children = NULL;
         node->child_count = 0;
+        node->params = NULL;
+        node->param_count = 0;
         return node;
     }
 
@@ -499,6 +522,8 @@ static AstNode *parse_atom(Parser *p) {
         node->line = t.line;
         node->children = NULL;
         node->child_count = 0;
+        node->params = NULL;
+        node->param_count = 0;
         return node;
     }
 
@@ -1088,6 +1113,8 @@ static AstNode *make_while(AstNode *condition, AstNode *body, size_t line) {
     node->line = line;
     node->children = children;
     node->child_count = 2;
+    node->params = NULL;
+    node->param_count = 0;
     return node;
 }
 
@@ -1214,6 +1241,290 @@ static AstNode *parse_while(Parser *p) {
     }
 
     return while_node;
+}
+
+/*
+ * Helper: free a params array (array of owned strings).
+ */
+static void free_params(char **params, size_t count) {
+    if (!params)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        free(params[i]);
+    }
+    free((void *)params);
+}
+
+/*
+ * Parse a function definition expression.
+ * Syntax: fn name(param1, param2, ...) is body end
+ *
+ * Returns an AST_FUNCTION node with:
+ *   value = function name
+ *   params = array of parameter name strings
+ *   param_count = number of parameters
+ *   left = body expression (single expr or AST_BLOCK)
+ */
+static AstNode *parse_fn(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    Token fn_tok = p->current;
+
+    /* Consume 'fn' keyword (already verified by caller) */
+    advance(p);
+
+    /* Expect function name (identifier) */
+    if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+        parser_error(p, p->current.line, p->current.col, "expected function name after 'fn'");
+        return NULL;
+    }
+
+    /* Save function name before advance invalidates token buffer */
+    char *fn_name = malloc(p->current.value_len + 1);
+    if (!fn_name) {
+        parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+        return NULL;
+    }
+    memcpy(fn_name, p->current.value, p->current.value_len);
+    fn_name[p->current.value_len] = '\0';
+    advance(p);
+
+    /* Expect '(' */
+    if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+        p->current.value[0] != '(') {
+        parser_error(p, p->current.line, p->current.col, "expected '(' after function name");
+        free(fn_name);
+        return NULL;
+    }
+    advance(p); /* consume '(' */
+
+    /* Parse comma-separated parameter names */
+    PtrArray param_names;
+    if (!ptr_array_init(&param_names, 4)) {
+        parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+        free(fn_name);
+        return NULL;
+    }
+
+    /* Check for zero-param: immediate ')' */
+    if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+          p->current.value[0] == ')')) {
+        /* Parse first parameter name */
+        if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+            parser_error(p, p->current.line, p->current.col, "expected parameter name");
+            free(fn_name);
+            ptr_array_destroy(&param_names);
+            return NULL;
+        }
+        char *param = malloc(p->current.value_len + 1);
+        if (!param) {
+            parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+            free(fn_name);
+            ptr_array_destroy(&param_names);
+            return NULL;
+        }
+        memcpy(param, p->current.value, p->current.value_len);
+        param[p->current.value_len] = '\0';
+        ptr_array_push(&param_names, param);
+        advance(p);
+
+        /* Parse additional comma-separated parameter names */
+        while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+               p->current.value[0] == ',') {
+            advance(p); /* consume ',' */
+            if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+                parser_error(p, p->current.line, p->current.col, "expected parameter name");
+                free(fn_name);
+                free_params((char **)param_names.items, param_names.count);
+                param_names.items = NULL;
+                param_names.count = 0;
+                ptr_array_destroy(&param_names);
+                return NULL;
+            }
+            param = malloc(p->current.value_len + 1);
+            if (!param) {
+                parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+                free(fn_name);
+                free_params((char **)param_names.items, param_names.count);
+                param_names.items = NULL;
+                param_names.count = 0;
+                ptr_array_destroy(&param_names);
+                return NULL;
+            }
+            memcpy(param, p->current.value, p->current.value_len);
+            param[p->current.value_len] = '\0';
+            ptr_array_push(&param_names, param);
+            advance(p);
+        }
+    }
+
+    /* Expect ')' */
+    if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+        p->current.value[0] != ')') {
+        parser_error(p, p->current.line, p->current.col, "expected ')' after parameters");
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        return NULL;
+    }
+    advance(p); /* consume ')' */
+
+    skip_newlines(p);
+
+    /* Expect 'is' */
+    if (!token_is_keyword(&p->current, "is")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'is' after parameters");
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        return NULL;
+    }
+    advance(p);
+    skip_newlines(p);
+
+    /* Parse body: collect expressions until 'end' */
+    if (token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected expression in function body");
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        return NULL;
+    }
+
+    PtrArray body_exprs;
+    if (!ptr_array_init(&body_exprs, 4)) {
+        parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        return NULL;
+    }
+
+    /* Parse first body expression */
+    AstNode *expr = parse_assignment(p);
+    if (!expr) {
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        ptr_array_destroy(&body_exprs);
+        return NULL;
+    }
+    ptr_array_push(&body_exprs, expr);
+
+    /* Parse additional newline-separated expressions in body */
+    while (!p->has_error && p->current.type == TOK_NEWLINE) {
+        skip_newlines(p);
+        if (token_is_keyword(&p->current, "end"))
+            break;
+        if (p->current.type == TOK_EOF)
+            break;
+
+        expr = parse_assignment(p);
+        if (!expr) {
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            free_expr_array(&body_exprs);
+            return NULL;
+        }
+        if (!ptr_array_push(&body_exprs, expr)) {
+            ast_free(expr);
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            free_expr_array(&body_exprs);
+            parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    /* Build body: unwrap if single expression */
+    AstNode *body;
+    if (body_exprs.count == 1) {
+        body = (AstNode *)body_exprs.items[0];
+        ptr_array_destroy(&body_exprs);
+    } else {
+        size_t count = body_exprs.count;
+        AstNode **children = (AstNode **)ptr_array_release(&body_exprs);
+        body = make_block(children, count, fn_tok.line);
+        if (!body) {
+            for (size_t i = 0; i < count; i++)
+                ast_free(children[i]);
+            ptr_array_free_raw((void *)children);
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+            return NULL;
+        }
+    }
+
+    skip_newlines(p);
+
+    /* Expect 'end' */
+    if (!token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'end' to close 'fn'");
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        ast_free(body);
+        return NULL;
+    }
+    advance(p);
+
+    /* Build AST_FUNCTION node */
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node) {
+        free(fn_name);
+        free_params((char **)param_names.items, param_names.count);
+        param_names.items = NULL;
+        param_names.count = 0;
+        ptr_array_destroy(&param_names);
+        ast_free(body);
+        parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    /* Transfer param_names ownership to the node */
+    size_t pc = param_names.count;
+    char **params_arr = NULL;
+    if (pc > 0) {
+        params_arr = (char **)ptr_array_release(&param_names);
+    } else {
+        ptr_array_destroy(&param_names);
+    }
+
+    node->type = AST_FUNCTION;
+    node->value = fn_name; /* takes ownership */
+    node->left = body;     /* body expression */
+    node->right = NULL;
+    node->grouped = false;
+    node->line = fn_tok.line;
+    node->children = NULL;
+    node->child_count = 0;
+    node->params = params_arr;
+    node->param_count = pc;
+
+    return node;
 }
 
 /* ============================================================
@@ -1408,6 +1719,13 @@ void ast_free(AstNode *node) {
         }
         ptr_array_free_raw((void *)node->children);
     }
+    /* Free params array for AST_FUNCTION nodes */
+    if (node->params) {
+        for (size_t i = 0; i < node->param_count; i++) {
+            free(node->params[i]);
+        }
+        free((void *)node->params);
+    }
     free(node->value);
     free(node);
 }
@@ -1444,6 +1762,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "BREAK";
     case AST_CONTINUE:
         return "CONTINUE";
+    case AST_FUNCTION:
+        return "FN";
     default:
         return "UNKNOWN";
     }
@@ -1732,6 +2052,44 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    if (node->type == AST_FUNCTION) {
+        /* Function: [FN name(a, b) body]
+         * value = function name
+         * params = parameter name strings
+         * left = body expression */
+        char *body_str = ast_format_node(node->left);
+        if (!body_str)
+            return NULL;
+
+        /* Build params string: "a, b" or "" */
+        size_t params_len = 0;
+        for (size_t i = 0; i < node->param_count; i++) {
+            params_len += strlen(node->params[i]);
+            if (i > 0)
+                params_len += 2; /* ", " */
+        }
+
+        /* Total: "[FN name(params) body]" */
+        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + params_len + 2 +
+                     strlen(body_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(body_str);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, len - pos, "[%s %s(", type_str, node->value);
+        for (size_t i = 0; i < node->param_count; i++) {
+            if (i > 0)
+                pos += (size_t)snprintf(buf + pos, len - pos, ", ");
+            pos += (size_t)snprintf(buf + pos, len - pos, "%s", node->params[i]);
+        }
+        snprintf(buf + pos, len - pos, ") %s]", body_str);
+        free(body_str);
+        return buf;
+    }
+
     return NULL;
 }
 
@@ -1866,6 +2224,11 @@ bool parser_is_complete(const char *input) {
 
     if (strstr(msg, "expected 'do'") != NULL) {
         /* while without do - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'is'") != NULL) {
+        /* fn without is - incomplete */
         return false;
     }
 

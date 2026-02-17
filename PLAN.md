@@ -101,33 +101,9 @@ This feature requires:
 
 Each step follows the required process: tests first → confirm failures → implement → `make test && make check`.
 
-#### Step 1: AST_FUNCTION node + parser
+#### Step 1: AST_FUNCTION node + parser ✅
 
-Add the `AST_FUNCTION` node type and parse `fn name(params) is body end`.
-
-**AstNode changes** (`parser.h`):
-- Add `AST_FUNCTION` to `AstNodeType` enum.
-- Add `char **params` and `size_t param_count` fields to `AstNode` struct (used only by AST_FUNCTION).
-
-**Parser** (`parser.c`):
-- `fn` triggers a prefix parse rule.
-- Parse: `fn` → identifier (name, stored in `value`) → `(` → comma-separated identifiers (stored in `params`) → `)` → `is` → body (block until `end`) → `end`.
-- Body uses the same block-parsing logic as `if`/`while` (newline-separated expressions).
-- `ast_format()`: `"AST [FN name(a, b) [body]]"`.
-- `ast_free()`: free `params` array and each string in it.
-- `parser_is_complete()`: treat `fn` as an opener that needs `end` (like `if`/`while`).
-
-**Tests** (`tests/test_parser.c`):
-- `fn foo() is 42 end` → correct s-expr.
-- `fn add(a, b) is a + b end` → correct s-expr with params.
-- `fn foo() is\n  42\nend` → multiline body.
-- Missing `is` → parse error.
-- Missing `end` → parse error / incomplete.
-- Missing `)` → parse error.
-- `parser_is_complete("fn foo() is")` → false (incomplete).
-- `parser_is_complete("fn foo() is 42 end")` → true.
-
-**Files touched**: `src/parser.h`, `src/parser.c`, `tests/test_parser.c`.
+Added `AST_FUNCTION` node type and `fn name(params) is body end` parsing. `params`/`param_count` fields on `AstNode`. `fn`/`is` reserved keywords. `parse_fn()` follows `parse_while` pattern. `ast_format` outputs `[FN name(a, b) body]`. `parser_is_complete` handles `fn` as opener needing `end`. 20 new tests (8 success, 5 error, 2 reserved keyword, 5 is_complete). Files: `src/parser.h`, `src/parser.c`, `tests/test_parser.c`.
 
 #### Step 2: VAL_FUNCTION value type
 

@@ -1761,6 +1761,163 @@ TEST(test_expr_concat_with_number) {
 }
 
 /* ============================================================
+ * Function definition (fn) parsing tests
+ * ============================================================ */
+
+/* fn foo() is 42 end → [FN foo() [NUMBER 42]] */
+TEST(test_fn_no_params) {
+    ASSERT(ast_matches("fn foo() is 42 end", "AST [FN foo() [NUMBER 42]]"), "fn no params");
+    PASS();
+}
+
+/* fn add(a, b) is a + b end → [FN add(a, b) [BINOP + [IDENT a] [IDENT b]]] */
+TEST(test_fn_two_params) {
+    ASSERT(ast_matches("fn add(a, b) is a + b end",
+                       "AST [FN add(a, b) [BINOP + [IDENT a] [IDENT b]]]"),
+           "fn with two params");
+    PASS();
+}
+
+/* fn identity(x) is x end → [FN identity(x) [IDENT x]] */
+TEST(test_fn_one_param) {
+    ASSERT(ast_matches("fn identity(x) is x end", "AST [FN identity(x) [IDENT x]]"),
+           "fn with one param");
+    PASS();
+}
+
+/* Multiline body: fn foo() is\n  42\nend */
+TEST(test_fn_multiline_body) {
+    ASSERT(ast_matches("fn foo() is\n  42\nend", "AST [FN foo() [NUMBER 42]]"),
+           "fn multiline body");
+    PASS();
+}
+
+/* Multi-expression body */
+TEST(test_fn_multi_expr_body) {
+    ASSERT(
+        ast_matches("fn foo() is\n  1\n  2\nend", "AST [FN foo() [BLOCK [NUMBER 1] [NUMBER 2]]]"),
+        "fn multi-expression body");
+    PASS();
+}
+
+/* fn as expression in assignment */
+TEST(test_fn_in_assignment) {
+    ASSERT(ast_matches("my f = fn foo() is 42 end", "AST [DECL f [FN foo() [NUMBER 42]]]"),
+           "fn in assignment");
+    PASS();
+}
+
+/* fn with body using params */
+TEST(test_fn_body_uses_params) {
+    ASSERT(ast_matches("fn greet(name) is say(name) end",
+                       "AST [FN greet(name) [CALL say [IDENT name]]]"),
+           "fn body uses params");
+    PASS();
+}
+
+/* fn followed by another expression (multi-line program) */
+TEST(test_fn_then_call) {
+    ASSERT(
+        ast_matches("fn foo() is 42 end\nfoo()", "AST [BLOCK [FN foo() [NUMBER 42]] [CALL foo]]"),
+        "fn definition then call");
+    PASS();
+}
+
+/* Error: missing 'is' → parse error */
+TEST(test_fn_missing_is) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn foo() 42 end", &node, &err), "fn without is should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: missing 'end' → parse error */
+TEST(test_fn_missing_end) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn foo() is 42", &node, &err), "fn without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: missing ')' → parse error */
+TEST(test_fn_missing_close_paren) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn foo(a, b is 42 end", &node, &err),
+           "fn without close paren should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: missing name → parse error */
+TEST(test_fn_missing_name) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn () is 42 end", &node, &err), "fn without name should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Error: empty body → parse error */
+TEST(test_fn_empty_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn foo() is end", &node, &err), "fn with empty body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'fn' as variable name rejected */
+TEST(test_fn_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my fn = 1", &node, &err), "fn as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'is' as variable name rejected */
+TEST(test_is_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my is = 1", &node, &err), "is as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete: incomplete fn cases */
+TEST(test_is_incomplete_fn_no_is) {
+    /* "fn foo()" needs "is body end" */
+    ASSERT(!parser_is_complete("fn foo()"), "fn without is should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_fn_no_body) {
+    /* "fn foo() is" needs body and end */
+    ASSERT(!parser_is_complete("fn foo() is"), "fn without body should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_fn_no_end) {
+    /* "fn foo() is 42" needs end */
+    ASSERT(!parser_is_complete("fn foo() is 42"), "fn without end should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: complete fn */
+TEST(test_is_complete_fn) {
+    ASSERT(parser_is_complete("fn foo() is 42 end"), "complete fn should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_fn_multiline) {
+    ASSERT(parser_is_complete("fn foo() is\n  42\nend"), "multiline fn should be complete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2045,6 +2202,34 @@ int main(void) {
     RUN_TEST(test_expr_concat_right_assoc);
     RUN_TEST(test_expr_concat_chained);
     RUN_TEST(test_expr_concat_with_number);
+
+    printf("\nFunction definition (fn) parsing:\n");
+    RUN_TEST(test_fn_no_params);
+    RUN_TEST(test_fn_two_params);
+    RUN_TEST(test_fn_one_param);
+    RUN_TEST(test_fn_multiline_body);
+    RUN_TEST(test_fn_multi_expr_body);
+    RUN_TEST(test_fn_in_assignment);
+    RUN_TEST(test_fn_body_uses_params);
+    RUN_TEST(test_fn_then_call);
+
+    printf("\nFunction definition error cases:\n");
+    RUN_TEST(test_fn_missing_is);
+    RUN_TEST(test_fn_missing_end);
+    RUN_TEST(test_fn_missing_close_paren);
+    RUN_TEST(test_fn_missing_name);
+    RUN_TEST(test_fn_empty_body);
+
+    printf("\nFunction definition reserved keywords:\n");
+    RUN_TEST(test_fn_keyword_reserved);
+    RUN_TEST(test_is_keyword_reserved);
+
+    printf("\nparser_is_complete() - function definitions:\n");
+    RUN_TEST(test_is_incomplete_fn_no_is);
+    RUN_TEST(test_is_incomplete_fn_no_body);
+    RUN_TEST(test_is_incomplete_fn_no_end);
+    RUN_TEST(test_is_complete_fn);
+    RUN_TEST(test_is_complete_fn_multiline);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

@@ -29,6 +29,7 @@ typedef enum {
     AST_WHILE,    /* while loop: while cond do body end */
     AST_BREAK,    /* break [expr]: exit innermost loop, optional value */
     AST_CONTINUE, /* continue: skip to next iteration of innermost loop */
+    AST_FUNCTION, /* function def: fn name(params) is body end */
 } AstNodeType;
 
 typedef struct AstNode {
@@ -42,6 +43,10 @@ typedef struct AstNode {
     /* For AST_BLOCK only: array of child expressions */
     struct AstNode **children; /* owned array of owned nodes */
     size_t child_count;        /* number of children */
+
+    /* For AST_FUNCTION only: parameter names */
+    char **params;      /* owned array of owned strings */
+    size_t param_count; /* number of parameters */
 } AstNode;
 
 typedef struct {
