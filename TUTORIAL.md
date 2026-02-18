@@ -283,7 +283,69 @@ end
 # continue     # => ERR 'continue' outside of loop
 
 # ============================================================
-# 9. say() for output
+# 9. User-defined functions
+# ============================================================
+
+# Define a function with `fn name(params) is body end`.
+fn greet(name) is
+  say("hello " .. name)
+end
+
+greet("world")      # prints: hello world
+
+# Functions are expressions — they return a value.
+# The last expression in the body is the return value.
+fn double(x) is
+  x * 2
+end
+say(double(21))     # prints: 42
+
+# Zero-parameter functions:
+fn meaning_of_life() is 42 end
+say(meaning_of_life())  # prints: 42
+
+# Multi-line body with local variables:
+fn sum_of_squares(a, b) is
+  my a2 = a ** 2
+  my b2 = b ** 2
+  a2 + b2
+end
+say(sum_of_squares(3, 4))  # prints: 25
+
+# Recursion works — functions are bound globally before the body runs.
+fn factorial(n) is
+  if n <= 1 then 1
+  else n * factorial(n - 1)
+  end
+end
+say(factorial(5))       # prints: 120
+
+fn fib(n) is
+  if n <= 1 then n
+  else fib(n - 1) + fib(n - 2)
+  end
+end
+say(fib(10))            # prints: 55
+
+# Functions are first-class values.
+my f = fn square(x) is x ** 2 end
+say(f)                  # prints: <fn square>
+say(f(7))               # prints: 49
+
+# `fn ... end` is an expression, so the function definition itself
+# returns the function value. In the REPL:
+#   fn add(a, b) is a + b end  # => <fn add>
+
+# Calling with wrong arity is a runtime error.
+# greet()             # => ERR 'greet' expects 1 argument, got 0
+# greet("a", "b")     # => ERR 'greet' expects 1 argument, got 2
+
+# Calling a non-function is a runtime error.
+# my x = 42
+# x()                 # => ERR cannot call value of type number
+
+# ============================================================
+# 10. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -294,7 +356,7 @@ say(true)       # prints: true
 say(nothing)    # prints: nothing
 
 # ============================================================
-# 10. Running Cutlet programs
+# 11. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -315,7 +377,7 @@ say(nothing)    # prints: nothing
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 11. The REPL
+# 12. The REPL
 # ============================================================
 
 # Start an interactive REPL:
