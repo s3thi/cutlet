@@ -133,24 +133,9 @@ Added `OP_SET_LOCAL` opcode with 1-byte slot index operand. `compile_decl()` in 
 
 Confirmed recursion works automatically (OP_GET_GLOBAL resolves at call time). All error handling was already implemented in Steps 4-5 (arity checks, stack overflow, line numbers). No code changes needed — this step was purely test coverage. 9 new VM tests: factorial, fibonacci, mutual recursion (is_even/is_odd), wrong arity (too few, too many, zero-called-with-args), call stack overflow via infinite recursion, error line numbers in function bodies, arity error line numbers. Files: `tests/test_vm.c`.
 
-#### Step 9: Integration + REPL + cleanup
+#### Step 9: Integration + REPL + cleanup ✅
 
-End-to-end integration, REPL multi-line support, and disassembly cleanup.
-
-**REPL** (`src/main.c`):
-- Verify multi-line function definitions work in the local REPL (continuation prompt on `fn ... is` without `end`).
-- Verify `--bytecode` flag shows the function's inner Chunk disassembly.
-
-**CLI integration tests** (`tests/test_cli.sh`):
-- `cutlet run` with a file that defines and calls functions.
-- `echo "fn f() is 42 end\nsay(f())" | cutlet repl` → prints 42.
-
-**Bytecode disassembly** (`src/chunk.c`):
-- When disassembling a Chunk that contains a VAL_FUNCTION constant, recursively disassemble the function's Chunk too.
-
-**Tests**: integration tests covering the full pipeline.
-
-**Files touched**: `src/chunk.c`, `tests/test_cli.sh`, `tests/test_eval.c`, `src/main.c` if needed.
+Added recursive function disassembly in `chunk_disassemble_to_string()`: when a Chunk contains `VAL_FUNCTION` constants, their inner Chunks are recursively disassembled and appended (using function name or `<fn>` for anonymous). Added 13 CLI integration tests for user-defined functions: define+call via `cutlet run` (basic, return value, recursion, multiple functions, locals, expression form, arity errors), piped REPL (define+call, multiline `fn`), and `--bytecode` showing nested function chunks (run + repl). Added 2 chunk unit tests for recursive disassembly (named + anonymous). Files: `src/chunk.c`, `tests/test_chunk.c`, `tests/test_cli.sh`.
 
 **Post-implementation reminders** (per AGENTS.md):
 - Update `TUTORIAL.md` with a functions section.

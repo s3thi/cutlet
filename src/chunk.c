@@ -342,6 +342,20 @@ char *chunk_disassemble_to_string(const Chunk *chunk, const char *name) {
         offset = disassemble_instruction_to_buf(&b, chunk, offset);
     }
 
+    /* Recursively disassemble any function constants' inner chunks. */
+    for (size_t i = 0; i < chunk->const_count; i++) {
+        if (chunk->constants[i].type == VAL_FUNCTION && chunk->constants[i].function != NULL &&
+            chunk->constants[i].function->chunk != NULL) {
+            ObjFunction *fn = chunk->constants[i].function;
+            const char *label = fn->name ? fn->name : "<fn>";
+            char *inner = chunk_disassemble_to_string(fn->chunk, label);
+            if (inner) {
+                dynbuf_printf(&b, "\n%s", inner);
+                free(inner);
+            }
+        }
+    }
+
     return b.data; /* Caller owns the buffer. */
 }
 

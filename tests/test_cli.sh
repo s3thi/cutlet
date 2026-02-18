@@ -920,6 +920,88 @@ else
 fi
 rm -f "$bc_all_tmpfile"
 
+# ============================================================
+# User-defined functions (cutlet run + local REPL)
+# ============================================================
+echo
+echo "User-defined functions:"
+
+# Basic function definition and call via cutlet run
+test_run_file "define and call function" 'fn greet(name) is
+  say("hello " .. name)
+end
+greet("world")' "hello world"
+
+# Function with return value
+test_run_file "function return value" 'fn double(x) is
+  x * 2
+end
+say(double(21))' "42"
+
+# Recursive function (factorial)
+test_run_file "recursive factorial" 'fn factorial(n) is
+  if n <= 1 then 1
+  else n * factorial(n - 1)
+  end
+end
+say(factorial(5))' "120"
+
+# Multiple functions defined and called
+test_run_file "multiple functions" 'fn add(a, b) is a + b end
+fn mul(a, b) is a * b end
+say(add(2, 3))
+say(mul(4, 5))' "5
+20"
+
+# Function with local variables
+test_run_file "function with locals" 'fn compute(x) is
+  my doubled = x * 2
+  my result = doubled + 1
+  result
+end
+say(compute(10))' "21"
+
+# Function as expression (returns the function value)
+test_run_file "function is expression" 'my f = fn square(x) is x ** 2 end
+say(f(7))' "49"
+
+# Function arity error
+test_run_file_error "function wrong arity" 'fn f(a, b) is a + b end
+f(1)' "expects 2 arguments"
+
+# Piped REPL: define and call a function
+test_local_repl "repl function define+call" "$(printf 'fn f() is 42 end\nsay(f())')" "$(printf '<fn f>\n42\nnothing')"
+
+# Piped REPL: multiline function definition (continuation across lines)
+test_local_repl "repl multiline fn" "$(printf 'fn add(a, b) is\n  a + b\nend\nsay(add(3, 4))')" "$(printf '<fn add>\n7\nnothing')"
+
+# --bytecode with a function shows inner function chunk disassembly
+bc_fn_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'fn f() is 42 end' > "$bc_fn_tmpfile"
+bc_fn_result=$("$CUTLET" run "$bc_fn_tmpfile" --bytecode 2>/dev/null)
+if echo "$bc_fn_result" | grep -q "== f ==" && echo "$bc_fn_result" | grep -q "OP_RETURN"; then
+    echo "  PASS: --bytecode shows inner function chunk"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows inner function chunk"
+    echo "    Expected to contain: == f =="
+    echo "    Got: $bc_fn_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_fn_tmpfile"
+
+# --bytecode via REPL pipe with function
+bc_fn_repl_result=$(printf 'fn g(x) is x + 1 end' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_fn_repl_result" | grep -q "== g =="; then
+    echo "  PASS: --bytecode repl shows inner function chunk"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode repl shows inner function chunk"
+    echo "    Expected to contain: == g =="
+    echo "    Got: $bc_fn_repl_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

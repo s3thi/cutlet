@@ -320,6 +320,89 @@ TEST(test_disassemble_to_string_empty_chunk) {
     PASS();
 }
 
+TEST(test_disassemble_recursive_function) {
+    /*
+     * When a chunk contains a VAL_FUNCTION constant, the disassembly
+     * should recursively include the function's inner chunk.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    /* Build a simple inner function chunk: OP_CONSTANT 42, OP_RETURN */
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    int inner_idx = chunk_add_constant(inner, make_number(42.0));
+    chunk_write(inner, OP_CONSTANT, 1);
+    chunk_write(inner, (uint8_t)inner_idx, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    /* Create an ObjFunction wrapping the inner chunk. */
+    ObjFunction *fn = malloc(sizeof(ObjFunction));
+    fn->name = strdup("myfunc");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+
+    /* Add the function as a constant in the outer chunk. */
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CONSTANT, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "script");
+    ASSERT(s != NULL, "should return non-NULL string");
+
+    /* Outer chunk header and opcodes should be present. */
+    ASSERT(strstr(s, "== script ==") != NULL, "should contain outer header");
+
+    /* Inner function's chunk should be recursively disassembled. */
+    ASSERT(strstr(s, "== myfunc ==") != NULL, "should contain inner function header");
+
+    /* The inner chunk's constant (42) should appear in the output. */
+    ASSERT(strstr(s, "42") != NULL, "should contain inner constant value");
+
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
+TEST(test_disassemble_recursive_anonymous_function) {
+    /*
+     * Anonymous functions (name == NULL) should use a fallback label
+     * like "<fn>" in their disassembly header.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    chunk_write(inner, OP_NOTHING, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    ObjFunction *fn = malloc(sizeof(ObjFunction));
+    fn->name = NULL; /* anonymous */
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CONSTANT, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "script");
+    ASSERT(s != NULL, "should return non-NULL string");
+
+    /* Should use a fallback label for anonymous functions. */
+    ASSERT(strstr(s, "== <fn> ==") != NULL, "should contain anonymous function header");
+
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -358,6 +441,10 @@ int main(void) {
     RUN_TEST(test_disassemble_to_string_opcodes);
     RUN_TEST(test_disassemble_to_string_constant_value);
     RUN_TEST(test_disassemble_to_string_empty_chunk);
+
+    printf("\nRecursive function disassembly:\n");
+    RUN_TEST(test_disassemble_recursive_function);
+    RUN_TEST(test_disassemble_recursive_anonymous_function);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
