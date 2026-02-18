@@ -1272,6 +1272,43 @@ TEST(test_fn_concat_coercion) {
 }
 
 /* ============================================================
+ * Function definitions (compile + eval)
+ * ============================================================ */
+
+/* fn foo() is 42 end → foo is a VAL_FUNCTION in globals */
+TEST(test_fn_def_creates_global) {
+    Value v = run_input("fn fndef1() is 42 end\nfndef1", &test_ctx);
+    ASSERT(v.type == VAL_FUNCTION, "fn def creates a function value");
+    ASSERT(v.function != NULL, "function pointer is non-NULL");
+    ASSERT(strcmp(v.function->name, "fndef1") == 0, "function name is fndef1");
+    value_free(&v);
+    PASS();
+}
+
+/* fn foo() is 42 end evaluates to the function value itself */
+TEST(test_fn_def_evaluates_to_function) {
+    Value v = run_input("fn fndef2() is 42 end", &test_ctx);
+    ASSERT(v.type == VAL_FUNCTION, "fn def expression returns function");
+    char *s = value_format(&v);
+    ASSERT(strcmp(s, "<fn fndef2>") == 0, "formats as <fn fndef2>");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* Retrieving a defined function by name formats correctly */
+TEST(test_fn_def_format_via_global) {
+    /* Define then read back. */
+    Value v = run_input("fn fndef3(x, y) is x end\nfndef3", &test_ctx);
+    ASSERT(v.type == VAL_FUNCTION, "is function");
+    char *s = value_format(&v);
+    ASSERT(strcmp(s, "<fn fndef3>") == 0, "formats as <fn fndef3>");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1533,6 +1570,11 @@ int main(void) {
     RUN_TEST(test_native_fn_create);
     RUN_TEST(test_native_fn_format);
     RUN_TEST(test_fn_concat_coercion);
+
+    printf("\nFunction definitions (compile + eval):\n");
+    RUN_TEST(test_fn_def_creates_global);
+    RUN_TEST(test_fn_def_evaluates_to_function);
+    RUN_TEST(test_fn_def_format_via_global);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

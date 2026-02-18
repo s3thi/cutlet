@@ -109,20 +109,9 @@ Added `AST_FUNCTION` node type and `fn name(params) is body end` parsing. `param
 
 Added `VAL_FUNCTION` to the value system with `ObjFunction` struct (name, arity, params, chunk, native pointer). `NativeFn` typedef for built-in function pointers. `Value` changed from anonymous `typedef struct` to `struct Value` (needed for `NativeFn` forward reference). `Chunk` changed to named struct for forward declaration in `value.h`. Constructors: `make_function()` (takes ownership), `make_native()` (allocates ObjFunction for built-ins). `value_format()`: `"<fn name>"` / `"<fn>"`. `value_free()`: deep-frees ObjFunction. `value_clone()`: deep-copies ObjFunction including chunk bytecode and constants. `is_truthy()`: functions are truthy. `values_equal()` in `vm.c`: identity-based (pointer comparison). 8 new tests in `test_vm.c`. Files: `src/value.h`, `src/value.c`, `src/chunk.h`, `src/vm.c`, `tests/test_vm.c`.
 
-#### Step 3: Compile function definitions
+#### Step 3: Compile function definitions ✅
 
-Compile `AST_FUNCTION` into bytecode. Each function body gets its own Chunk.
-
-**Compiler** (`compiler.c`):
-- `compile_function()`: create a new Compiler with a fresh Chunk, compile the body into it, emit `OP_RETURN` at the end. Create an `ObjFunction` wrapping the Chunk. Add it as a constant in the *enclosing* Chunk. Emit `OP_CONSTANT` + `OP_DEFINE_GLOBAL` with the function name.
-- For now, the function body is compiled but **cannot be called yet** (call convention change is step 4). The function is just stored as a global variable value.
-
-**Tests** (`tests/test_compiler.c` or `tests/test_eval.c`):
-- Compile `fn foo() is 42 end` → verify bytecode contains OP_CONSTANT + OP_DEFINE_GLOBAL.
-- Eval `fn foo() is 42 end` → verify `foo` is a VAL_FUNCTION in globals.
-- `fn foo() is 42 end\nfoo` → verify evaluating the name returns `<fn foo>`.
-
-**Files touched**: `src/compiler.c`, tests.
+Added `compile_function()` to the compiler. Creates a new Compiler with a fresh Chunk for the function body, compiles the body into it, emits `OP_RETURN`. Wraps the Chunk in an `ObjFunction` (with name, arity, deep-copied params). Adds it as a `VAL_FUNCTION` constant in the enclosing Chunk. Emits `OP_CONSTANT` + `OP_DEFINE_GLOBAL` to bind the function as a global variable. Functions cannot be called yet (Step 4). 6 new tests (3 compiler, 3 VM). Files: `src/compiler.c`, `tests/test_compiler.c`, `tests/test_vm.c`.
 
 #### Step 4: Refactor call convention to stack-based
 

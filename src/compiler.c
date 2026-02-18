@@ -498,6 +498,112 @@ static void compile_continue(Compiler *c, const AstNode *node) {
     emit_loop(c, c->current_loop->loop_start, line);
 }
 
+/*
+ * Compile a function definition: fn name(params) is body end
+ *
+ * Creates a new Compiler with a fresh Chunk for the function body,
+ * compiles the body into it, emits OP_RETURN. Wraps the resulting
+ * Chunk in an ObjFunction constant in the enclosing Chunk. Emits
+ * OP_CONSTANT + OP_DEFINE_GLOBAL to bind the function to a global.
+ *
+ * The function value becomes the expression result (stays on stack
+ * after OP_DEFINE_GLOBAL, which peeks rather than pops).
+ */
+static void compile_function(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* Create a new Chunk for the function body. */
+    Chunk *body_chunk = malloc(sizeof(Chunk));
+    if (!body_chunk) {
+        compiler_error(c, "memory allocation failed");
+        return;
+    }
+    chunk_init(body_chunk);
+
+    /* Set up a temporary Compiler for the function body. */
+    CompileError body_err;
+    Compiler body_compiler = {
+        .chunk = body_chunk,
+        .err = &body_err,
+        .had_error = false,
+        .current_loop = NULL,
+    };
+
+    /* Compile the body (node->left holds the body expression). */
+    compile_node(&body_compiler, node->left);
+
+    if (body_compiler.had_error) {
+        compiler_error(c, "%s", body_err.message);
+        chunk_free(body_chunk);
+        free(body_chunk);
+        return;
+    }
+
+    /* Emit OP_RETURN at the end of the function body. */
+    emit_byte(&body_compiler, OP_RETURN, line);
+
+    /* Build the ObjFunction. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    if (!fn) {
+        compiler_error(c, "memory allocation failed");
+        chunk_free(body_chunk);
+        free(body_chunk);
+        return;
+    }
+    fn->name = compiler_strdup(c, node->value);
+    if (!fn->name) {
+        chunk_free(body_chunk);
+        free(body_chunk);
+        free(fn);
+        return;
+    }
+    fn->arity = (int)node->param_count;
+    fn->chunk = body_chunk;
+    fn->native = NULL;
+
+    /* Deep-copy parameter names into the ObjFunction. */
+    if (node->param_count > 0) {
+        fn->params = (char **)calloc(node->param_count, sizeof(char *));
+        if (!fn->params) {
+            compiler_error(c, "memory allocation failed");
+            free(fn->name);
+            chunk_free(body_chunk);
+            free(body_chunk);
+            free(fn);
+            return;
+        }
+        for (size_t i = 0; i < node->param_count; i++) {
+            fn->params[i] = compiler_strdup(c, node->params[i]);
+            if (!fn->params[i]) {
+                /* compiler_strdup already set the error. Clean up. */
+                for (size_t j = 0; j < i; j++)
+                    free(fn->params[j]);
+                free((void *)fn->params);
+                free(fn->name);
+                chunk_free(body_chunk);
+                free(body_chunk);
+                free(fn);
+                return;
+            }
+        }
+    }
+
+    /* Add the function as a constant in the enclosing chunk. */
+    Value fn_val = make_function(fn);
+    emit_constant(c, fn_val, line);
+
+    /* Emit OP_DEFINE_GLOBAL with the function's name to bind it. */
+    char *name = compiler_strdup(c, node->value);
+    if (!name)
+        return;
+    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
+    if (name_idx < 0) {
+        compiler_error(c, "too many constants");
+        return;
+    }
+    emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
+}
+
 /* Compile any AST node by dispatching on its type. */
 static void compile_node(Compiler *c, const AstNode *node) {
     if (c->had_error)
@@ -552,6 +658,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_CONTINUE:
         compile_continue(c, node);
+        break;
+    case AST_FUNCTION:
+        compile_function(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

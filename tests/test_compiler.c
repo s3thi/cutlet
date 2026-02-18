@@ -395,6 +395,74 @@ TEST(test_compile_dedup_constants) {
 }
 
 /* ============================================================
+ * Function definitions
+ * ============================================================ */
+
+/* Compile fn foo() is 42 end → OP_CONSTANT (function) + OP_DEFINE_GLOBAL (name) */
+TEST(test_compile_fn_def_bytecode) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    /* The top-level chunk should have:
+     *   OP_CONSTANT <fn_idx>   (push the function value)
+     *   OP_DEFINE_GLOBAL <name_idx>  (bind to global "foo")
+     *   OP_RETURN
+     */
+    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL for name");
+    uint8_t name_idx = chunk->code[3];
+    ASSERT(chunk->code[4] == OP_RETURN, "OP_RETURN");
+
+    /* The function constant should be VAL_FUNCTION. */
+    ASSERT(fn_idx < chunk->const_count, "fn constant index in range");
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    ASSERT(chunk->constants[fn_idx].function != NULL, "function pointer not NULL");
+    ASSERT(strcmp(chunk->constants[fn_idx].function->name, "foo") == 0, "function name is foo");
+    ASSERT(chunk->constants[fn_idx].function->arity == 0, "arity is 0");
+
+    /* The name constant should be a string "foo". */
+    ASSERT(name_idx < chunk->const_count, "name constant index in range");
+    ASSERT(chunk->constants[name_idx].type == VAL_STRING, "name constant is string");
+    ASSERT(strcmp(chunk->constants[name_idx].string, "foo") == 0, "name is foo");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Compile fn with parameters → function has correct arity and param names */
+TEST(test_compile_fn_def_with_params) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn add(a, b) is a end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->arity == 2, "arity is 2");
+    ASSERT(fn->params != NULL, "params array exists");
+    ASSERT(strcmp(fn->params[0], "a") == 0, "param 0 is a");
+    ASSERT(strcmp(fn->params[1], "b") == 0, "param 1 is b");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Function body gets its own chunk with OP_RETURN at the end */
+TEST(test_compile_fn_body_has_return) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* The body chunk should end with OP_RETURN. */
+    ASSERT(fn->chunk->count > 0, "body chunk is non-empty");
+    ASSERT(fn->chunk->code[fn->chunk->count - 1] == OP_RETURN, "body ends with OP_RETURN");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -442,6 +510,11 @@ int main(void) {
 
     printf("\nConstant deduplication:\n");
     RUN_TEST(test_compile_dedup_constants);
+
+    printf("\nFunction definitions:\n");
+    RUN_TEST(test_compile_fn_def_bytecode);
+    RUN_TEST(test_compile_fn_def_with_params);
+    RUN_TEST(test_compile_fn_body_has_return);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
