@@ -65,6 +65,9 @@ typedef enum {
     /* Stack management */
     OP_POP, /* Discard TOS */
 
+    /* Local variables (stack-slot based, used inside functions) */
+    OP_GET_LOCAL, /* Operand: 1-byte slot index. Push clone of frame->slots[slot]. */
+
     /* Function calls (stack-based: callee is on the stack) */
     OP_CALL, /* Operand: 1-byte argc. Callee at stack_top[-argc-1]. */
 

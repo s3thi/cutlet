@@ -684,6 +684,21 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_GET_LOCAL: {
+            /* Read a local variable from the current call frame's stack window.
+             * The slot index is relative to frame->slots (slot 0 = callee,
+             * slot 1 = first param, etc.). */
+            uint8_t slot = read_byte(frame);
+            Value v;
+            if (!value_clone(&v, &frame->slots[slot])) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            if (!vm_push(&vm, v)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_JUMP: {
             uint16_t offset = read_short(frame);
             frame->ip += offset;

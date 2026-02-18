@@ -465,6 +465,60 @@ TEST(test_compile_fn_body_has_return) {
 }
 
 /* ============================================================
+ * Function parameters (OP_GET_LOCAL) - Step 6
+ * ============================================================ */
+
+/* Function body uses OP_GET_LOCAL for parameters, not OP_GET_GLOBAL */
+TEST(test_compile_fn_param_uses_get_local) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn identity(x) is x end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* The body chunk should use OP_GET_LOCAL for x, not OP_GET_GLOBAL.
+     * Parameter x is at slot 1 (slot 0 is reserved for the callee). */
+    ASSERT(fn->chunk->code[0] == OP_GET_LOCAL, "body uses OP_GET_LOCAL for param");
+    ASSERT(fn->chunk->code[1] == 1, "param x is at slot 1");
+    ASSERT(fn->chunk->code[2] == OP_RETURN, "body ends with OP_RETURN");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Function body with two params: uses correct slot indices */
+TEST(test_compile_fn_two_params_slots) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn add(a, b) is a + b end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* Body: OP_GET_LOCAL 1 (a), OP_GET_LOCAL 2 (b), OP_ADD, OP_RETURN */
+    ASSERT(fn->chunk->code[0] == OP_GET_LOCAL, "first OP_GET_LOCAL");
+    ASSERT(fn->chunk->code[1] == 1, "param a at slot 1");
+    ASSERT(fn->chunk->code[2] == OP_GET_LOCAL, "second OP_GET_LOCAL");
+    ASSERT(fn->chunk->code[3] == 2, "param b at slot 2");
+    ASSERT(fn->chunk->code[4] == OP_ADD, "OP_ADD");
+    ASSERT(fn->chunk->code[5] == OP_RETURN, "OP_RETURN");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Function body falls back to OP_GET_GLOBAL for non-parameter names */
+TEST(test_compile_fn_nonparam_uses_get_global) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn readglobal() is x end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* x is not a parameter, so the body should use OP_GET_GLOBAL. */
+    ASSERT(fn->chunk->code[0] == OP_GET_GLOBAL, "body uses OP_GET_GLOBAL for non-param");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -517,6 +571,11 @@ int main(void) {
     RUN_TEST(test_compile_fn_def_bytecode);
     RUN_TEST(test_compile_fn_def_with_params);
     RUN_TEST(test_compile_fn_body_has_return);
+
+    printf("\nFunction parameters (OP_GET_LOCAL):\n");
+    RUN_TEST(test_compile_fn_param_uses_get_local);
+    RUN_TEST(test_compile_fn_two_params_slots);
+    RUN_TEST(test_compile_fn_nonparam_uses_get_global);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

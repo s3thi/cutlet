@@ -153,6 +153,8 @@ const char *opcode_name(OpCode op) {
         return "OP_LOOP";
     case OP_POP:
         return "OP_POP";
+    case OP_GET_LOCAL:
+        return "OP_GET_LOCAL";
     case OP_CALL:
         return "OP_CALL";
     case OP_RETURN:
@@ -300,6 +302,13 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         dynbuf_printf(b, "%-20s %4d -> %zu\n", opcode_name((OpCode)instruction), jump,
                       offset + 3 - (size_t)jump);
         return offset + 3;
+    }
+
+    /* OP_GET_LOCAL: 1-byte slot index */
+    case OP_GET_LOCAL: {
+        uint8_t slot = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s slot=%d\n", opcode_name((OpCode)instruction), slot);
+        return offset + 2;
     }
 
     /* OP_CALL: 1-byte argc (callee is on the stack) */

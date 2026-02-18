@@ -121,31 +121,9 @@ Refactored function call dispatch from name-based (`OP_CALL [name_idx] [argc]`) 
 
 Added `CallFrame` struct (function, ip, slots) and call frame stack (`frames[FRAMES_MAX]`, `frame_count`) to VM. `FRAMES_MAX` = 64. Top-level code runs inside a "script" CallFrame (frame 0) wrapping the top-level Chunk in a stack-allocated `ObjFunction`. Refactored `vm_execute()`: `read_byte()`/`read_short()` take a `CallFrame*`; all constant/chunk access goes through `frame->function->chunk`. `OP_CALL` for user functions pushes a new CallFrame. `OP_RETURN` pops the frame, discards the called function's stack window, and pushes the return value for the caller; frame_count==0 ends the program. 3 new VM tests. Files: `src/vm.h`, `src/vm.c`, `tests/test_vm.c`.
 
-#### Step 6: Function parameters (OP_GET_LOCAL)
+#### Step 6: Function parameters (OP_GET_LOCAL) ✅
 
-Add local variable reads so function parameters can be accessed.
-
-**Opcodes** (`chunk.h`):
-- Add `OP_GET_LOCAL` with 1-byte slot index operand.
-
-**Compiler** (`compiler.c`):
-- Add a `Local` struct (name, depth/slot index) and a locals array to the Compiler.
-- Track compilation context: "script" vs "function". In function context, parameters are added as locals 0..N-1 before compiling the body.
-- `compile_ident()`: in function context, check locals first. If found, emit `OP_GET_LOCAL [slot]`. If not found, fall back to `OP_GET_GLOBAL`.
-
-**VM** (`vm.c`):
-- `OP_GET_LOCAL`: read slot index, push clone of `frame->slots[slot]`.
-
-**Disassembler** (`chunk.c`):
-- Format `OP_GET_LOCAL` with slot index.
-
-**Tests**:
-- `fn identity(x) is x end\nidentity(42)` → 42.
-- `fn add(a, b) is a + b end\nadd(1, 2)` → 3.
-- `fn shadow(x) is x end\nmy x = 99\nshadow(1)` → 1 (local shadows global).
-- `fn readglobal() is x end\nmy x = 99\nreadglobal()` → 99 (falls back to global).
-
-**Files touched**: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, tests.
+Added `OP_GET_LOCAL` opcode with 1-byte slot index operand. Compiler now tracks `CompileContext` (script vs function) and a `Local` struct array. In function context, slot 0 is reserved for the callee, parameters occupy slots 1..arity. `compile_ident()` resolves locals first via `resolve_local()`, falling back to `OP_GET_GLOBAL`. VM handler clones `frame->slots[slot]` onto the stack. Disassembler formats as `OP_GET_LOCAL slot=N`. 4 VM tests + 3 compiler tests. Files: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, `tests/test_vm.c`, `tests/test_compiler.c`.
 
 #### Step 7: Local variable declarations (OP_SET_LOCAL + `my` in functions)
 

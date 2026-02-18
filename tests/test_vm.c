@@ -1370,6 +1370,31 @@ TEST(test_user_fn_call_result_used_in_say) {
 }
 
 /* ============================================================
+ * Function parameters (OP_GET_LOCAL) - Step 6
+ * ============================================================ */
+
+/* fn identity(x) is x end\nidentity(42) → 42 */
+TEST(test_fn_param_identity) {
+    assert_vm_number("fn identity(x) is x end\nidentity(42)", 42.0, "identity function");
+}
+
+/* fn add(a, b) is a + b end\nadd(1, 2) → 3 */
+TEST(test_fn_param_add) {
+    assert_vm_number("fn add(a, b) is a + b end\nadd(1, 2)", 3.0, "two-param function");
+}
+
+/* fn shadow(x) is x end\nmy x = 99\nshadow(1) → 1 (local shadows global) */
+TEST(test_fn_param_shadows_global) {
+    assert_vm_number("fn shadow(x) is x end\nmy x = 99\nshadow(1)", 1.0, "local shadows global");
+}
+
+/* fn readglobal() is x end\nmy x = 99\nreadglobal() → 99 (falls back to global) */
+TEST(test_fn_param_falls_back_to_global) {
+    assert_vm_number("fn readglobal() is x end\nmy x = 99\nreadglobal()", 99.0,
+                     "falls back to global");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1645,6 +1670,12 @@ int main(void) {
     RUN_TEST(test_user_fn_call_returns_value);
     RUN_TEST(test_user_fn_call_with_say);
     RUN_TEST(test_user_fn_call_result_used_in_say);
+
+    printf("\nFunction parameters (OP_GET_LOCAL):\n");
+    RUN_TEST(test_fn_param_identity);
+    RUN_TEST(test_fn_param_add);
+    RUN_TEST(test_fn_param_shadows_global);
+    RUN_TEST(test_fn_param_falls_back_to_global);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

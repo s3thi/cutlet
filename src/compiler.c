@@ -25,12 +25,38 @@ typedef struct LoopContext {
     struct LoopContext *enclosing; /* Enclosing loop context (for nested loops). */
 } LoopContext;
 
+/*
+ * Compilation context: distinguishes top-level script code from
+ * function body code. In function context, identifiers are resolved
+ * against the locals array before falling back to globals.
+ */
+typedef enum {
+    COMPILE_SCRIPT,   /* Top-level code — all variables are global. */
+    COMPILE_FUNCTION, /* Inside a function body — has local slots. */
+} CompileContext;
+
+/*
+ * Local variable entry: tracks a named local in the compiler's
+ * locals array. Each local occupies one stack slot in the call
+ * frame at runtime.
+ */
+typedef struct {
+    const char *name; /* Variable name (points into AST — not owned). */
+    int length;       /* Length of the name string. */
+} Local;
+
+/* Maximum number of local variables per function (1-byte slot index). */
+#define LOCALS_MAX 256
+
 /* Internal compiler state. */
 typedef struct {
     Chunk *chunk;              /* The chunk being compiled into. */
     CompileError *err;         /* Where to report errors. */
     bool had_error;            /* Set to true on first error. */
     LoopContext *current_loop; /* Current innermost loop context (NULL if not in a loop). */
+    CompileContext context;    /* Script vs function body. */
+    Local locals[LOCALS_MAX];  /* Local variable slots (params, then declarations). */
+    int local_count;           /* Number of locals currently in scope. */
 } Compiler;
 
 /* ---- Helpers ---- */
@@ -156,8 +182,35 @@ static void compile_nothing(Compiler *c, const AstNode *node) {
     emit_byte(c, OP_NOTHING, (int)node->line);
 }
 
-/* Compile an identifier (variable read). */
+/*
+ * Resolve a name against the compiler's locals array.
+ * Returns the slot index if found, or -1 if not a local.
+ */
+static int resolve_local(Compiler *c, const char *name) {
+    int len = (int)strlen(name);
+    /* Search backwards so inner-scoped locals shadow outer ones. */
+    for (int i = c->local_count - 1; i >= 0; i--) {
+        if (c->locals[i].length == len && memcmp(c->locals[i].name, name, (size_t)len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Compile an identifier (variable read).
+ * In function context, check locals first (emit OP_GET_LOCAL).
+ * Fall back to OP_GET_GLOBAL for globals or script context. */
 static void compile_ident(Compiler *c, const AstNode *node) {
+    /* In function context, try resolving as a local variable. */
+    if (c->context == COMPILE_FUNCTION) {
+        int slot = resolve_local(c, node->value);
+        if (slot >= 0) {
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, (int)node->line);
+            return;
+        }
+    }
+
+    /* Fall back to global variable lookup. */
     char *name = compiler_strdup(c, node->value);
     if (!name)
         return;
@@ -529,14 +582,33 @@ static void compile_function(Compiler *c, const AstNode *node) {
     }
     chunk_init(body_chunk);
 
-    /* Set up a temporary Compiler for the function body. */
+    /* Set up a temporary Compiler for the function body.
+     * Function context enables local variable resolution. */
     CompileError body_err;
     Compiler body_compiler = {
         .chunk = body_chunk,
         .err = &body_err,
         .had_error = false,
         .current_loop = NULL,
+        .context = COMPILE_FUNCTION,
+        .local_count = 0,
     };
+
+    /* Reserve slot 0 for the callee (the function value itself).
+     * This matches the call frame layout where slots[0] = callee. */
+    body_compiler.locals[body_compiler.local_count++] = (Local){.name = "", .length = 0};
+
+    /* Add each parameter as a local variable (slots 1..arity). */
+    for (size_t i = 0; i < node->param_count; i++) {
+        if (body_compiler.local_count >= LOCALS_MAX) {
+            compiler_error(c, "too many local variables");
+            chunk_free(body_chunk);
+            free(body_chunk);
+            return;
+        }
+        body_compiler.locals[body_compiler.local_count++] =
+            (Local){.name = node->params[i], .length = (int)strlen(node->params[i])};
+    }
 
     /* Compile the body (node->left holds the body expression). */
     compile_node(&body_compiler, node->left);
@@ -686,7 +758,14 @@ Chunk *compile(const AstNode *node, CompileError *err) {
     }
     chunk_init(chunk);
 
-    Compiler c = {.chunk = chunk, .err = err, .had_error = false, .current_loop = NULL};
+    Compiler c = {
+        .chunk = chunk,
+        .err = err,
+        .had_error = false,
+        .current_loop = NULL,
+        .context = COMPILE_SCRIPT,
+        .local_count = 0,
+    };
 
     compile_node(&c, node);
 
