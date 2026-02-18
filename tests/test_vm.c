@@ -1426,6 +1426,133 @@ TEST(test_fn_local_doesnt_leak) {
 }
 
 /* ============================================================
+ * Recursion (Step 8)
+ * ============================================================ */
+
+/* Factorial via recursion: factorial(5) = 120 */
+TEST(test_recursion_factorial) {
+    assert_vm_number("fn factorial(n) is\n"
+                     "  if n <= 1 then 1\n"
+                     "  else n * factorial(n - 1)\n"
+                     "  end\n"
+                     "end\n"
+                     "factorial(5)",
+                     120.0, "factorial(5) = 120");
+}
+
+/* Fibonacci via recursion: fib(10) = 55 */
+TEST(test_recursion_fibonacci) {
+    assert_vm_number("fn fib(n) is\n"
+                     "  if n < 2 then n\n"
+                     "  else fib(n - 1) + fib(n - 2)\n"
+                     "  end\n"
+                     "end\n"
+                     "fib(10)",
+                     55.0, "fib(10) = 55");
+}
+
+/* Mutual recursion: is_even calls is_odd and vice versa */
+TEST(test_recursion_mutual) {
+    assert_vm_bool("fn is_even(n) is\n"
+                   "  if n == 0 then true\n"
+                   "  else is_odd(n - 1)\n"
+                   "  end\n"
+                   "end\n"
+                   "fn is_odd(n) is\n"
+                   "  if n == 0 then false\n"
+                   "  else is_even(n - 1)\n"
+                   "  end\n"
+                   "end\n"
+                   "is_even(10)",
+                   true, "is_even(10) via mutual recursion");
+}
+
+/* ============================================================
+ * Error handling for user-defined functions (Step 8)
+ * ============================================================ */
+
+/* Wrong arity: too few arguments */
+TEST(test_user_fn_arity_too_few) {
+    Value v = run_input("fn foo(a, b) is a end\nfoo(1)", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "wrong arity should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "'foo'") != NULL, "error mentions function name");
+    ASSERT(strstr(msg, "2 arguments") != NULL, "error mentions expected arity");
+    ASSERT(strstr(msg, "got 1") != NULL, "error mentions actual count");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Wrong arity: too many arguments */
+TEST(test_user_fn_arity_too_many) {
+    Value v = run_input("fn bar(a) is a end\nbar(1, 2, 3)", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "wrong arity should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "'bar'") != NULL, "error mentions function name");
+    ASSERT(strstr(msg, "1 argument") != NULL, "error mentions expected arity");
+    ASSERT(strstr(msg, "got 3") != NULL, "error mentions actual count");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Zero-arg function called with args */
+TEST(test_user_fn_arity_zero_called_with_args) {
+    Value v = run_input("fn noargs() is 42 end\nnoargs(1)", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "wrong arity should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "'noargs'") != NULL, "error mentions function name");
+    ASSERT(strstr(msg, "0 arguments") != NULL, "error mentions expected arity");
+    ASSERT(strstr(msg, "got 1") != NULL, "error mentions actual count");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Call stack overflow via infinite recursion */
+TEST(test_call_stack_overflow_recursion) {
+    Value v = run_input("fn recurse(n) is recurse(n + 1) end\n"
+                        "recurse(0)",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "deep recursion should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "stack overflow") != NULL, "error mentions stack overflow");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Error inside function body includes line number */
+TEST(test_fn_error_has_line_number) {
+    Value v = run_input("fn bad() is\n"
+                        "  1 / 0\n"
+                        "end\n"
+                        "bad()",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "should be error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "division by zero") != NULL, "error mentions division by zero");
+    ASSERT(strstr(msg, "line") != NULL, "error includes line number");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Wrong arity error includes line number */
+TEST(test_fn_arity_error_has_line_number) {
+    Value v = run_input("fn foo(a, b) is a end\n"
+                        "foo(1)",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "should be error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "line 2") != NULL, "arity error mentions line 2");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1713,6 +1840,19 @@ int main(void) {
     RUN_TEST(test_fn_multiple_locals);
     RUN_TEST(test_fn_reassign_param);
     RUN_TEST(test_fn_local_doesnt_leak);
+
+    printf("\nRecursion:\n");
+    RUN_TEST(test_recursion_factorial);
+    RUN_TEST(test_recursion_fibonacci);
+    RUN_TEST(test_recursion_mutual);
+
+    printf("\nUser function error handling:\n");
+    RUN_TEST(test_user_fn_arity_too_few);
+    RUN_TEST(test_user_fn_arity_too_many);
+    RUN_TEST(test_user_fn_arity_zero_called_with_args);
+    RUN_TEST(test_call_stack_overflow_recursion);
+    RUN_TEST(test_fn_error_has_line_number);
+    RUN_TEST(test_fn_arity_error_has_line_number);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

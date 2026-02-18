@@ -129,21 +129,9 @@ Added `OP_GET_LOCAL` opcode with 1-byte slot index operand. Compiler now tracks 
 
 Added `OP_SET_LOCAL` opcode with 1-byte slot index operand. `compile_decl()` in function context compiles the RHS (value lands at the next local slot), registers the local, then emits `OP_GET_LOCAL` to push a clone as the expression result (so `compile_block`'s OP_POP doesn't destroy the local). `compile_assign()` in function context resolves locals first via `resolve_local()`, emitting `OP_SET_LOCAL` instead of `OP_SET_GLOBAL`. VM `OP_SET_LOCAL` handler: peek TOS, clone into slot (freeing old value), TOS stays as expression result. Disassembler formats as `OP_SET_LOCAL slot=N`. Locals declared in inner blocks are valid until function end (no block scoping yet). 4 VM tests + 3 compiler tests. Files: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, `tests/test_vm.c`, `tests/test_compiler.c`.
 
-#### Step 8: Recursion + error handling
+#### Step 8: Recursion + error handling ✅
 
-Test recursion (should work automatically) and add missing error handling.
-
-**Recursion** (no code changes expected — OP_GET_GLOBAL finds the function at call time):
-- Test: `fn factorial(n) is if n <= 1 then 1 else n * factorial(n - 1) end end\nfactorial(5)` → 120.
-- Test: `fn fib(n) is if n < 2 then n else fib(n - 1) + fib(n - 2) end end\nfib(10)` → 55.
-- Test: mutual recursion (fn even/odd calling each other).
-
-**Error handling**:
-- Wrong arity: `fn foo(a, b) is a end\nfoo(1)` → error "'foo' expects 2 arguments, got 1".
-- Call stack overflow: deeply recursive function → error "stack overflow" (not a segfault).
-- Verify all errors include line numbers.
-
-**Files touched**: `src/vm.c` (error messages), tests.
+Confirmed recursion works automatically (OP_GET_GLOBAL resolves at call time). All error handling was already implemented in Steps 4-5 (arity checks, stack overflow, line numbers). No code changes needed — this step was purely test coverage. 9 new VM tests: factorial, fibonacci, mutual recursion (is_even/is_odd), wrong arity (too few, too many, zero-called-with-args), call stack overflow via infinite recursion, error line numbers in function bodies, arity error line numbers. Files: `tests/test_vm.c`.
 
 #### Step 9: Integration + REPL + cleanup
 
