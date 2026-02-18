@@ -519,6 +519,85 @@ TEST(test_compile_fn_nonparam_uses_get_global) {
 }
 
 /* ============================================================
+ * Local variable declarations (OP_SET_LOCAL) - Step 7
+ * ============================================================ */
+
+/* my declaration inside function body does NOT use OP_DEFINE_GLOBAL */
+TEST(test_compile_fn_local_decl_no_define_global) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo(x) is my y = 1\ny end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* The body chunk should NOT contain OP_DEFINE_GLOBAL for local y. */
+    bool found_define_global = false;
+    for (size_t i = 0; i < fn->chunk->count; i++) {
+        if (fn->chunk->code[i] == OP_DEFINE_GLOBAL) {
+            found_define_global = true;
+            break;
+        }
+    }
+    ASSERT(!found_define_global, "body should not use OP_DEFINE_GLOBAL for local decl");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Assignment to parameter uses OP_SET_LOCAL, not OP_SET_GLOBAL */
+TEST(test_compile_fn_assign_param_uses_set_local) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo(x) is x = 1\nx end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* Body: OP_CONSTANT [1], OP_SET_LOCAL 1, ...
+     * The assignment x = 1 should use OP_SET_LOCAL for slot 1 (param x). */
+    bool found_set_local = false;
+    for (size_t i = 0; i < fn->chunk->count; i++) {
+        if (fn->chunk->code[i] == OP_SET_LOCAL) {
+            ASSERT(i + 1 < fn->chunk->count, "OP_SET_LOCAL has operand");
+            ASSERT(fn->chunk->code[i + 1] == 1, "OP_SET_LOCAL targets slot 1 (param x)");
+            found_set_local = true;
+            break;
+        }
+    }
+    ASSERT(found_set_local, "body should use OP_SET_LOCAL for param assignment");
+    /* Should NOT contain OP_SET_GLOBAL for x. */
+    bool found_set_global = false;
+    for (size_t i = 0; i < fn->chunk->count; i++) {
+        if (fn->chunk->code[i] == OP_SET_GLOBAL) {
+            found_set_global = true;
+            break;
+        }
+    }
+    ASSERT(!found_set_global, "body should not use OP_SET_GLOBAL for param assignment");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Assignment to non-local still uses OP_SET_GLOBAL */
+TEST(test_compile_fn_assign_nonlocal_uses_set_global) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is g = 1 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* g is not a local, so assignment should use OP_SET_GLOBAL. */
+    bool found_set_global = false;
+    for (size_t i = 0; i < fn->chunk->count; i++) {
+        if (fn->chunk->code[i] == OP_SET_GLOBAL) {
+            found_set_global = true;
+            break;
+        }
+    }
+    ASSERT(found_set_global, "body should use OP_SET_GLOBAL for non-local");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -576,6 +655,11 @@ int main(void) {
     RUN_TEST(test_compile_fn_param_uses_get_local);
     RUN_TEST(test_compile_fn_two_params_slots);
     RUN_TEST(test_compile_fn_nonparam_uses_get_global);
+
+    printf("\nLocal variable declarations (OP_SET_LOCAL):\n");
+    RUN_TEST(test_compile_fn_local_decl_no_define_global);
+    RUN_TEST(test_compile_fn_assign_param_uses_set_local);
+    RUN_TEST(test_compile_fn_assign_nonlocal_uses_set_global);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

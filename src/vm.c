@@ -699,6 +699,24 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_SET_LOCAL: {
+            /* Write TOS into a local variable slot without popping.
+             * The old slot value is freed, then TOS is cloned into it.
+             * TOS stays on the stack as the expression result. */
+            uint8_t slot = read_byte(frame);
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            Value cloned;
+            if (!value_clone(&cloned, &tos)) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            value_free(&frame->slots[slot]);
+            frame->slots[slot] = cloned;
+            break;
+        }
+
         case OP_JUMP: {
             uint16_t offset = read_short(frame);
             frame->ip += offset;

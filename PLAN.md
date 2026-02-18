@@ -125,31 +125,9 @@ Added `CallFrame` struct (function, ip, slots) and call frame stack (`frames[FRA
 
 Added `OP_GET_LOCAL` opcode with 1-byte slot index operand. Compiler now tracks `CompileContext` (script vs function) and a `Local` struct array. In function context, slot 0 is reserved for the callee, parameters occupy slots 1..arity. `compile_ident()` resolves locals first via `resolve_local()`, falling back to `OP_GET_GLOBAL`. VM handler clones `frame->slots[slot]` onto the stack. Disassembler formats as `OP_GET_LOCAL slot=N`. 4 VM tests + 3 compiler tests. Files: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, `tests/test_vm.c`, `tests/test_compiler.c`.
 
-#### Step 7: Local variable declarations (OP_SET_LOCAL + `my` in functions)
+#### Step 7: Local variable declarations (OP_SET_LOCAL + `my` in functions) ✅
 
-Allow `my` declarations and `=` assignment inside functions to use stack slots.
-
-**Opcodes** (`chunk.h`):
-- Add `OP_SET_LOCAL` with 1-byte slot index operand.
-
-**Compiler** (`compiler.c`):
-- `compile_decl()` in function context: add a new local (increment local count), compile the RHS, the value is already at the correct stack slot. Emit `OP_SET_LOCAL` to leave the value as the expression result.
-- `compile_assign()` in function context: if the name resolves to a local, emit `OP_SET_LOCAL [slot]`. Otherwise fall back to `OP_SET_GLOBAL`.
-- Scope: locals declared in inner blocks (e.g., inside `if`) are valid until the function ends (no block scoping yet — matches the current global model).
-
-**VM** (`vm.c`):
-- `OP_SET_LOCAL`: read slot index, free old value at slot, clone TOS into slot (don't pop — value stays as expression result).
-
-**Disassembler** (`chunk.c`):
-- Format `OP_SET_LOCAL` with slot index.
-
-**Tests**:
-- `fn foo(x) is my y = x + 1\ny end\nfoo(10)` → 11.
-- `fn foo() is my a = 1\nmy b = 2\na + b end\nfoo()` → 3.
-- `fn foo(x) is x = x + 1\nx end\nfoo(10)` → 11 (reassign parameter).
-- Local doesn't leak to global scope.
-
-**Files touched**: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, tests.
+Added `OP_SET_LOCAL` opcode with 1-byte slot index operand. `compile_decl()` in function context compiles the RHS (value lands at the next local slot), registers the local, then emits `OP_GET_LOCAL` to push a clone as the expression result (so `compile_block`'s OP_POP doesn't destroy the local). `compile_assign()` in function context resolves locals first via `resolve_local()`, emitting `OP_SET_LOCAL` instead of `OP_SET_GLOBAL`. VM `OP_SET_LOCAL` handler: peek TOS, clone into slot (freeing old value), TOS stays as expression result. Disassembler formats as `OP_SET_LOCAL slot=N`. Locals declared in inner blocks are valid until function end (no block scoping yet). 4 VM tests + 3 compiler tests. Files: `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, `tests/test_vm.c`, `tests/test_compiler.c`.
 
 #### Step 8: Recursion + error handling
 

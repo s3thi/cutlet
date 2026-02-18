@@ -1395,6 +1395,37 @@ TEST(test_fn_param_falls_back_to_global) {
 }
 
 /* ============================================================
+ * Local variable declarations in functions (OP_SET_LOCAL) - Step 7
+ * ============================================================ */
+
+/* fn foo(x) is my y = x + 1\ny end\nfoo(10) → 11 */
+TEST(test_fn_local_decl_and_use) {
+    assert_vm_number("fn foo(x) is my y = x + 1\ny end\nfoo(10)", 11.0, "local decl in function");
+}
+
+/* fn foo() is my a = 1\nmy b = 2\na + b end\nfoo() → 3 */
+TEST(test_fn_multiple_locals) {
+    assert_vm_number("fn foo() is my a = 1\nmy b = 2\na + b end\nfoo()", 3.0,
+                     "multiple locals in function");
+}
+
+/* fn foo(x) is x = x + 1\nx end\nfoo(10) → 11 (reassign parameter) */
+TEST(test_fn_reassign_param) {
+    assert_vm_number("fn foo(x) is x = x + 1\nx end\nfoo(10)", 11.0, "reassign parameter");
+}
+
+/* Local variable doesn't leak to global scope */
+TEST(test_fn_local_doesnt_leak) {
+    Value v = run_input("fn foo() is my loc7 = 42 end\nfoo()\nloc7", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "local should not leak to global scope");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "loc7") != NULL, "error mentions the local variable name");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1676,6 +1707,12 @@ int main(void) {
     RUN_TEST(test_fn_param_add);
     RUN_TEST(test_fn_param_shadows_global);
     RUN_TEST(test_fn_param_falls_back_to_global);
+
+    printf("\nLocal variable declarations (OP_SET_LOCAL):\n");
+    RUN_TEST(test_fn_local_decl_and_use);
+    RUN_TEST(test_fn_multiple_locals);
+    RUN_TEST(test_fn_reassign_param);
+    RUN_TEST(test_fn_local_doesnt_leak);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

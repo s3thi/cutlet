@@ -294,8 +294,35 @@ static void compile_unary(Compiler *c, const AstNode *node) {
     }
 }
 
-/* Compile a variable declaration: my name = expr */
+/* Compile a variable declaration: my name = expr
+ *
+ * In function context, the RHS value lands on the stack at the next
+ * local slot.  We register the local, then emit OP_GET_LOCAL to push
+ * a clone as the expression result.  This way compile_block's OP_POP
+ * removes the clone while the local stays at its fixed slot.
+ *
+ * In script context, we use OP_DEFINE_GLOBAL as before. */
 static void compile_decl(Compiler *c, const AstNode *node) {
+    if (c->context == COMPILE_FUNCTION) {
+        /* Compile RHS first — value lands at stack position = local_count. */
+        compile_node(c, node->left);
+
+        /* Register the new local variable at the current slot. */
+        int slot = c->local_count;
+        if (c->local_count >= LOCALS_MAX) {
+            compiler_error(c, "too many local variables");
+            return;
+        }
+        c->locals[c->local_count++] =
+            (Local){.name = node->value, .length = (int)strlen(node->value)};
+
+        /* Push a clone of the local as the expression result.
+         * compile_block will OP_POP this clone; the local stays. */
+        emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, (int)node->line);
+        return;
+    }
+
+    /* Script context: global variable declaration. */
     compile_node(c, node->left); /* compile the RHS expression */
     char *name = compiler_strdup(c, node->value);
     if (!name)
@@ -308,9 +335,25 @@ static void compile_decl(Compiler *c, const AstNode *node) {
     emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)idx, (int)node->line);
 }
 
-/* Compile an assignment: name = expr */
+/* Compile an assignment: name = expr
+ *
+ * In function context, check if the name resolves to a local variable
+ * (parameter or prior `my` declaration).  If so, emit OP_SET_LOCAL
+ * which writes TOS into the slot without popping (value stays as the
+ * expression result).  Otherwise fall back to OP_SET_GLOBAL. */
 static void compile_assign(Compiler *c, const AstNode *node) {
     compile_node(c, node->left); /* compile the RHS expression */
+
+    /* In function context, try resolving as a local variable. */
+    if (c->context == COMPILE_FUNCTION) {
+        int slot = resolve_local(c, node->value);
+        if (slot >= 0) {
+            emit_bytes(c, OP_SET_LOCAL, (uint8_t)slot, (int)node->line);
+            return;
+        }
+    }
+
+    /* Fall back to global variable assignment. */
     char *name = compiler_strdup(c, node->value);
     if (!name)
         return;
