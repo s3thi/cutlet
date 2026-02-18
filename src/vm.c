@@ -160,65 +160,79 @@ static bool values_compare(const Value *a, const Value *b, int *result, const ch
     return false;
 }
 
-/* ---- Built-in function dispatch ---- */
+/* ---- Native function implementations ---- */
 
 /*
- * Execute a built-in function call.
- * fn_name is the function name string from the constant pool.
- * argc is the number of arguments on the stack (TOS is last arg).
- * Returns a Value result. On error returns VAL_ERROR.
+ * Native implementation of say(expr).
+ * Formats the argument and writes it + newline via the EvalContext.
  */
-static Value call_builtin(VM *vm, const char *fn_name, int argc) {
-    if (strcmp(fn_name, "say") == 0) {
-        if (argc != 1) {
-            /* Pop all arguments to clean up. */
-            for (int i = 0; i < argc; i++) {
-                Value v;
-                vm_pop(vm, &v);
-                value_free(&v);
-            }
-            return make_error("say() expects 1 argument, got %d", argc);
-        }
+static Value native_say(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
 
-        Value arg;
-        vm_pop(vm, &arg);
-
-        if (!vm->ctx->write_fn) {
-            value_free(&arg);
-            return make_error("no output writer available");
-        }
-
-        char *formatted = value_format(&arg);
-        value_free(&arg);
-        if (!formatted)
-            return make_error("memory allocation failed");
-
-        size_t flen = strlen(formatted);
-        char *with_newline = realloc(formatted, flen + 2);
-        if (!with_newline) {
-            free(formatted);
-            return make_error("memory allocation failed");
-        }
-        with_newline[flen] = '\n';
-        with_newline[flen + 1] = '\0';
-        vm->ctx->write_fn(vm->ctx->userdata, with_newline, flen + 1);
-        free(with_newline);
-
-        return make_nothing();
+    if (!ctx->write_fn) {
+        return make_error("no output writer available");
     }
 
-    /* Unknown function: pop all arguments. */
-    for (int i = 0; i < argc; i++) {
-        Value v;
-        vm_pop(vm, &v);
-        value_free(&v);
+    char *formatted = value_format(&args[0]);
+    if (!formatted)
+        return make_error("memory allocation failed");
+
+    size_t flen = strlen(formatted);
+    char *with_newline = realloc(formatted, flen + 2);
+    if (!with_newline) {
+        free(formatted);
+        return make_error("memory allocation failed");
     }
-    return make_error("unknown function '%s'", fn_name);
+    with_newline[flen] = '\n';
+    with_newline[flen + 1] = '\0';
+    ctx->write_fn(ctx->userdata, with_newline, flen + 1);
+    free(with_newline);
+
+    return make_nothing();
+}
+
+/*
+ * Register built-in functions as native VAL_FUNCTION values in the
+ * global variable environment. Called at the start of each vm_execute()
+ * to ensure builtins are always available (even if a previous eval
+ * overwrote a builtin name).
+ */
+static void register_builtins(void) {
+    Value say_fn = make_native("say", 1, native_say);
+    runtime_var_define("say", &say_fn);
+    value_free(&say_fn); /* runtime_var_define clones it. */
+}
+
+/* ---- Type name helper ---- */
+
+/* Return a human-readable type name for error messages. */
+static const char *value_type_name(ValueType type) {
+    switch (type) {
+    case VAL_NUMBER:
+        return "number";
+    case VAL_STRING:
+        return "string";
+    case VAL_BOOL:
+        return "boolean";
+    case VAL_NOTHING:
+        return "nothing";
+    case VAL_FUNCTION:
+        return "function";
+    case VAL_ERROR:
+        return "error";
+    default:
+        return "value";
+    }
 }
 
 /* ---- Main dispatch loop ---- */
 
 Value vm_execute(Chunk *chunk, EvalContext *ctx) {
+    /* Ensure built-in functions are registered in the global environment.
+     * Called every time so builtins are available even if a prior eval
+     * overwrote a builtin name (e.g. "my say = 42"). */
+    register_builtins();
+
     VM vm;
     vm.chunk = chunk;
     vm.ip = chunk->code;
@@ -688,16 +702,65 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_CALL: {
-            uint8_t name_idx = read_byte(&vm);
             uint8_t argc = read_byte(&vm);
-            const char *fn_name = chunk->constants[name_idx].string;
-            Value result = call_builtin(&vm, fn_name, argc);
-            if (result.type == VAL_ERROR) {
-                vm_free_stack(&vm);
-                return result;
+
+            /* Peek at the callee: it sits below the arguments on the stack.
+             * vm_peek gives us a shallow copy — the function pointer is
+             * shared with the stack Value. We must NOT free the peeked
+             * copy; vm_free_stack (inside vm_runtime_error) handles it. */
+            Value callee;
+            if (!vm_peek(&vm, argc, &callee)) {
+                return vm_runtime_error(&vm, "stack underflow");
             }
-            if (!vm_push(&vm, result)) {
-                return vm_runtime_error(&vm, "stack overflow");
+
+            /* Callee must be a function. Error paths let vm_runtime_error
+             * call vm_free_stack to clean up the stack (args + callee). */
+            if (callee.type != VAL_FUNCTION) {
+                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
+            }
+
+            ObjFunction *fn = callee.function;
+
+            /* Check arity. fn->name is still valid because the callee
+             * Value is on the stack; vm_runtime_error formats the message
+             * BEFORE vm_free_stack frees it. */
+            if (argc != fn->arity) {
+                return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                                        fn->name ? fn->name : "<fn>", fn->arity,
+                                        fn->arity == 1 ? "" : "s", argc);
+            }
+
+            if (fn->native) {
+                /* Native function: pop args into temp array, call, push result. */
+                Value args[256];
+                for (int i = argc - 1; i >= 0; i--) {
+                    vm_pop(&vm, &args[i]);
+                }
+                /* Pop the callee itself. */
+                Value callee_val;
+                vm_pop(&vm, &callee_val);
+
+                /* Call the native. fn->native is read before callee_val
+                 * is freed, so the pointer is still valid. */
+                Value result = fn->native(argc, args, vm.ctx);
+
+                /* Free the argument values and the callee. */
+                for (int i = 0; i < argc; i++) {
+                    value_free(&args[i]);
+                }
+                value_free(&callee_val);
+
+                if (result.type == VAL_ERROR) {
+                    vm_free_stack(&vm);
+                    return result;
+                }
+                if (!vm_push(&vm, result)) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+            } else {
+                /* User-defined function: not yet supported (Step 5).
+                 * Let vm_runtime_error clean up the stack. */
+                return vm_runtime_error(&vm, "user function calls not yet supported");
             }
             break;
         }

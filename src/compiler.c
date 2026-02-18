@@ -284,18 +284,22 @@ static void compile_block(Compiler *c, const AstNode *node) {
     }
 }
 
-/* Compile a function call: name(arg1, arg2, ...) */
+/*
+ * Compile a function call: name(arg1, arg2, ...)
+ *
+ * Stack-based call convention: push the callee (via OP_GET_GLOBAL),
+ * then push each argument, then emit OP_CALL [argc].
+ * The VM reads the callee from the stack at runtime.
+ */
 static void compile_call(Compiler *c, const AstNode *node) {
     /* Check argc limit before emitting anything. */
     if (node->child_count > 255) {
         compiler_error(c, "too many arguments (max 255)");
         return;
     }
-    /* Compile all arguments (push them onto the stack). */
-    for (size_t i = 0; i < node->child_count; i++) {
-        compile_node(c, node->children[i]);
-    }
-    /* Emit OP_CALL with function name index and argc. */
+    int line = (int)node->line;
+
+    /* Push the callee: look up the function by name from globals. */
     char *fn_name = compiler_strdup(c, node->value);
     if (!fn_name)
         return;
@@ -304,10 +308,15 @@ static void compile_call(Compiler *c, const AstNode *node) {
         compiler_error(c, "too many constants");
         return;
     }
-    int line = (int)node->line;
-    emit_byte(c, OP_CALL, line);
-    emit_byte(c, (uint8_t)name_idx, line);
-    emit_byte(c, (uint8_t)node->child_count, line);
+    emit_bytes(c, OP_GET_GLOBAL, (uint8_t)name_idx, line);
+
+    /* Compile all arguments (push them onto the stack after the callee). */
+    for (size_t i = 0; i < node->child_count; i++) {
+        compile_node(c, node->children[i]);
+    }
+
+    /* Emit OP_CALL with argc only. The callee is already on the stack. */
+    emit_bytes(c, OP_CALL, (uint8_t)node->child_count, line);
 }
 
 /*

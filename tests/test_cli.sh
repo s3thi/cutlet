@@ -739,8 +739,9 @@ test_run_file_error "parse error" '"unterminated' "unterminated string"
 # Runtime error: exit 1, error on stderr
 test_run_file_error "runtime error" '1 / 0' "division by zero"
 
-# Unknown function error
-test_run_file_error "unknown function" 'foo()' "unknown function"
+# Unknown function error: with stack-based dispatch, calling an undefined
+# name hits OP_GET_GLOBAL first, which reports "unknown variable".
+test_run_file_error "unknown function" 'foo()' "unknown variable"
 
 # Nonexistent file: exit 1, error on stderr
 set +e

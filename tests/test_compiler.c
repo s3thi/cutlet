@@ -266,11 +266,13 @@ TEST(test_compile_call_say) {
     CompileError err;
     Chunk *chunk = compile_input("say(42)", &err);
     ASSERT(chunk != NULL, "should compile");
-    /* OP_CONSTANT 0 (42), OP_CALL name_idx argc, OP_RETURN */
-    ASSERT(chunk->code[0] == OP_CONSTANT, "push arg");
-    ASSERT(chunk->code[2] == OP_CALL, "OP_CALL");
-    /* name_idx is code[3], argc is code[4] */
-    ASSERT(chunk->code[4] == 1, "argc = 1");
+    /* Stack-based call convention (Step 4):
+     * OP_GET_GLOBAL [say_idx], OP_CONSTANT [42_idx], OP_CALL [argc=1], OP_RETURN */
+    ASSERT(chunk->code[0] == OP_GET_GLOBAL, "push callee");
+    ASSERT(chunk->code[2] == OP_CONSTANT, "push arg");
+    ASSERT(chunk->code[4] == OP_CALL, "OP_CALL");
+    ASSERT(chunk->code[5] == 1, "argc = 1");
+    ASSERT(chunk->code[6] == OP_RETURN, "OP_RETURN");
     free_chunk(chunk);
     PASS();
 }

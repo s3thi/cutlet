@@ -113,34 +113,9 @@ Added `VAL_FUNCTION` to the value system with `ObjFunction` struct (name, arity,
 
 Added `compile_function()` to the compiler. Creates a new Compiler with a fresh Chunk for the function body, compiles the body into it, emits `OP_RETURN`. Wraps the Chunk in an `ObjFunction` (with name, arity, deep-copied params). Adds it as a `VAL_FUNCTION` constant in the enclosing Chunk. Emits `OP_CONSTANT` + `OP_DEFINE_GLOBAL` to bind the function as a global variable. Functions cannot be called yet (Step 4). 6 new tests (3 compiler, 3 VM). Files: `src/compiler.c`, `tests/test_compiler.c`, `tests/test_vm.c`.
 
-#### Step 4: Refactor call convention to stack-based
+#### Step 4: Refactor call convention to stack-based ✅
 
-Change how function calls are compiled and dispatched. This is a **refactor step** — existing behavior (calling `say()`) must keep working.
-
-**Built-in registration** (`runtime.c` or `vm.c`):
-- At startup, register `say` as a native VAL_FUNCTION in the global environment using `make_native("say", 1, native_say)`.
-- Implement `native_say()` matching the `NativeFn` signature.
-
-**Compiler** (`compiler.c`):
-- Change `compile_call()`: instead of emitting `OP_CALL [name_idx] [argc]`, emit `OP_GET_GLOBAL` for the function name, then compile args, then emit the new `OP_CALL [argc]` (1-byte argc only).
-- Update `OP_CALL` encoding in `chunk.h` comment.
-
-**VM** (`vm.c`):
-- Change `OP_CALL` handler: read `argc`, peek at callee at `stack_top[-argc-1]`.
-  - If `VAL_FUNCTION` with `native` != NULL: pop args into a temporary array, call native function, pop callee, push result.
-  - If `VAL_FUNCTION` with `native` == NULL: error for now ("user function calls not yet supported") — actual dispatch comes in step 5.
-  - If not a function: runtime error "cannot call \<type\>".
-- Remove `call_builtin()`.
-
-**Disassembler** (`chunk.c`):
-- Update `chunk_disassemble` for the new `OP_CALL` encoding (1-byte argc, no name index).
-
-**Tests**:
-- All existing `say()` tests pass unchanged.
-- `say("hi")` still prints "hi".
-- `42()` → error "cannot call number".
-
-**Files touched**: `src/compiler.c`, `src/vm.c`, `src/chunk.c`, `src/chunk.h`, `src/runtime.c` or `src/value.c`, tests.
+Refactored function call dispatch from name-based (`OP_CALL [name_idx] [argc]`) to stack-based (`OP_GET_GLOBAL` pushes callee, `OP_CALL [argc]` dispatches from stack). `say` is registered as a native `VAL_FUNCTION` in globals at the start of each `vm_execute()` via `register_builtins()`. Compiler emits `OP_GET_GLOBAL` for function name before args, then `OP_CALL` with 1-byte argc only. VM `OP_CALL` handler peeks callee from stack, checks type and arity, calls native or errors for user functions. Removed `call_builtin()`. Added `native_say()` matching `NativeFn` signature, `value_type_name()` helper. Disassembler updated for new 2-byte `OP_CALL` encoding. Added NOLINT for pre-existing struct Value padding warning. 2 new VM tests (call number/bool errors), updated compiler test + CLI test. Files: `src/vm.c`, `src/compiler.c`, `src/chunk.c`, `src/chunk.h`, `src/value.h`, `tests/test_vm.c`, `tests/test_compiler.c`, `tests/test_cli.sh`.
 
 #### Step 5: VM call frames + call/return
 

@@ -302,20 +302,11 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         return offset + 3;
     }
 
-    /* OP_CALL: 1-byte name index + 1-byte argc */
+    /* OP_CALL: 1-byte argc (callee is on the stack) */
     case OP_CALL: {
-        uint8_t name_idx = chunk->code[offset + 1];
-        uint8_t argc = chunk->code[offset + 2];
-        dynbuf_printf(b, "%-20s %4d '", opcode_name((OpCode)instruction), name_idx);
-        if (name_idx < chunk->const_count) {
-            char *s = value_format(&chunk->constants[name_idx]);
-            if (s) {
-                dynbuf_printf(b, "%s", s);
-                free(s);
-            }
-        }
-        dynbuf_printf(b, "' argc=%d\n", argc);
-        return offset + 3;
+        uint8_t argc = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s argc=%d\n", opcode_name((OpCode)instruction), argc);
+        return offset + 2;
     }
 
     default:

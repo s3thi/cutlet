@@ -74,6 +74,7 @@ typedef struct {
  * - VAL_NOTHING: no payload.
  * - VAL_ERROR: string field holds a heap-allocated error message.
  * - VAL_FUNCTION: function field holds an owned ObjFunction. */
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct Value {
     ValueType type;
     double number;

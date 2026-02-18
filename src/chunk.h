@@ -9,7 +9,7 @@
  * - Most opcodes are a single byte.
  * - OP_CONSTANT, OP_DEFINE_GLOBAL, OP_GET_GLOBAL, OP_SET_GLOBAL have
  *   a 1-byte constant index operand.
- * - OP_CALL has a 1-byte constant index (name) + 1-byte argc.
+ * - OP_CALL has a 1-byte argc operand (callee is on the stack).
  * - OP_JUMP, OP_JUMP_IF_FALSE, OP_JUMP_IF_TRUE have a 2-byte offset.
  */
 
@@ -65,8 +65,8 @@ typedef enum {
     /* Stack management */
     OP_POP, /* Discard TOS */
 
-    /* Built-in function calls */
-    OP_CALL, /* Operand: constant index (fn name), 1-byte argc */
+    /* Function calls (stack-based: callee is on the stack) */
+    OP_CALL, /* Operand: 1-byte argc. Callee at stack_top[-argc-1]. */
 
     /* End of program */
     OP_RETURN, /* End execution. TOS is the result. */

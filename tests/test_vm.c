@@ -1309,6 +1309,32 @@ TEST(test_fn_def_format_via_global) {
 }
 
 /* ============================================================
+ * Stack-based call dispatch (Step 4)
+ * ============================================================ */
+
+/* Calling a number produces a runtime error */
+TEST(test_call_number_error) {
+    Value v = run_input("my call_num = 42\ncall_num()", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "calling a number should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "cannot call") != NULL, "error mentions cannot call");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Calling a boolean produces a runtime error */
+TEST(test_call_bool_error) {
+    Value v = run_input("my call_b = true\ncall_b()", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "calling a boolean should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "cannot call") != NULL, "error mentions cannot call");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1575,6 +1601,10 @@ int main(void) {
     RUN_TEST(test_fn_def_creates_global);
     RUN_TEST(test_fn_def_evaluates_to_function);
     RUN_TEST(test_fn_def_format_via_global);
+
+    printf("\nStack-based call dispatch:\n");
+    RUN_TEST(test_call_number_error);
+    RUN_TEST(test_call_bool_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
