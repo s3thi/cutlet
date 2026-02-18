@@ -1335,6 +1335,41 @@ TEST(test_call_bool_error) {
 }
 
 /* ============================================================
+ * VM call frames: user-defined function call/return (Step 5)
+ * ============================================================ */
+
+/* fn foo() is 42 end\nfoo() → 42 */
+TEST(test_user_fn_call_returns_value) {
+    assert_vm_number("fn uf1() is 42 end\nuf1()", 42.0, "user fn returns body value");
+}
+
+/* fn greet() is say("hi") end\ngreet() → prints "hi", returns nothing */
+TEST(test_user_fn_call_with_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("fn uf2() is say(\"hi\") end\nuf2()", &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "greet returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hi\n", "greet prints hi", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* fn five() is 2 + 3 end\nsay(five()) → prints 5 */
+TEST(test_user_fn_call_result_used_in_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("fn uf3() is 2 + 3 end\nsay(uf3())", &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "5\n", "say prints fn result", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1605,6 +1640,11 @@ int main(void) {
     printf("\nStack-based call dispatch:\n");
     RUN_TEST(test_call_number_error);
     RUN_TEST(test_call_bool_error);
+
+    printf("\nVM call frames (user function call/return):\n");
+    RUN_TEST(test_user_fn_call_returns_value);
+    RUN_TEST(test_user_fn_call_with_say);
+    RUN_TEST(test_user_fn_call_result_used_in_say);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

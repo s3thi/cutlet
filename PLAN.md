@@ -117,32 +117,9 @@ Added `compile_function()` to the compiler. Creates a new Compiler with a fresh 
 
 Refactored function call dispatch from name-based (`OP_CALL [name_idx] [argc]`) to stack-based (`OP_GET_GLOBAL` pushes callee, `OP_CALL [argc]` dispatches from stack). `say` is registered as a native `VAL_FUNCTION` in globals at the start of each `vm_execute()` via `register_builtins()`. Compiler emits `OP_GET_GLOBAL` for function name before args, then `OP_CALL` with 1-byte argc only. VM `OP_CALL` handler peeks callee from stack, checks type and arity, calls native or errors for user functions. Removed `call_builtin()`. Added `native_say()` matching `NativeFn` signature, `value_type_name()` helper. Disassembler updated for new 2-byte `OP_CALL` encoding. Added NOLINT for pre-existing struct Value padding warning. 2 new VM tests (call number/bool errors), updated compiler test + CLI test. Files: `src/vm.c`, `src/compiler.c`, `src/chunk.c`, `src/chunk.h`, `src/value.h`, `tests/test_vm.c`, `tests/test_compiler.c`, `tests/test_cli.sh`.
 
-#### Step 5: VM call frames + call/return
+#### Step 5: VM call frames + call/return ✅
 
-Add call frames to the VM so user-defined functions can actually execute.
-
-**VM** (`vm.h`, `vm.c`):
-- Define `CallFrame`:
-  ```c
-  typedef struct {
-      ObjFunction *function;  /* The function being executed. */
-      uint8_t *ip;            /* Instruction pointer into function's chunk. */
-      Value *slots;           /* Pointer into VM stack: base of this frame's window. */
-  } CallFrame;
-  ```
-- Add `CallFrame frames[FRAMES_MAX]` and `int frame_count` to VM. `FRAMES_MAX` = 64.
-- Top-level code runs inside a "script" CallFrame (frame 0) whose function is an `ObjFunction` wrapping the top-level Chunk.
-- Refactor `vm_execute()`: `ip`, `chunk` now come from `frames[frame_count-1]`. All `read_byte()`/`read_short()` and constant access go through the current frame.
-- **OP_CALL** for user functions: validate arity, push new CallFrame, set `ip` to function's chunk, set `slots` to `stack_top - argc - 1`.
-- **OP_RETURN**: pop frame. If `frame_count` reaches 0, return the result (end of program). Otherwise, pop the called function's stack window, push the return value onto the caller's stack, resume caller's frame.
-
-**Tests**:
-- `fn foo() is 42 end\nfoo()` → 42.
-- `fn greet() is say("hi") end\ngreet()` → prints "hi", returns nothing.
-- `fn five() is 2 + 3 end\nsay(five())` → prints 5.
-- Existing tests still pass.
-
-**Files touched**: `src/vm.h`, `src/vm.c`, tests.
+Added `CallFrame` struct (function, ip, slots) and call frame stack (`frames[FRAMES_MAX]`, `frame_count`) to VM. `FRAMES_MAX` = 64. Top-level code runs inside a "script" CallFrame (frame 0) wrapping the top-level Chunk in a stack-allocated `ObjFunction`. Refactored `vm_execute()`: `read_byte()`/`read_short()` take a `CallFrame*`; all constant/chunk access goes through `frame->function->chunk`. `OP_CALL` for user functions pushes a new CallFrame. `OP_RETURN` pops the frame, discards the called function's stack window, and pushes the return value for the caller; frame_count==0 ends the program. 3 new VM tests. Files: `src/vm.h`, `src/vm.c`, `tests/test_vm.c`.
 
 #### Step 6: Function parameters (OP_GET_LOCAL)
 

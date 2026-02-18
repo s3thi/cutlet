@@ -1,10 +1,14 @@
 /*
  * vm.c - Cutlet bytecode virtual machine
  *
- * Stack-based dispatch loop. Each opcode pops its operands from
- * the stack and pushes its result. The VM uses owned Values on
- * the stack — OP_POP calls value_free(), and OP_GET_GLOBAL clones
- * values from the global environment.
+ * Stack-based dispatch loop with call frames. Each opcode pops its
+ * operands from the stack and pushes its result. The VM uses owned
+ * Values on the stack — OP_POP calls value_free(), and OP_GET_GLOBAL
+ * clones values from the global environment.
+ *
+ * Top-level code runs inside a "script" CallFrame (frame 0) whose
+ * ObjFunction wraps the top-level Chunk. User function calls push
+ * new frames; OP_RETURN pops them.
  */
 
 #include "vm.h"
@@ -17,7 +21,10 @@
 
 /* ---- Stack operations ---- */
 
-static void vm_reset_stack(VM *vm) { vm->stack_top = vm->stack; }
+static void vm_reset_stack(VM *vm) {
+    vm->stack_top = vm->stack;
+    vm->frame_count = 0;
+}
 
 /* Returns false on stack overflow. Caller must handle the error. */
 static bool vm_push(VM *vm, Value value) {
@@ -58,13 +65,14 @@ static void vm_free_stack(VM *vm) {
     }
 }
 
-/* ---- Byte reading helpers ---- */
+/* ---- Byte reading helpers ----
+ * Read from the current call frame's instruction pointer. */
 
-static uint8_t read_byte(VM *vm) { return *vm->ip++; }
+static uint8_t read_byte(CallFrame *frame) { return *frame->ip++; }
 
-static uint16_t read_short(VM *vm) {
-    uint8_t high = *vm->ip++;
-    uint8_t low = *vm->ip++;
+static uint16_t read_short(CallFrame *frame) {
+    uint8_t high = *frame->ip++;
+    uint8_t low = *frame->ip++;
     return (uint16_t)((high << 8) | low);
 }
 
@@ -76,13 +84,17 @@ static uint16_t read_short(VM *vm) {
  * number of the instruction that caused the error.
  */
 static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
-    /* Look up the line number of the instruction that just executed.
-     * vm->ip points to the next instruction, so subtract 1. */
+    /* Look up the line number from the current call frame.
+     * frame->ip points to the next instruction, so subtract 1. */
     int line = 0;
-    if (vm->ip > vm->chunk->code) {
-        size_t offset = (size_t)(vm->ip - vm->chunk->code - 1);
-        if (offset < vm->chunk->count) {
-            line = vm->chunk->lines[offset];
+    if (vm->frame_count > 0) {
+        CallFrame *frame = &vm->frames[vm->frame_count - 1];
+        Chunk *chunk = frame->function->chunk;
+        if (frame->ip > chunk->code) {
+            size_t offset = (size_t)(frame->ip - chunk->code - 1);
+            if (offset < chunk->count) {
+                line = chunk->lines[offset];
+            }
         }
     }
 
@@ -234,19 +246,36 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
     register_builtins();
 
     VM vm;
-    vm.chunk = chunk;
-    vm.ip = chunk->code;
     vm.ctx = ctx;
     vm_reset_stack(&vm);
 
+    /* Create a "script" ObjFunction that wraps the top-level chunk.
+     * This lives on the C stack — it's only used for the duration of
+     * this vm_execute() call. The chunk pointer is borrowed (not owned). */
+    ObjFunction script_fn = {
+        .name = NULL,
+        .arity = 0,
+        .params = NULL,
+        .chunk = chunk,
+        .native = NULL,
+    };
+
+    /* Push frame 0: the top-level script. */
+    CallFrame *frame = &vm.frames[vm.frame_count++];
+    frame->function = &script_fn;
+    frame->ip = chunk->code;
+    frame->slots = vm.stack;
+
     for (;;) {
-        uint8_t instruction = read_byte(&vm);
+        /* Current frame may change during execution (calls/returns). */
+        frame = &vm.frames[vm.frame_count - 1];
+        uint8_t instruction = read_byte(frame);
         switch ((OpCode)instruction) {
 
         case OP_CONSTANT: {
-            uint8_t idx = read_byte(&vm);
+            uint8_t idx = read_byte(frame);
             Value v;
-            if (!value_clone(&v, &chunk->constants[idx])) {
+            if (!value_clone(&v, &frame->function->chunk->constants[idx])) {
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
             if (!vm_push(&vm, v)) {
@@ -606,8 +635,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_DEFINE_GLOBAL: {
-            uint8_t idx = read_byte(&vm);
-            const char *name = chunk->constants[idx].string;
+            uint8_t idx = read_byte(frame);
+            const char *name = frame->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — the value stays as the expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -621,8 +650,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_GET_GLOBAL: {
-            uint8_t idx = read_byte(&vm);
-            const char *name = chunk->constants[idx].string;
+            uint8_t idx = read_byte(frame);
+            const char *name = frame->function->chunk->constants[idx].string;
             Value val = {0};
             RuntimeVarStatus status = runtime_var_get(name, &val);
             if (status == RUNTIME_VAR_NOT_FOUND) {
@@ -638,8 +667,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_SET_GLOBAL: {
-            uint8_t idx = read_byte(&vm);
-            const char *name = chunk->constants[idx].string;
+            uint8_t idx = read_byte(frame);
+            const char *name = frame->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — value stays as expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -656,39 +685,39 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_JUMP: {
-            uint16_t offset = read_short(&vm);
-            vm.ip += offset;
+            uint16_t offset = read_short(frame);
+            frame->ip += offset;
             break;
         }
 
         case OP_JUMP_IF_FALSE: {
-            uint16_t offset = read_short(&vm);
+            uint16_t offset = read_short(frame);
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
                 return vm_runtime_error(&vm, "stack underflow");
             }
             if (!is_truthy(&tos)) {
-                vm.ip += offset;
+                frame->ip += offset;
             }
             break;
         }
 
         case OP_JUMP_IF_TRUE: {
-            uint16_t offset = read_short(&vm);
+            uint16_t offset = read_short(frame);
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
                 return vm_runtime_error(&vm, "stack underflow");
             }
             if (is_truthy(&tos)) {
-                vm.ip += offset;
+                frame->ip += offset;
             }
             break;
         }
 
         case OP_LOOP: {
             /* Backward jump: subtract offset from instruction pointer. */
-            uint16_t offset = read_short(&vm);
-            vm.ip -= offset;
+            uint16_t offset = read_short(frame);
+            frame->ip -= offset;
             break;
         }
 
@@ -702,7 +731,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_CALL: {
-            uint8_t argc = read_byte(&vm);
+            uint8_t argc = read_byte(frame);
 
             /* Peek at the callee: it sits below the arguments on the stack.
              * vm_peek gives us a shallow copy — the function pointer is
@@ -758,24 +787,55 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                     return vm_runtime_error(&vm, "stack overflow");
                 }
             } else {
-                /* User-defined function: not yet supported (Step 5).
-                 * Let vm_runtime_error clean up the stack. */
-                return vm_runtime_error(&vm, "user function calls not yet supported");
+                /* User-defined function: push a new call frame.
+                 * The callee value sits at stack_top[-argc-1]; arguments
+                 * are above it. The new frame's slots point to the callee
+                 * slot (slot 0 = the function itself, not used yet but
+                 * reserves the position for future local variable support). */
+                if (vm.frame_count >= FRAMES_MAX) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                CallFrame *new_frame = &vm.frames[vm.frame_count++];
+                new_frame->function = fn;
+                new_frame->ip = fn->chunk->code;
+                new_frame->slots = vm.stack_top - argc - 1;
             }
             break;
         }
 
         case OP_RETURN: {
-            /* Pop the result from the stack. */
+            /* Pop the return value from the stack. */
             Value result;
-            if (vm.stack_top > vm.stack) {
+            if (vm.stack_top > frame->slots) {
                 vm_pop(&vm, &result);
             } else {
                 result = make_nothing();
             }
-            /* Free any remaining values on the stack. */
-            vm_free_stack(&vm);
-            return result; // NOLINT(clang-analyzer-core.StackAddressEscape)
+
+            /* Pop the current call frame. */
+            vm.frame_count--;
+
+            if (vm.frame_count == 0) {
+                /* Returning from the top-level script: end of program.
+                 * Free any remaining values on the stack and return. */
+                vm_free_stack(&vm);
+                return result; // NOLINT(clang-analyzer-core.StackAddressEscape)
+            }
+
+            /* Returning from a user function: discard the called
+             * function's stack window (callee + args + locals), then
+             * push the return value for the caller. */
+            while (vm.stack_top > frame->slots) {
+                Value v;
+                vm_pop(&vm, &v);
+                value_free(&v);
+            }
+
+            /* Push the return value back onto the caller's stack. */
+            if (!vm_push(&vm, result)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
         }
 
         default:

@@ -2,8 +2,12 @@
  * vm.h - Cutlet bytecode virtual machine
  *
  * Stack-based VM that executes bytecode from a Chunk.
- * The VM maintains a value stack, an instruction pointer,
- * and a reference to the EvalContext for built-in I/O.
+ * The VM maintains a value stack, a call frame stack, and a
+ * reference to the EvalContext for built-in I/O.
+ *
+ * Each function call pushes a CallFrame that tracks the executing
+ * function, instruction pointer, and stack window base. Top-level
+ * code runs inside a "script" frame (frame 0).
  *
  * Global variables are stored externally in the runtime module
  * (not owned by the VM).
@@ -16,13 +20,28 @@
 #include "value.h"
 
 #define VM_STACK_MAX 256
+#define FRAMES_MAX 64
+
+/*
+ * CallFrame - tracks one in-flight function invocation.
+ *
+ * function: the ObjFunction being executed (not owned by the frame).
+ * ip:       instruction pointer into function->chunk->code.
+ * slots:    pointer into the VM value stack marking the base of
+ *           this frame's stack window (callee slot 0).
+ */
+typedef struct {
+    ObjFunction *function; /* The function being executed. */
+    uint8_t *ip;           /* Instruction pointer into function's chunk. */
+    Value *slots;          /* Pointer into VM stack: base of this frame's window. */
+} CallFrame;
 
 typedef struct {
-    Chunk *chunk;              /* Current bytecode chunk (not owned). */
-    uint8_t *ip;               /* Instruction pointer into chunk->code. */
-    Value stack[VM_STACK_MAX]; /* Value stack. */
-    Value *stack_top;          /* Points one past the top of stack. */
-    EvalContext *ctx;          /* Write callback for say() (not owned). */
+    CallFrame frames[FRAMES_MAX]; /* Call frame stack. */
+    int frame_count;              /* Number of active call frames. */
+    Value stack[VM_STACK_MAX];    /* Value stack. */
+    Value *stack_top;             /* Points one past the top of stack. */
+    EvalContext *ctx;             /* Write callback for say() (not owned). */
 } VM;
 
 /*
