@@ -49,6 +49,13 @@ When a new language feature is added, remind the user to:
 
 The agent should NOT make these updates itself — just remind the user at the end of the implementation step.
 
+## Example expected-output files
+
+Each `examples/*.cutlet` file has a corresponding `examples/*.expected` file containing its exact expected stdout. The test harness (`tests/test_examples.sh`, run via `make test-examples`) diffs actual output against these files.
+
+- **New examples**: When adding a new `.cutlet` example, generate its `.expected` file by running `./build/cutlet run examples/foo.cutlet > examples/foo.expected`.
+- **Never modify `.expected` files for existing examples without user confirmation.** A change to expected output means the language's observable behavior changed — the user must approve that.
+
 ## Codebase understanding tools
 
 Three Python analysis scripts in `scripts/` help you orient yourself in the codebase. They use Universal Ctags and cscope for accurate C symbol indexing and call graph analysis. Run `make understand` to generate all three, or run them individually:
