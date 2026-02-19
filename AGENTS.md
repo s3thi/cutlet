@@ -33,7 +33,7 @@ Multiple agents may work on different tasks at the same time. To avoid stale ref
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.
 - Before implementing any new code, run `make test` and `make check` to prove that your tests are failing. Pause after test failures and require user confirmation to proceed with implementation. (This only applies when writing source code, not documentation.)
-- Run `make test` and `make check` after every source code change (C files, headers, Makefiles, test files). Skip for documentation-only changes (plans, READMEs, AGENTS.md, TUTORIAL.md, etc.).
+- Run `make test` and `make check` after every source code change (C files, headers, Makefiles, test files). Skip for documentation-only changes (plans, READMEs, AGENTS.md, TUTORIAL.md, etc.). **Note:** output from these commands may exceed the tool output limit. Be prepared to pipe through `tail` or `grep` to see the results summary rather than re-running the full command.
 - Never remove, change, or disable any tests without user confirmation.
 - Never disable any linter errors without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
