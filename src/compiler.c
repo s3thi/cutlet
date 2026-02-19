@@ -666,7 +666,8 @@ static void compile_function(Compiler *c, const AstNode *node) {
     /* Emit OP_RETURN at the end of the function body. */
     emit_byte(&body_compiler, OP_RETURN, line);
 
-    /* Build the ObjFunction. */
+    /* Build the ObjFunction.
+     * For anonymous functions (node->value == NULL), fn->name is NULL. */
     ObjFunction *fn = calloc(1, sizeof(ObjFunction));
     if (!fn) {
         compiler_error(c, "memory allocation failed");
@@ -674,12 +675,16 @@ static void compile_function(Compiler *c, const AstNode *node) {
         free(body_chunk);
         return;
     }
-    fn->name = compiler_strdup(c, node->value);
-    if (!fn->name) {
-        chunk_free(body_chunk);
-        free(body_chunk);
-        free(fn);
-        return;
+    if (node->value) {
+        fn->name = compiler_strdup(c, node->value);
+        if (!fn->name) {
+            chunk_free(body_chunk);
+            free(body_chunk);
+            free(fn);
+            return;
+        }
+    } else {
+        fn->name = NULL;
     }
     fn->arity = (int)node->param_count;
     fn->chunk = body_chunk;
@@ -716,16 +721,19 @@ static void compile_function(Compiler *c, const AstNode *node) {
     Value fn_val = make_function(fn);
     emit_constant(c, fn_val, line);
 
-    /* Emit OP_DEFINE_GLOBAL with the function's name to bind it. */
-    char *name = compiler_strdup(c, node->value);
-    if (!name)
-        return;
-    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
-    if (name_idx < 0) {
-        compiler_error(c, "too many constants");
-        return;
+    /* For named functions, emit OP_DEFINE_GLOBAL to bind the name globally.
+     * For anonymous functions, just leave the value on the stack. */
+    if (node->value) {
+        char *name = compiler_strdup(c, node->value);
+        if (!name)
+            return;
+        int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
+        if (name_idx < 0) {
+            compiler_error(c, "too many constants");
+            return;
+        }
+        emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
     }
-    emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
 }
 
 /* Compile any AST node by dispatching on its type. */

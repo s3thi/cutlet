@@ -576,6 +576,77 @@ TEST(test_compile_fn_assign_param_uses_set_local) {
     PASS();
 }
 
+/* ============================================================
+ * Anonymous function definitions
+ * ============================================================ */
+
+/* Compile fn() is 42 end → OP_CONSTANT (function) + OP_RETURN, no OP_DEFINE_GLOBAL */
+TEST(test_compile_anon_fn_no_define_global) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    /* The top-level chunk should have:
+     *   OP_CONSTANT <fn_idx>   (push the function value)
+     *   OP_RETURN
+     * No OP_DEFINE_GLOBAL since anonymous. */
+    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->code[2] == OP_RETURN, "OP_RETURN after constant (no DEFINE_GLOBAL)");
+
+    /* The function constant should be VAL_FUNCTION with NULL name. */
+    ASSERT(fn_idx < chunk->const_count, "fn constant index in range");
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    ASSERT(chunk->constants[fn_idx].function != NULL, "function pointer not NULL");
+    ASSERT(chunk->constants[fn_idx].function->name == NULL, "anonymous function name is NULL");
+    ASSERT(chunk->constants[fn_idx].function->arity == 0, "arity is 0");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Anonymous fn with parameters has correct arity and param names */
+TEST(test_compile_anon_fn_with_params) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn(a, b) is a + b end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->name == NULL, "anonymous function name is NULL");
+    ASSERT(fn->arity == 2, "arity is 2");
+    ASSERT(fn->params != NULL, "params array exists");
+    ASSERT(strcmp(fn->params[0], "a") == 0, "param 0 is a");
+    ASSERT(strcmp(fn->params[1], "b") == 0, "param 1 is b");
+
+    /* Body should use OP_GET_LOCAL for params */
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    ASSERT(fn->chunk->code[0] == OP_GET_LOCAL, "body uses OP_GET_LOCAL for param a");
+    ASSERT(fn->chunk->code[1] == 1, "param a at slot 1");
+    ASSERT(fn->chunk->code[2] == OP_GET_LOCAL, "second OP_GET_LOCAL for param b");
+    ASSERT(fn->chunk->code[3] == 2, "param b at slot 2");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Anonymous fn assigned to variable: my f = fn(x) is x end */
+TEST(test_compile_anon_fn_in_decl) {
+    CompileError err;
+    Chunk *chunk = compile_input("my f = fn(x) is x end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    /* Should have: OP_CONSTANT (fn), OP_DEFINE_GLOBAL (f), OP_RETURN
+     * The DEFINE_GLOBAL is for the variable 'f', not for the fn itself. */
+    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL for variable f");
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    ASSERT(chunk->constants[fn_idx].function->name == NULL, "fn name is NULL (anonymous)");
+
+    free_chunk(chunk);
+    PASS();
+}
+
 /* Assignment to non-local still uses OP_SET_GLOBAL */
 TEST(test_compile_fn_assign_nonlocal_uses_set_global) {
     CompileError err;
@@ -660,6 +731,11 @@ int main(void) {
     RUN_TEST(test_compile_fn_local_decl_no_define_global);
     RUN_TEST(test_compile_fn_assign_param_uses_set_local);
     RUN_TEST(test_compile_fn_assign_nonlocal_uses_set_global);
+
+    printf("\nAnonymous function definitions:\n");
+    RUN_TEST(test_compile_anon_fn_no_define_global);
+    RUN_TEST(test_compile_anon_fn_with_params);
+    RUN_TEST(test_compile_anon_fn_in_decl);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

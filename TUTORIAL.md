@@ -345,6 +345,39 @@ say(f(7))               # prints: 49
 # x()                 # => ERR cannot call value of type number
 
 # ============================================================
+# 9b. Anonymous functions
+# ============================================================
+
+# Anonymous functions have no name — just `fn(params) is body end`.
+my double = fn(x) is x * 2 end
+say(double(21))         # prints: 42
+
+# They work exactly like named functions, but don't bind a global.
+my add = fn(a, b) is a + b end
+say(add(3, 4))          # prints: 7
+
+# Zero-parameter anonymous function:
+my greeting = fn() is "hello world" end
+say(greeting())         # prints: hello world
+
+# Multi-line body works the same way:
+my sum_sq = fn(a, b) is
+  my a2 = a ** 2
+  my b2 = b ** 2
+  a2 + b2
+end
+say(sum_sq(3, 4))       # prints: 25
+
+# Anonymous functions are expressions — they evaluate to a function value.
+fn(x) is x + 1 end     # => <fn>
+
+# You can reassign a variable to different anonymous functions.
+my op = fn(x) is x + 10 end
+say(op(5))              # prints: 15
+op = fn(x) is x * 10 end
+say(op(5))              # prints: 50
+
+# ============================================================
 # 10. say() for output
 # ============================================================
 

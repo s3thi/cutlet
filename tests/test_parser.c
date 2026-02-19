@@ -1851,14 +1851,8 @@ TEST(test_fn_missing_close_paren) {
     PASS();
 }
 
-/* Error: missing name → parse error */
-TEST(test_fn_missing_name) {
-    AstNode *node = NULL;
-    ParseError err;
-    ASSERT(!parser_parse("fn () is 42 end", &node, &err), "fn without name should fail");
-    ASSERT(node == NULL, "node should be NULL");
-    PASS();
-}
+/* Anonymous function: fn () is 42 end → [FN (params) body] with no name */
+/* (Previously this was an error; now anonymous functions are supported.) */
 
 /* Error: empty body → parse error */
 TEST(test_fn_empty_body) {
@@ -1914,6 +1908,105 @@ TEST(test_is_complete_fn) {
 
 TEST(test_is_complete_fn_multiline) {
     ASSERT(parser_is_complete("fn foo() is\n  42\nend"), "multiline fn should be complete");
+    PASS();
+}
+
+/* ============================================================
+ * Anonymous function parsing tests
+ * ============================================================ */
+
+/* fn(x) is x + 1 end → [FN (x) [BINOP + [IDENT x] [NUMBER 1]]] */
+TEST(test_anon_fn_one_param) {
+    ASSERT(ast_matches("fn(x) is x + 1 end", "AST [FN (x) [BINOP + [IDENT x] [NUMBER 1]]]"),
+           "anonymous fn with one param");
+    PASS();
+}
+
+/* fn() is 42 end → [FN () [NUMBER 42]] */
+TEST(test_anon_fn_no_params) {
+    ASSERT(ast_matches("fn() is 42 end", "AST [FN () [NUMBER 42]]"), "anonymous fn no params");
+    PASS();
+}
+
+/* fn(a, b) is a + b end → [FN (a, b) [BINOP + [IDENT a] [IDENT b]]] */
+TEST(test_anon_fn_two_params) {
+    ASSERT(ast_matches("fn(a, b) is a + b end", "AST [FN (a, b) [BINOP + [IDENT a] [IDENT b]]]"),
+           "anonymous fn two params");
+    PASS();
+}
+
+/* Anonymous fn assigned to variable: my f = fn(x) is x end */
+TEST(test_anon_fn_in_assignment) {
+    ASSERT(ast_matches("my f = fn(x) is x end", "AST [DECL f [FN (x) [IDENT x]]]"),
+           "anonymous fn in assignment");
+    PASS();
+}
+
+/* Anonymous fn with multiline body */
+TEST(test_anon_fn_multiline_body) {
+    ASSERT(ast_matches("fn(x) is\n  x + 1\nend", "AST [FN (x) [BINOP + [IDENT x] [NUMBER 1]]]"),
+           "anonymous fn multiline body");
+    PASS();
+}
+
+/* Anonymous fn with multi-expression body */
+TEST(test_anon_fn_multi_expr_body) {
+    ASSERT(ast_matches("fn() is\n  1\n  2\nend", "AST [FN () [BLOCK [NUMBER 1] [NUMBER 2]]]"),
+           "anonymous fn multi-expression body");
+    PASS();
+}
+
+/* Anonymous fn: empty body should still error */
+TEST(test_anon_fn_empty_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn() is end", &node, &err), "anonymous fn empty body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Anonymous fn: missing 'is' should error */
+TEST(test_anon_fn_missing_is) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn() 42 end", &node, &err), "anonymous fn without is should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* Anonymous fn: missing 'end' should error */
+TEST(test_anon_fn_missing_end) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn() is 42", &node, &err), "anonymous fn without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete: incomplete anonymous fn cases */
+TEST(test_is_incomplete_anon_fn_no_is) {
+    ASSERT(!parser_is_complete("fn()"), "anon fn without is should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_anon_fn_no_body) {
+    ASSERT(!parser_is_complete("fn() is"), "anon fn without body should be incomplete");
+    PASS();
+}
+
+TEST(test_is_incomplete_anon_fn_no_end) {
+    ASSERT(!parser_is_complete("fn() is 42"), "anon fn without end should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: complete anonymous fn */
+TEST(test_is_complete_anon_fn) {
+    ASSERT(parser_is_complete("fn() is 42 end"), "complete anon fn should be complete");
+    PASS();
+}
+
+TEST(test_is_complete_anon_fn_multiline) {
+    ASSERT(parser_is_complete("fn(x) is\n  x\nend"), "multiline anon fn should be complete");
     PASS();
 }
 
@@ -2217,7 +2310,6 @@ int main(void) {
     RUN_TEST(test_fn_missing_is);
     RUN_TEST(test_fn_missing_end);
     RUN_TEST(test_fn_missing_close_paren);
-    RUN_TEST(test_fn_missing_name);
     RUN_TEST(test_fn_empty_body);
 
     printf("\nFunction definition reserved keywords:\n");
@@ -2230,6 +2322,26 @@ int main(void) {
     RUN_TEST(test_is_incomplete_fn_no_end);
     RUN_TEST(test_is_complete_fn);
     RUN_TEST(test_is_complete_fn_multiline);
+
+    printf("\nAnonymous function parsing:\n");
+    RUN_TEST(test_anon_fn_one_param);
+    RUN_TEST(test_anon_fn_no_params);
+    RUN_TEST(test_anon_fn_two_params);
+    RUN_TEST(test_anon_fn_in_assignment);
+    RUN_TEST(test_anon_fn_multiline_body);
+    RUN_TEST(test_anon_fn_multi_expr_body);
+
+    printf("\nAnonymous function error cases:\n");
+    RUN_TEST(test_anon_fn_empty_body);
+    RUN_TEST(test_anon_fn_missing_is);
+    RUN_TEST(test_anon_fn_missing_end);
+
+    printf("\nparser_is_complete() - anonymous functions:\n");
+    RUN_TEST(test_is_incomplete_anon_fn_no_is);
+    RUN_TEST(test_is_incomplete_anon_fn_no_body);
+    RUN_TEST(test_is_incomplete_anon_fn_no_end);
+    RUN_TEST(test_is_complete_anon_fn);
+    RUN_TEST(test_is_complete_anon_fn_multiline);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

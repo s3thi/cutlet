@@ -1257,10 +1257,11 @@ static void free_params(char **params, size_t count) {
 
 /*
  * Parse a function definition expression.
- * Syntax: fn name(param1, param2, ...) is body end
+ * Syntax: fn name(param1, param2, ...) is body end     (named)
+ *         fn(param1, param2, ...) is body end           (anonymous)
  *
  * Returns an AST_FUNCTION node with:
- *   value = function name
+ *   value = function name (NULL for anonymous functions)
  *   params = array of parameter name strings
  *   param_count = number of parameters
  *   left = body expression (single expr or AST_BLOCK)
@@ -1274,21 +1275,27 @@ static AstNode *parse_fn(Parser *p) {
     /* Consume 'fn' keyword (already verified by caller) */
     advance(p);
 
-    /* Expect function name (identifier) */
-    if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
-        parser_error(p, p->current.line, p->current.col, "expected function name after 'fn'");
+    /* Check if the next token is '(' — if so, this is an anonymous function.
+     * Otherwise, expect a function name (identifier). */
+    char *fn_name = NULL;
+    if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+        p->current.value[0] == '(') {
+        /* Anonymous function: fn_name stays NULL, don't advance past '(' yet. */
+    } else if (p->current.type == TOK_IDENT && !is_reserved_keyword(&p->current)) {
+        /* Named function: save the name. */
+        fn_name = malloc(p->current.value_len + 1);
+        if (!fn_name) {
+            parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+            return NULL;
+        }
+        memcpy(fn_name, p->current.value, p->current.value_len);
+        fn_name[p->current.value_len] = '\0';
+        advance(p);
+    } else {
+        parser_error(p, p->current.line, p->current.col,
+                     "expected function name or '(' after 'fn'");
         return NULL;
     }
-
-    /* Save function name before advance invalidates token buffer */
-    char *fn_name = malloc(p->current.value_len + 1);
-    if (!fn_name) {
-        parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
-        return NULL;
-    }
-    memcpy(fn_name, p->current.value, p->current.value_len);
-    fn_name[p->current.value_len] = '\0';
-    advance(p);
 
     /* Expect '(' */
     if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
@@ -1298,6 +1305,9 @@ static AstNode *parse_fn(Parser *p) {
         return NULL;
     }
     advance(p); /* consume '(' */
+
+    /* Note: for anonymous functions, fn_name is NULL and is intentionally
+     * threaded through the rest of this function unchanged. */
 
     /* Parse comma-separated parameter names */
     PtrArray param_names;
@@ -2053,8 +2063,8 @@ static char *ast_format_node(const AstNode *node) {
     }
 
     if (node->type == AST_FUNCTION) {
-        /* Function: [FN name(a, b) body]
-         * value = function name
+        /* Function: [FN name(a, b) body] for named, [FN (a, b) body] for anonymous.
+         * value = function name (NULL for anonymous)
          * params = parameter name strings
          * left = body expression */
         char *body_str = ast_format_node(node->left);
@@ -2069,9 +2079,12 @@ static char *ast_format_node(const AstNode *node) {
                 params_len += 2; /* ", " */
         }
 
-        /* Total: "[FN name(params) body]" */
-        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + params_len + 2 +
-                     strlen(body_str) + 1 + 1;
+        /* Total: "[FN name(params) body]" or "[FN (params) body]"
+         * Named:    "[" + type + " " + name + "(" + params + ") " + body + "]" + NUL
+         * Anonymous: "[" + type + " " + "(" + params + ") " + body + "]" + NUL */
+        size_t name_len = node->value ? strlen(node->value) : 0;
+        size_t len =
+            1 + strlen(type_str) + 1 + name_len + 1 + params_len + 2 + strlen(body_str) + 1 + 1;
         char *buf = malloc(len);
         if (!buf) {
             free(body_str);
@@ -2079,7 +2092,11 @@ static char *ast_format_node(const AstNode *node) {
         }
 
         size_t pos = 0;
-        pos += (size_t)snprintf(buf + pos, len - pos, "[%s %s(", type_str, node->value);
+        if (node->value) {
+            pos += (size_t)snprintf(buf + pos, len - pos, "[%s %s(", type_str, node->value);
+        } else {
+            pos += (size_t)snprintf(buf + pos, len - pos, "[%s (", type_str);
+        }
         for (size_t i = 0; i < node->param_count; i++) {
             if (i > 0)
                 pos += (size_t)snprintf(buf + pos, len - pos, ", ");
