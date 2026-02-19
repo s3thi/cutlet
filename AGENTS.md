@@ -21,6 +21,14 @@ The author of this project is an experienced developer of 20 years. But they don
 
 See `plans/README.md` for project status, key files, and what exists today. Tasks to work on are in `plans/doing/`. Completed work is archived in `plans/done/`. When you finish a task, move its file from `doing/` to `done/`.
 
+## Concurrent agent safety
+
+Multiple agents may work on different tasks at the same time. To avoid stale references:
+
+- **Never trust line numbers from plans.** Always search for the target symbol (`grep`, `make symbol-index`, or `Read`) before editing. Plans reference symbols and file paths, not line numbers.
+- **Re-orient before each step.** Before starting a plan step, read the relevant files to discover the current state of the code. Another agent may have changed it since the plan was written.
+- **Check `make test && make check` after every change.** This catches conflicts early — if another agent's edits broke an assumption, tests will surface it.
+
 ## Important instructions
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.

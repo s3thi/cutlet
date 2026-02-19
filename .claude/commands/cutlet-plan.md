@@ -11,4 +11,6 @@ Then create a new task file in `plans/doing/` with:
 
 Write it so another agent can execute without asking me anything.
 
+Reference code locations by **symbol name + file path**, never by line number. For example, write "Add `VAL_ARRAY` to the `ValueType` enum in `src/value.h`", not "Add `VAL_ARRAY` at `src/value.h:42`". Line numbers go stale when multiple agents edit the codebase concurrently; symbol names remain stable.
+
 Break large features into multiple task files, each with at most 10 steps. A task should be completable in a single session without running out of context. If a feature needs more than 10 steps, ask me how to split it before creating the files.
