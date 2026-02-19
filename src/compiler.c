@@ -383,9 +383,11 @@ static void compile_block(Compiler *c, const AstNode *node) {
 /*
  * Compile a function call: name(arg1, arg2, ...)
  *
- * Stack-based call convention: push the callee (via OP_GET_GLOBAL),
- * then push each argument, then emit OP_CALL [argc].
- * The VM reads the callee from the stack at runtime.
+ * Stack-based call convention: push the callee, then push each argument,
+ * then emit OP_CALL [argc]. The VM reads the callee from the stack at
+ * runtime. In function context, the callee is resolved locally first
+ * (OP_GET_LOCAL) before falling back to OP_GET_GLOBAL, matching the
+ * pattern used by compile_ident().
  */
 static void compile_call(Compiler *c, const AstNode *node) {
     /* Check argc limit before emitting anything. */
@@ -395,16 +397,29 @@ static void compile_call(Compiler *c, const AstNode *node) {
     }
     int line = (int)node->line;
 
-    /* Push the callee: look up the function by name from globals. */
-    char *fn_name = compiler_strdup(c, node->value);
-    if (!fn_name)
-        return;
-    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(fn_name));
-    if (name_idx < 0) {
-        compiler_error(c, "too many constants");
-        return;
+    /* Push the callee: in function context, try local resolution first. */
+    if (c->context == COMPILE_FUNCTION) {
+        int slot = resolve_local(c, node->value);
+        if (slot >= 0) {
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+            goto args;
+        }
     }
-    emit_bytes(c, OP_GET_GLOBAL, (uint8_t)name_idx, line);
+
+    /* Fall back to global variable lookup for the callee. */
+    {
+        char *fn_name = compiler_strdup(c, node->value);
+        if (!fn_name)
+            return;
+        int name_idx = chunk_find_or_add_constant(c->chunk, make_string(fn_name));
+        if (name_idx < 0) {
+            compiler_error(c, "too many constants");
+            return;
+        }
+        emit_bytes(c, OP_GET_GLOBAL, (uint8_t)name_idx, line);
+    }
+
+args:
 
     /* Compile all arguments (push them onto the stack after the callee). */
     for (size_t i = 0; i < node->child_count; i++) {

@@ -378,7 +378,48 @@ op = fn(x) is x * 10 end
 say(op(5))              # prints: 50
 
 # ============================================================
-# 10. say() for output
+# 10. Higher-order functions
+# ============================================================
+
+# Functions are first-class values, so you can pass them as arguments.
+# This enables higher-order function patterns like apply, map, compose.
+
+# Pass a function as an argument:
+fn apply(f, x) is f(x) end
+fn inc(x) is x + 1 end
+say(apply(inc, 5))      # prints: 6
+
+# Works with built-in functions too:
+apply(say, "hello")     # prints: hello
+
+# Compose two functions:
+fn compose(f, g, x) is f(g(x)) end
+fn double(x) is x * 2 end
+say(compose(double, inc, 5))   # prints: 12 (double(inc(5)))
+
+# Anonymous functions work as arguments:
+say(apply(fn(x) is x ** 2 end, 4))   # prints: 16
+
+# Store a function in a local variable and call it:
+fn run_twice(f, x) is
+  my result = f(x)
+  f(result)
+end
+say(run_twice(inc, 5))   # prints: 7 (inc(inc(5)))
+
+# A simple "each" pattern using a counter loop:
+fn times(n, f) is
+  my i = 0
+  while i < n do
+    f(i)
+    i = i + 1
+  end
+end
+times(3, fn(i) is say("iteration " .. i) end)
+# prints: iteration 0, iteration 1, iteration 2
+
+# ============================================================
+# 11. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -389,7 +430,7 @@ say(true)       # prints: true
 say(nothing)    # prints: nothing
 
 # ============================================================
-# 11. Running Cutlet programs
+# 12. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -410,7 +451,7 @@ say(nothing)    # prints: nothing
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 12. The REPL
+# 13. The REPL
 # ============================================================
 
 # Start an interactive REPL:

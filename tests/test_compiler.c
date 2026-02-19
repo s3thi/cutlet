@@ -647,6 +647,47 @@ TEST(test_compile_anon_fn_in_decl) {
     PASS();
 }
 
+/* ============================================================
+ * Local callee resolution in function calls
+ * ============================================================ */
+
+/* Call to a local parameter emits OP_GET_LOCAL for the callee, not OP_GET_GLOBAL.
+ * fn apply(f, x) is f(x) end — f is param slot 1. */
+TEST(test_compile_call_local_callee) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn apply(f, x) is f(x) end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* Body should emit OP_GET_LOCAL 1 (f) to push the callee,
+     * then OP_GET_LOCAL 2 (x) to push the argument, then OP_CALL 1. */
+    ASSERT(fn->chunk->code[0] == OP_GET_LOCAL, "callee loaded via OP_GET_LOCAL");
+    ASSERT(fn->chunk->code[1] == 1, "callee f is at slot 1");
+    ASSERT(fn->chunk->code[2] == OP_GET_LOCAL, "arg loaded via OP_GET_LOCAL");
+    ASSERT(fn->chunk->code[3] == 2, "arg x is at slot 2");
+    ASSERT(fn->chunk->code[4] == OP_CALL, "OP_CALL");
+    ASSERT(fn->chunk->code[5] == 1, "argc = 1");
+    ASSERT(fn->chunk->code[6] == OP_RETURN, "OP_RETURN");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Call to a non-local inside a function body still emits OP_GET_GLOBAL.
+ * fn foo() is bar() end — bar is not a local. */
+TEST(test_compile_call_global_callee_in_function) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is bar() end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->chunk != NULL, "function has its own chunk");
+    /* Body should emit OP_GET_GLOBAL for bar (not a local). */
+    ASSERT(fn->chunk->code[0] == OP_GET_GLOBAL, "callee loaded via OP_GET_GLOBAL");
+    free_chunk(chunk);
+    PASS();
+}
+
 /* Assignment to non-local still uses OP_SET_GLOBAL */
 TEST(test_compile_fn_assign_nonlocal_uses_set_global) {
     CompileError err;
@@ -731,6 +772,10 @@ int main(void) {
     RUN_TEST(test_compile_fn_local_decl_no_define_global);
     RUN_TEST(test_compile_fn_assign_param_uses_set_local);
     RUN_TEST(test_compile_fn_assign_nonlocal_uses_set_global);
+
+    printf("\nLocal callee resolution in function calls:\n");
+    RUN_TEST(test_compile_call_local_callee);
+    RUN_TEST(test_compile_call_global_callee_in_function);
 
     printf("\nAnonymous function definitions:\n");
     RUN_TEST(test_compile_anon_fn_no_define_global);

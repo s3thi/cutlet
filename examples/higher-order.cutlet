@@ -1,0 +1,42 @@
+# Higher-order functions: passing functions as arguments
+
+# apply: call a function with one argument
+fn apply(f, x) is f(x) end
+
+fn inc(x) is x + 1 end
+fn double(x) is x * 2 end
+
+say(apply(inc, 5))       # 6
+say(apply(double, 5))    # 10
+
+# Works with built-in functions too
+apply(say, "hello")      # hello
+
+# compose: apply two functions in sequence
+fn compose(f, g, x) is f(g(x)) end
+
+say(compose(double, inc, 5))    # 12 (double(inc(5)))
+say(compose(inc, double, 5))    # 11 (inc(double(5)))
+
+# Anonymous functions as arguments
+say(apply(fn(x) is x ** 2 end, 4))   # 16
+
+# Local function variable as callee
+fn run_twice(f, x) is
+  my result = f(x)
+  f(result)
+end
+
+say(run_twice(inc, 5))      # 7 (inc(inc(5)))
+say(run_twice(double, 3))   # 12 (double(double(3)))
+
+# A simple "times" loop using higher-order style
+fn times(n, f) is
+  my i = 0
+  while i < n do
+    f(i)
+    i = i + 1
+  end
+end
+
+times(4, fn(i) is say("step " .. i) end)

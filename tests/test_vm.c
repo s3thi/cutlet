@@ -1618,6 +1618,52 @@ TEST(test_anon_fn_as_expression) {
 }
 
 /* ============================================================
+ * Higher-order functions (local callee resolution)
+ * ============================================================ */
+
+/* fn apply(f, x) is f(x) end with a user-defined function */
+TEST(test_higher_order_apply) {
+    assert_vm_number("fn apply(f, x) is f(x) end\n"
+                     "fn inc(x) is x + 1 end\n"
+                     "apply(inc, 5)",
+                     6.0, "higher-order apply with user fn");
+}
+
+/* fn apply(f, x) is f(x) end with the built-in say() */
+TEST(test_higher_order_builtin) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("fn apply(f, x) is f(x) end\n"
+                        "apply(say, \"hello\")",
+                        &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hello\n", "say output via higher-order", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Nested higher-order: compose(f, g, x) = f(g(x)) */
+TEST(test_higher_order_nested) {
+    assert_vm_number("fn compose(f, g, x) is f(g(x)) end\n"
+                     "fn double(x) is x * 2 end\n"
+                     "fn inc(x) is x + 1 end\n"
+                     "compose(double, inc, 5)",
+                     12.0, "compose(double, inc, 5) = 12");
+}
+
+/* Calling a my-declared local function variable */
+TEST(test_local_var_as_callee) {
+    assert_vm_number("fn foo() is\n"
+                     "  my f = fn(x) is x + 10 end\n"
+                     "  f(5)\n"
+                     "end\n"
+                     "foo()",
+                     15.0, "my-declared local function as callee");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1927,6 +1973,12 @@ int main(void) {
     RUN_TEST(test_anon_fn_with_say);
     RUN_TEST(test_anon_fn_arity_error);
     RUN_TEST(test_anon_fn_as_expression);
+
+    printf("\nHigher-order functions (local callee resolution):\n");
+    RUN_TEST(test_higher_order_apply);
+    RUN_TEST(test_higher_order_builtin);
+    RUN_TEST(test_higher_order_nested);
+    RUN_TEST(test_local_var_as_callee);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
