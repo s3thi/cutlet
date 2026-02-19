@@ -13,12 +13,20 @@ Cutlet is a dynamic programming language written in C. It aims to be a small
 # Numbers are 64-bit floating point (doubles).
 42          # => 42
 0           # => 0
+3.14        # => 3.14
+0.5         # => 0.5
+
+# Decimal literals need at least one digit before the dot.
+# .5 is NOT a valid number (the dot starts an operator).
+# 5. is NOT a decimal — it's the integer 5 followed by a dot operator.
 
 # Arithmetic works how you'd expect.
 1 + 2       # => 3
 10 - 3      # => 7
 2 * 3       # => 6
 7 / 2       # => 3.5
+0.5 + 0.5   # => 1
+3.14 * 2    # => 6.28
 
 # Modulo with % (Python-style: result has the sign of the divisor).
 10 % 3      # => 1
