@@ -17,6 +17,10 @@ Cutlet is written in C. It's designed to run on Linux and macOS.
 
 The author of this project is an experienced developer of 20 years. But they don't have experience building and designing programming languages outside of college-level theoretical texts. They also don't have experience with C, primarily being a Rust developer. The author will often need guidance on how best to proceed with the implementation of this language. They will also need an explanation of what the C code is doing.
 
+## Plans and tasks
+
+See `plans/README.md` for project status, key files, and what exists today. Tasks to work on are in `plans/doing/`. Completed work is archived in `plans/done/`. When you finish a task, move its file from `doing/` to `done/`.
+
 ## Important instructions
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.
