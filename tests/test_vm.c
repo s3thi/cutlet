@@ -1553,6 +1553,71 @@ TEST(test_fn_arity_error_has_line_number) {
 }
 
 /* ============================================================
+ * Anonymous functions
+ * ============================================================ */
+
+/* Assign anonymous fn to variable, then call it */
+TEST(test_anon_fn_assign_and_call) {
+    assert_vm_number("my f = fn(x) is x + 1 end\nf(5)", 6.0, "anon fn assigned and called");
+}
+
+/* Anonymous fn with no params */
+TEST(test_anon_fn_no_params) {
+    assert_vm_number("my g = fn() is 42 end\ng()", 42.0, "anon fn no params");
+}
+
+/* Anonymous fn with two params */
+TEST(test_anon_fn_two_params) {
+    assert_vm_number("my add = fn(a, b) is a + b end\nadd(3, 4)", 7.0, "anon fn two params");
+}
+
+/* Anonymous fn value formats as "<fn>" (no name) */
+TEST(test_anon_fn_formats_as_fn) {
+    Value v = run_input("fn() is 42 end", &test_ctx);
+    ASSERT(v.type == VAL_FUNCTION, "anon fn evaluates to function");
+    char *s = value_format(&v);
+    ASSERT(strcmp(s, "<fn>") == 0, "anonymous fn formats as <fn>");
+    free(s);
+    value_free(&v);
+    PASS();
+}
+
+/* Anonymous fn can use say() */
+TEST(test_anon_fn_with_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("my printer = fn(x) is say(x) end\nprinter(\"hello\")", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "no error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hello\n", "anon fn called say correctly", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Anonymous fn arity mismatch gives error */
+TEST(test_anon_fn_arity_error) {
+    Value v = run_input("my f = fn(x) is x end\nf(1, 2)", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "arity mismatch should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "expects 1 argument") != NULL, "error mentions expected arity");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Anonymous fn is an expression (can be used inline) */
+TEST(test_anon_fn_as_expression) {
+    Value v = run_input("fn(x) is x * 2 end", &test_ctx);
+    ASSERT(v.type == VAL_FUNCTION, "anon fn as expression returns function");
+    ASSERT(v.function != NULL, "function pointer is non-NULL");
+    ASSERT(v.function->name == NULL, "anonymous function has no name");
+    ASSERT(v.function->arity == 1, "arity is 1");
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1853,6 +1918,15 @@ int main(void) {
     RUN_TEST(test_call_stack_overflow_recursion);
     RUN_TEST(test_fn_error_has_line_number);
     RUN_TEST(test_fn_arity_error_has_line_number);
+
+    printf("\nAnonymous functions:\n");
+    RUN_TEST(test_anon_fn_assign_and_call);
+    RUN_TEST(test_anon_fn_no_params);
+    RUN_TEST(test_anon_fn_two_params);
+    RUN_TEST(test_anon_fn_formats_as_fn);
+    RUN_TEST(test_anon_fn_with_say);
+    RUN_TEST(test_anon_fn_arity_error);
+    RUN_TEST(test_anon_fn_as_expression);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
