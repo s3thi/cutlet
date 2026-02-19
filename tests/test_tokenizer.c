@@ -1939,6 +1939,159 @@ TEST(test_tok_concat_no_spaces) {
 }
 
 /* ============================================================
+ * Decimal number literal tokenization tests
+ * ============================================================ */
+
+/* Simple decimal: 0.5 → NUMBER "0.5" */
+TEST(test_tok_decimal_simple) {
+    Tokenizer *tok = tokenizer_create("0.5");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "0.5", 3), "expected NUMBER '0.5'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Decimal with integer part: 3.14 → NUMBER "3.14" */
+TEST(test_tok_decimal_pi) {
+    Tokenizer *tok = tokenizer_create("3.14");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "3.14", 4), "expected NUMBER '3.14'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Decimal with many fractional digits: 100.001 → NUMBER "100.001" */
+TEST(test_tok_decimal_long) {
+    Tokenizer *tok = tokenizer_create("100.001");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "100.001", 7), "expected NUMBER '100.001'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Zero decimal: 0.0 → NUMBER "0.0" */
+TEST(test_tok_decimal_zero) {
+    Tokenizer *tok = tokenizer_create("0.0");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "0.0", 3), "expected NUMBER '0.0'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Range operator must not break: 5..10 → NUMBER "5", OPERATOR "..", NUMBER "10" */
+TEST(test_tok_decimal_range_no_regression) {
+    Tokenizer *tok = tokenizer_create("5..10");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "5", 1), "expected NUMBER '5'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "expected OPERATOR '..'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "expected NUMBER '10'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Trailing dot (not followed by digit): 5. → NUMBER "5", OPERATOR "." */
+TEST(test_tok_decimal_trailing_dot) {
+    Tokenizer *tok = tokenizer_create("5.");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "5", 1), "expected NUMBER '5'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ".", 1), "expected OPERATOR '.'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Dot followed by ident: 5.a → NUMBER "5", OPERATOR ".", IDENT "a" */
+TEST(test_tok_decimal_dot_ident) {
+    Tokenizer *tok = tokenizer_create("5.a");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "5", 1), "expected NUMBER '5'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ".", 1), "expected OPERATOR '.'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Multiple dots: 1.2.3 → NUMBER "1.2", OPERATOR ".", NUMBER "3" */
+TEST(test_tok_decimal_multiple_dots) {
+    Tokenizer *tok = tokenizer_create("1.2.3");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1.2", 3), "expected NUMBER '1.2'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ".", 1), "expected OPERATOR '.'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "3", 1), "expected NUMBER '3'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -2091,6 +2244,16 @@ int main(void) {
     RUN_TEST(test_tok_concat_operator);
     RUN_TEST(test_tok_concat_in_expr);
     RUN_TEST(test_tok_concat_no_spaces);
+
+    printf("\nDecimal number literal tokenization:\n");
+    RUN_TEST(test_tok_decimal_simple);
+    RUN_TEST(test_tok_decimal_pi);
+    RUN_TEST(test_tok_decimal_long);
+    RUN_TEST(test_tok_decimal_zero);
+    RUN_TEST(test_tok_decimal_range_no_regression);
+    RUN_TEST(test_tok_decimal_trailing_dot);
+    RUN_TEST(test_tok_decimal_dot_ident);
+    RUN_TEST(test_tok_decimal_multiple_dots);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);
