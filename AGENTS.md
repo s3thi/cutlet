@@ -27,13 +27,13 @@ Multiple agents may work on different tasks at the same time. To avoid stale ref
 
 - **Never trust line numbers from plans.** Always search for the target symbol (`grep`, `make symbol-index`, or `Read`) before editing. Plans reference symbols and file paths, not line numbers.
 - **Re-orient before each step.** Before starting a plan step, read the relevant files to discover the current state of the code. Another agent may have changed it since the plan was written.
-- **Check `make test && make check` after every change.** This catches conflicts early — if another agent's edits broke an assumption, tests will surface it.
+- **Check `make test && make check` after every source code change.** This catches conflicts early — if another agent's edits broke an assumption, tests will surface it. Skip this for non-source changes (documentation, plans, agent config, READMEs, etc.).
 
 ## Important instructions
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.
-- Before implementing any new code, run `make test` and `make check` to prove that your tests are failing. Pause after test failures and require user confirmation to proceed with implementation.
-- Run `make test` and `make check` after every code change.
+- Before implementing any new code, run `make test` and `make check` to prove that your tests are failing. Pause after test failures and require user confirmation to proceed with implementation. (This only applies when writing source code, not documentation.)
+- Run `make test` and `make check` after every source code change (C files, headers, Makefiles, test files). Skip for documentation-only changes (plans, READMEs, AGENTS.md, TUTORIAL.md, etc.).
 - Never remove, change, or disable any tests without user confirmation.
 - Never disable any linter errors without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
