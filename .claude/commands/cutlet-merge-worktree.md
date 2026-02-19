@@ -41,6 +41,7 @@ Follow these steps in order. Stop and ask me only when explicitly noted below.
 - Look at `plans/doing/` for any task files that correspond to the merged branch's work (match by topic/feature name).
 - If you find a plausible match, ask me if the task is complete. If yes, move it to `plans/done/` with the next consecutive 4-digit number prefix and add a short summary of what changed.
 - It's possible that the plan files have already been moved to the correct location. There's no need to perform this step if the git log shows the files being moved.
+- **Fix conflicting numbering.** After the merge, check `plans/done/` for duplicate number prefixes (e.g., two files both starting with `0020-`). If duplicates exist, use `git log` timestamps to determine which file was moved to `done/` first (earliest commit timestamp keeps its number). Renumber the other file(s) so all prefixes are unique and consecutive. There must never be gaps or duplicates in the numbering sequence.
 
 ## 5. Clean up
 
