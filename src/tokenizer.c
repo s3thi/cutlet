@@ -2,7 +2,7 @@
  * tokenizer.c - Cutlet tokenizer implementation
  *
  * Implements the simplified tokenizer with Python/Ruby-style rules:
- * - NUMBER: integer literals (digits only, no negatives)
+ * - NUMBER: integer and decimal literals (e.g. 42, 3.14; no negatives)
  * - STRING: double-quoted strings (no escapes, no adjacency error)
  * - IDENT: [A-Za-z_][A-Za-z0-9_]* (ASCII only, no symbol sandwiches)
  * - OPERATOR: one or more symbol chars (no whitespace delimiter required)
@@ -245,11 +245,16 @@ static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_
 }
 
 /*
- * Read a number token (digits only).
+ * Read a number token (integer or decimal).
  * Called when current char is a digit.
  *
- * After consuming digits, the only error is if the next char is an
- * ident-start character (letter or underscore). All other adjacency
+ * Consumes a run of digits, then optionally a '.' followed by more
+ * digits (decimal part). The '.' is only consumed if the character
+ * after it is a digit — this avoids eating the '..' concat operator
+ * or a trailing dot.
+ *
+ * After consuming the number, the only error is if the next char is
+ * an ident-start character (letter or underscore). All other adjacency
  * (operator, string, EOF, whitespace) is allowed.
  */
 static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
@@ -260,6 +265,20 @@ static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
     while (tok->pos < tok->input_len && is_ascii_digit(tok->input[tok->pos])) {
         tok->pos++;
         tok->col++;
+    }
+
+    /* Consume optional decimal part: '.' followed by one or more digits.
+     * Do NOT consume if the dot is followed by another dot (that's the
+     * '..' concat operator) or by a non-digit character (trailing dot
+     * remains a separate operator token). */
+    if (tok->pos < tok->input_len && tok->input[tok->pos] == '.' && tok->pos + 1 < tok->input_len &&
+        is_ascii_digit(tok->input[tok->pos + 1])) {
+        tok->pos++; /* consume '.' */
+        tok->col++;
+        while (tok->pos < tok->input_len && is_ascii_digit(tok->input[tok->pos])) {
+            tok->pos++;
+            tok->col++;
+        }
     }
 
     size_t value_len = tok->pos - value_start;

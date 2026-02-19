@@ -119,3 +119,14 @@ Run `make test && make check` one final time to verify everything passes, includ
 4. Implement the feature.
 5. Run `make test` and `make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
+
+## Completion summary
+
+**What changed:** The tokenizer's `read_number()` now consumes an optional decimal part (`'.'` followed by digits) after the integer digit run. The `'.'` is only consumed when the next character is a digit, preserving the `..` concat operator and trailing-dot behavior.
+
+**Files touched:**
+- `src/tokenizer.c` — added decimal lookahead logic in `read_number()`, updated comments
+- `tests/test_tokenizer.c` — 8 new tests: simple decimals, `..` non-regression, trailing dot, dot-ident, multiple dots
+- `tests/test_vm.c` — 5 new integration tests: literal eval, arithmetic, equality, `say()` output
+
+All acceptance criteria met. `make test && make check` pass.

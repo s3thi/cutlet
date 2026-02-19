@@ -1664,6 +1664,36 @@ TEST(test_local_var_as_callee) {
 }
 
 /* ============================================================
+ * Decimal number literal tests
+ * ============================================================ */
+
+/* 0.5 evaluates to 0.5 */
+TEST(test_decimal_literal_half) { assert_vm_number("0.5", 0.5, "0.5 evals to 0.5"); }
+
+/* 0.5 + 0.5 evaluates to 1 */
+TEST(test_decimal_literal_add) { assert_vm_number("0.5 + 0.5", 1.0, "0.5 + 0.5 evals to 1"); }
+
+/* 3.14 * 2 evaluates to 6.28 */
+TEST(test_decimal_literal_mul) { assert_vm_number("3.14 * 2", 6.28, "3.14 * 2 evals to 6.28"); }
+
+/* 1.0 == 1 evaluates to true */
+TEST(test_decimal_literal_eq_int) { assert_vm_bool("1.0 == 1", true, "1.0 == 1 is true"); }
+
+/* say(0.5) prints "0.5\n" */
+TEST(test_decimal_literal_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("say(0.5)", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "say(0.5) should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "0.5\n", "say(0.5) prints '0.5\\n'", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1979,6 +2009,13 @@ int main(void) {
     RUN_TEST(test_higher_order_builtin);
     RUN_TEST(test_higher_order_nested);
     RUN_TEST(test_local_var_as_callee);
+
+    printf("\nDecimal number literals:\n");
+    RUN_TEST(test_decimal_literal_half);
+    RUN_TEST(test_decimal_literal_add);
+    RUN_TEST(test_decimal_literal_mul);
+    RUN_TEST(test_decimal_literal_eq_int);
+    RUN_TEST(test_decimal_literal_say);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
