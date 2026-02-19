@@ -96,7 +96,7 @@ $(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_OBJ) | $(BUILD_DIR)
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-ptr-array test-json test-chunk test-compiler test-vm test-cli
+test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-ptr-array test-json test-chunk test-compiler test-vm test-cli test-examples
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -152,6 +152,11 @@ test-vm: $(TEST_VM_BIN)
 .PHONY: test-cli
 test-cli: $(BIN)
 	./$(TEST_DIR)/test_cli.sh
+
+# Run example output tests (compares examples/*.cutlet stdout against .expected files)
+.PHONY: test-examples
+test-examples: $(BIN)
+	./$(TEST_DIR)/test_examples.sh
 
 # Build tokenizer test binary
 $(TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(BUILD_DIR)
@@ -314,6 +319,7 @@ test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITI
 	./$(SANITIZE_TEST_COMPILER_BIN)
 	./$(SANITIZE_TEST_VM_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
+	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_examples.sh
 
 # ---------- Combined checks ----------
 
@@ -359,6 +365,7 @@ help:
 	@echo "  test-repl     - Run REPL tests only"
 	@echo "  test-repl-server - Run TCP REPL server tests only"
 	@echo "  test-cli      - Run CLI integration tests only"
+	@echo "  test-examples - Run example output tests (stdout vs .expected)"
 	@echo "  format        - Auto-format all C source and header files"
 	@echo "  format-check  - Check formatting (fails on diff)"
 	@echo "  compile-db    - Generate compile_commands.json (requires bear)"
