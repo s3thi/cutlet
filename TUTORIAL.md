@@ -179,7 +179,17 @@ if false then 1 else 2 end   # => 2
 if false then 1 end           # => nothing
 if true then 42 end           # => 42
 
-# Multi-line bodies:
+# Single-line forms: when the body is on the same line as `then`,
+# you can omit `end`.
+if true then 42               # => 42
+if true then 1 else 2         # => 1
+if false then 1               # => nothing
+
+# Single-line else-if chains:
+my x = 5
+if x > 0 then "pos" else if x < 0 then "neg" else "zero"  # => pos
+
+# Multi-line bodies (with newline after `then`) still require `end`:
 if 1 < 2 then
   my x = 10
   x + 5        # last expression is the return value
@@ -198,7 +208,7 @@ else
 end             # => "B"
 
 # Use if/else in assignments:
-my result = if 1 < 2 then "yes" else "no" end
+my result = if 1 < 2 then "yes" else "no"
 result          # => yes
 
 # ============================================================
@@ -214,9 +224,10 @@ end                 # => 5 (last body value)
 # A loop that never runs returns nothing.
 while false do 42 end   # => nothing
 
-# Single-line form:
+# Single-line form: when the body is on the same line as `do`,
+# you can omit `end`.
 my j = 10
-while j > 0 do j = j - 1 end   # => 0
+while j > 0 do j = j - 1       # => 0
 
 # Multi-expression body:
 my k = 0
@@ -251,7 +262,7 @@ count               # => 6
 my m = 0
 while m < 100 do
   m = m + 1
-  if m == 5 then break end
+  if m == 5 then break
 end
 m                   # => 5
 
@@ -262,13 +273,13 @@ end
 found               # => done
 
 # Bare `break` (no value) — the loop evaluates to nothing.
-while true do break end     # => nothing
+while true do break         # => nothing
 
 # `continue` skips the rest of the current iteration.
 my p = 0
 while p < 6 do
   p = p + 1
-  if p % 2 == 0 then continue end
+  if p % 2 == 0 then continue
   say(p)
 end
 # prints: 1, 3, 5
@@ -280,7 +291,7 @@ while q < 3 do
   my r = 0
   while r < 3 do
     r = r + 1
-    if r == 2 then continue end
+    if r == 2 then continue
     say(q ++ "-" ++ r)
   end
 end
@@ -308,8 +319,13 @@ fn double(x) is
 end
 say(double(21))     # prints: 42
 
+# Single-line form: when the body is on the same line as `is`,
+# you can omit `end`.
+fn triple(x) is x * 3
+say(triple(7))      # prints: 21
+
 # Zero-parameter functions:
-fn meaning_of_life() is 42 end
+fn meaning_of_life() is 42
 say(meaning_of_life())  # prints: 42
 
 # Multi-line body with local variables:
@@ -322,27 +338,23 @@ say(sum_of_squares(3, 4))  # prints: 25
 
 # Recursion works — functions are bound globally before the body runs.
 fn factorial(n) is
-  if n <= 1 then 1
-  else n * factorial(n - 1)
-  end
+  if n <= 1 then 1 else n * factorial(n - 1)
 end
 say(factorial(5))       # prints: 120
 
 fn fib(n) is
-  if n <= 1 then n
-  else fib(n - 1) + fib(n - 2)
-  end
+  if n <= 1 then n else fib(n - 1) + fib(n - 2)
 end
 say(fib(10))            # prints: 55
 
 # Functions are first-class values.
-my f = fn square(x) is x ** 2 end
+my f = fn square(x) is x ** 2
 say(f)                  # prints: <fn square>
 say(f(7))               # prints: 49
 
-# `fn ... end` is an expression, so the function definition itself
+# `fn ... is ...` is an expression, so the function definition itself
 # returns the function value. In the REPL:
-#   fn add(a, b) is a + b end  # => <fn add>
+#   fn add(a, b) is a + b   # => <fn add>
 
 # Calling with wrong arity is a runtime error.
 # greet()             # => ERR 'greet' expects 1 argument, got 0
@@ -357,15 +369,16 @@ say(f(7))               # prints: 49
 # ============================================================
 
 # Anonymous functions have no name — just `fn(params) is body end`.
-my double = fn(x) is x * 2 end
+# Single-line form works here too (omit `end`):
+my double = fn(x) is x * 2
 say(double(21))         # prints: 42
 
 # They work exactly like named functions, but don't bind a global.
-my add = fn(a, b) is a + b end
+my add = fn(a, b) is a + b
 say(add(3, 4))          # prints: 7
 
 # Zero-parameter anonymous function:
-my greeting = fn() is "hello world" end
+my greeting = fn() is "hello world"
 say(greeting())         # prints: hello world
 
 # Multi-line body works the same way:
@@ -377,12 +390,12 @@ end
 say(sum_sq(3, 4))       # prints: 25
 
 # Anonymous functions are expressions — they evaluate to a function value.
-fn(x) is x + 1 end     # => <fn>
+fn(x) is x + 1         # => <fn>
 
 # You can reassign a variable to different anonymous functions.
-my op = fn(x) is x + 10 end
+my op = fn(x) is x + 10
 say(op(5))              # prints: 15
-op = fn(x) is x * 10 end
+op = fn(x) is x * 10
 say(op(5))              # prints: 50
 
 # ============================================================
@@ -393,20 +406,20 @@ say(op(5))              # prints: 50
 # This enables higher-order function patterns like apply, map, compose.
 
 # Pass a function as an argument:
-fn apply(f, x) is f(x) end
-fn inc(x) is x + 1 end
+fn apply(f, x) is f(x)
+fn inc(x) is x + 1
 say(apply(inc, 5))      # prints: 6
 
 # Works with built-in functions too:
 apply(say, "hello")     # prints: hello
 
 # Compose two functions:
-fn compose(f, g, x) is f(g(x)) end
-fn double(x) is x * 2 end
+fn compose(f, g, x) is f(g(x))
+fn double(x) is x * 2
 say(compose(double, inc, 5))   # prints: 12 (double(inc(5)))
 
-# Anonymous functions work as arguments:
-say(apply(fn(x) is x ** 2 end, 4))   # prints: 16
+# Anonymous functions work as arguments (single-line, no `end`):
+say(apply(fn(x) is x ** 2, 4))   # prints: 16
 
 # Store a function in a local variable and call it:
 fn run_twice(f, x) is
@@ -423,7 +436,7 @@ fn times(n, f) is
     i = i + 1
   end
 end
-times(3, fn(i) is say("iteration " ++ i) end)
+times(3, fn(i) is say("iteration " ++ i))
 # prints: iteration 0, iteration 1, iteration 2
 
 # ============================================================

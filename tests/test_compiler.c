@@ -525,7 +525,7 @@ TEST(test_compile_fn_nonparam_uses_get_global) {
 /* my declaration inside function body does NOT use OP_DEFINE_GLOBAL */
 TEST(test_compile_fn_local_decl_no_define_global) {
     CompileError err;
-    Chunk *chunk = compile_input("fn foo(x) is my y = 1\ny end", &err);
+    Chunk *chunk = compile_input("fn foo(x) is\nmy y = 1\ny\nend", &err);
     ASSERT(chunk != NULL, "should compile");
     uint8_t fn_idx = chunk->code[1];
     ObjFunction *fn = chunk->constants[fn_idx].function;
@@ -546,7 +546,7 @@ TEST(test_compile_fn_local_decl_no_define_global) {
 /* Assignment to parameter uses OP_SET_LOCAL, not OP_SET_GLOBAL */
 TEST(test_compile_fn_assign_param_uses_set_local) {
     CompileError err;
-    Chunk *chunk = compile_input("fn foo(x) is x = 1\nx end", &err);
+    Chunk *chunk = compile_input("fn foo(x) is\nx = 1\nx\nend", &err);
     ASSERT(chunk != NULL, "should compile");
     uint8_t fn_idx = chunk->code[1];
     ObjFunction *fn = chunk->constants[fn_idx].function;

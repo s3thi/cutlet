@@ -940,9 +940,7 @@ say(double(21))' "42"
 
 # Recursive function (factorial)
 test_run_file "recursive factorial" 'fn factorial(n) is
-  if n <= 1 then 1
-  else n * factorial(n - 1)
-  end
+  if n <= 1 then 1 else n * factorial(n - 1)
 end
 say(factorial(5))' "120"
 

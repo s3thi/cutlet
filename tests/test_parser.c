@@ -1004,9 +1004,11 @@ TEST(test_if_missing_then) {
 }
 
 TEST(test_if_missing_end) {
+    /* Single-line form is valid without end, but multiline still requires it */
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("if true then 1 else 2", &node, &err), "missing end should fail");
+    ASSERT(!parser_parse("if true then\n1 else 2", &node, &err),
+           "multiline if without end should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -1335,8 +1337,8 @@ TEST(test_is_incomplete_if_no_body) {
 }
 
 TEST(test_is_incomplete_if_no_end) {
-    /* "if true then 1" needs end */
-    ASSERT(!parser_is_complete("if true then 1"), "if without end should be incomplete");
+    /* Single-line "if true then 1" is now complete; multiline still needs end */
+    ASSERT(!parser_is_complete("if true then\n1"), "multiline if without end should be incomplete");
     PASS();
 }
 
@@ -1549,9 +1551,11 @@ TEST(test_while_missing_do) {
 
 /* While missing 'end' → parse error */
 TEST(test_while_missing_end) {
+    /* Single-line form is valid without end, but multiline still requires it */
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("while true do 1", &node, &err), "while without end should fail");
+    ASSERT(!parser_parse("while true do\n1", &node, &err),
+           "multiline while without end should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -1577,7 +1581,9 @@ TEST(test_is_incomplete_while_no_body) {
 }
 
 TEST(test_is_incomplete_while_no_end) {
-    ASSERT(!parser_is_complete("while true do 1"), "while without end should be incomplete");
+    /* Single-line "while true do 1" is now complete; multiline still needs end */
+    ASSERT(!parser_is_complete("while true do\n1"),
+           "multiline while without end should be incomplete");
     PASS();
 }
 
@@ -1834,9 +1840,10 @@ TEST(test_fn_missing_is) {
 
 /* Error: missing 'end' → parse error */
 TEST(test_fn_missing_end) {
+    /* Single-line form is valid without end, but multiline still requires it */
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("fn foo() is 42", &node, &err), "fn without end should fail");
+    ASSERT(!parser_parse("fn foo() is\n42", &node, &err), "multiline fn without end should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -1895,8 +1902,8 @@ TEST(test_is_incomplete_fn_no_body) {
 }
 
 TEST(test_is_incomplete_fn_no_end) {
-    /* "fn foo() is 42" needs end */
-    ASSERT(!parser_is_complete("fn foo() is 42"), "fn without end should be incomplete");
+    /* Single-line "fn foo() is 42" is now complete; multiline still needs end */
+    ASSERT(!parser_is_complete("fn foo() is\n42"), "multiline fn without end should be incomplete");
     PASS();
 }
 
@@ -1976,9 +1983,11 @@ TEST(test_anon_fn_missing_is) {
 
 /* Anonymous fn: missing 'end' should error */
 TEST(test_anon_fn_missing_end) {
+    /* Single-line form is valid without end, but multiline still requires it */
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("fn() is 42", &node, &err), "anonymous fn without end should fail");
+    ASSERT(!parser_parse("fn() is\n42", &node, &err),
+           "multiline anonymous fn without end should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -1995,7 +2004,9 @@ TEST(test_is_incomplete_anon_fn_no_body) {
 }
 
 TEST(test_is_incomplete_anon_fn_no_end) {
-    ASSERT(!parser_is_complete("fn() is 42"), "anon fn without end should be incomplete");
+    /* Single-line "fn() is 42" is now complete; multiline still needs end */
+    ASSERT(!parser_is_complete("fn() is\n42"),
+           "multiline anon fn without end should be incomplete");
     PASS();
 }
 
@@ -2007,6 +2018,207 @@ TEST(test_is_complete_anon_fn) {
 
 TEST(test_is_complete_anon_fn_multiline) {
     ASSERT(parser_is_complete("fn(x) is\n  x\nend"), "multiline anon fn should be complete");
+    PASS();
+}
+
+/* ============================================================
+ * Single-line form tests (if, while, fn without end)
+ * ============================================================ */
+
+/* --- Single-line if --- */
+
+TEST(test_sl_if_no_else) {
+    /* if true then 1  (no else, no end) */
+    ASSERT(ast_matches("if true then 1", "AST [IF [BOOL true] [NUMBER 1]]"),
+           "single-line if without else");
+    PASS();
+}
+
+TEST(test_sl_if_else) {
+    /* if true then 1 else 2  (no end) */
+    ASSERT(ast_matches("if true then 1 else 2", "AST [IF [BOOL true] [NUMBER 1] [NUMBER 2]]"),
+           "single-line if/else");
+    PASS();
+}
+
+TEST(test_sl_if_else_if_chain) {
+    /* if false then 1 else if true then 2 else 3  (no end anywhere) */
+    ASSERT(ast_matches("if false then 1 else if true then 2 else 3",
+                       "AST [IF [BOOL false] [NUMBER 1] [IF [BOOL true] [NUMBER 2] [NUMBER 3]]]"),
+           "single-line else-if chain");
+    PASS();
+}
+
+TEST(test_sl_if_optional_end) {
+    /* if true then 1 end  (end accepted in single-line mode) */
+    ASSERT(ast_matches("if true then 1 end", "AST [IF [BOOL true] [NUMBER 1]]"),
+           "single-line if with optional end");
+    PASS();
+}
+
+TEST(test_sl_if_else_optional_end) {
+    /* if true then 1 else 2 end  (end accepted) */
+    ASSERT(ast_matches("if true then 1 else 2 end", "AST [IF [BOOL true] [NUMBER 1] [NUMBER 2]]"),
+           "single-line if/else with optional end");
+    PASS();
+}
+
+TEST(test_sl_if_dangling_else_inner) {
+    /* else binds to inner if:
+     * if a then if b then 1 else 2
+     * → outer if has no else; inner if has else 2 */
+    ASSERT(ast_matches("if true then if false then 1 else 2",
+                       "AST [IF [BOOL true] [IF [BOOL false] [NUMBER 1] [NUMBER 2]]]"),
+           "dangling else binds to inner if");
+    PASS();
+}
+
+TEST(test_sl_if_explicit_end_outer_else) {
+    /* if a then if b then 1 end else 2
+     * → explicit end closes inner if; else binds to outer if */
+    ASSERT(ast_matches("if true then if false then 1 end else 2",
+                       "AST [IF [BOOL true] [IF [BOOL false] [NUMBER 1]] [NUMBER 2]]"),
+           "explicit end makes else bind to outer if");
+    PASS();
+}
+
+TEST(test_sl_if_in_expression) {
+    /* 1 + if true then 2 else 3  (single-line if in expression position) */
+    ASSERT(ast_matches("1 + if true then 2 else 3",
+                       "AST [BINOP + [NUMBER 1] [IF [BOOL true] [NUMBER 2] [NUMBER 3]]]"),
+           "single-line if in expression position");
+    PASS();
+}
+
+TEST(test_sl_if_break_body) {
+    /* if true then break  (loop-control body) */
+    ASSERT(ast_matches("if true then break", "AST [IF [BOOL true] [BREAK]]"),
+           "single-line if with break body");
+    PASS();
+}
+
+TEST(test_sl_if_continue_body) {
+    /* if true then continue  (loop-control body) */
+    ASSERT(ast_matches("if true then continue", "AST [IF [BOOL true] [CONTINUE]]"),
+           "single-line if with continue body");
+    PASS();
+}
+
+TEST(test_sl_if_multiline_still_needs_end) {
+    /* Multiline form must still require end */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("if true then\n1", &node, &err), "multiline if without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* --- Single-line while --- */
+
+TEST(test_sl_while_basic) {
+    /* while true do 1  (no end) */
+    ASSERT(ast_matches("while true do 1", "AST [WHILE [BOOL true] [NUMBER 1]]"),
+           "single-line while");
+    PASS();
+}
+
+TEST(test_sl_while_optional_end) {
+    /* while true do 1 end  (end accepted) */
+    ASSERT(ast_matches("while true do 1 end", "AST [WHILE [BOOL true] [NUMBER 1]]"),
+           "single-line while with optional end");
+    PASS();
+}
+
+TEST(test_sl_while_assignment_body) {
+    /* while x < 10 do x = x + 1  (assignment in body) */
+    ASSERT(ast_matches("while x < 10 do x = x + 1", "AST [WHILE [BINOP < [IDENT x] [NUMBER 10]] "
+                                                    "[ASSIGN x [BINOP + [IDENT x] [NUMBER 1]]]]"),
+           "single-line while with assignment body");
+    PASS();
+}
+
+TEST(test_sl_while_multiline_still_needs_end) {
+    /* Multiline while must still require end */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("while true do\n1", &node, &err),
+           "multiline while without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* --- Single-line fn --- */
+
+TEST(test_sl_fn_named) {
+    /* fn double(x) is x * 2  (no end) */
+    ASSERT(
+        ast_matches("fn double(x) is x * 2", "AST [FN double(x) [BINOP * [IDENT x] [NUMBER 2]]]"),
+        "single-line named fn");
+    PASS();
+}
+
+TEST(test_sl_fn_anon) {
+    /* fn(x) is x ** 2  (anonymous, no end) */
+    ASSERT(ast_matches("fn(x) is x ** 2", "AST [FN (x) [BINOP ** [IDENT x] [NUMBER 2]]]"),
+           "single-line anonymous fn");
+    PASS();
+}
+
+TEST(test_sl_fn_optional_end) {
+    /* fn foo() is 42 end  (end accepted) */
+    ASSERT(ast_matches("fn foo() is 42 end", "AST [FN foo() [NUMBER 42]]"),
+           "single-line fn with optional end");
+    PASS();
+}
+
+TEST(test_sl_fn_anon_optional_end) {
+    /* fn(x) is x * 2 end  (end accepted) */
+    ASSERT(ast_matches("fn(x) is x * 2 end", "AST [FN (x) [BINOP * [IDENT x] [NUMBER 2]]]"),
+           "single-line anon fn with optional end");
+    PASS();
+}
+
+TEST(test_sl_fn_in_assignment) {
+    /* my f = fn(x) is x + 1  (in assignment context) */
+    ASSERT(ast_matches("my f = fn(x) is x + 1",
+                       "AST [DECL f [FN (x) [BINOP + [IDENT x] [NUMBER 1]]]]"),
+           "single-line fn in assignment");
+    PASS();
+}
+
+TEST(test_sl_fn_multiline_still_needs_end) {
+    /* Multiline fn must still require end */
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("fn foo() is\n42", &node, &err), "multiline fn without end should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* --- Single-line parser_is_complete --- */
+
+TEST(test_sl_is_complete_if_no_else) {
+    ASSERT(parser_is_complete("if true then 1"), "single-line if should be complete");
+    PASS();
+}
+
+TEST(test_sl_is_complete_if_else) {
+    ASSERT(parser_is_complete("if true then 1 else 2"), "single-line if/else should be complete");
+    PASS();
+}
+
+TEST(test_sl_is_complete_while) {
+    ASSERT(parser_is_complete("while true do 1"), "single-line while should be complete");
+    PASS();
+}
+
+TEST(test_sl_is_complete_fn) {
+    ASSERT(parser_is_complete("fn foo() is 42"), "single-line fn should be complete");
+    PASS();
+}
+
+TEST(test_sl_is_complete_anon_fn) {
+    ASSERT(parser_is_complete("fn(x) is x + 1"), "single-line anon fn should be complete");
     PASS();
 }
 
@@ -2342,6 +2554,40 @@ int main(void) {
     RUN_TEST(test_is_incomplete_anon_fn_no_end);
     RUN_TEST(test_is_complete_anon_fn);
     RUN_TEST(test_is_complete_anon_fn_multiline);
+
+    printf("\nSingle-line if forms:\n");
+    RUN_TEST(test_sl_if_no_else);
+    RUN_TEST(test_sl_if_else);
+    RUN_TEST(test_sl_if_else_if_chain);
+    RUN_TEST(test_sl_if_optional_end);
+    RUN_TEST(test_sl_if_else_optional_end);
+    RUN_TEST(test_sl_if_dangling_else_inner);
+    RUN_TEST(test_sl_if_explicit_end_outer_else);
+    RUN_TEST(test_sl_if_in_expression);
+    RUN_TEST(test_sl_if_break_body);
+    RUN_TEST(test_sl_if_continue_body);
+    RUN_TEST(test_sl_if_multiline_still_needs_end);
+
+    printf("\nSingle-line while forms:\n");
+    RUN_TEST(test_sl_while_basic);
+    RUN_TEST(test_sl_while_optional_end);
+    RUN_TEST(test_sl_while_assignment_body);
+    RUN_TEST(test_sl_while_multiline_still_needs_end);
+
+    printf("\nSingle-line fn forms:\n");
+    RUN_TEST(test_sl_fn_named);
+    RUN_TEST(test_sl_fn_anon);
+    RUN_TEST(test_sl_fn_optional_end);
+    RUN_TEST(test_sl_fn_anon_optional_end);
+    RUN_TEST(test_sl_fn_in_assignment);
+    RUN_TEST(test_sl_fn_multiline_still_needs_end);
+
+    printf("\nparser_is_complete() - single-line forms:\n");
+    RUN_TEST(test_sl_is_complete_if_no_else);
+    RUN_TEST(test_sl_is_complete_if_else);
+    RUN_TEST(test_sl_is_complete_while);
+    RUN_TEST(test_sl_is_complete_fn);
+    RUN_TEST(test_sl_is_complete_anon_fn);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

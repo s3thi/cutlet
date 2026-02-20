@@ -894,7 +894,69 @@ static AstNode *parse_if(Parser *p) {
         ast_free(condition);
         return NULL;
     }
-    advance(p);
+    advance(p); /* consume 'then' */
+
+    /* Single-line mode: no newline after 'then' means body is one expression
+     * on the same line. 'end' is accepted but not required. */
+    if (p->current.type != TOK_NEWLINE) {
+        /* Guard against empty body (e.g., "if true then else") */
+        if (token_is_keyword(&p->current, "else") || token_is_keyword(&p->current, "end")) {
+            parser_error(p, p->current.line, p->current.col, "expected expression in 'then' body");
+            ast_free(condition);
+            return NULL;
+        }
+
+        /* Parse single then-body expression */
+        AstNode *then_body = parse_assignment(p);
+        if (!then_body) {
+            ast_free(condition);
+            return NULL;
+        }
+
+        /* Check for 'else' */
+        AstNode *else_body = NULL;
+        if (token_is_keyword(&p->current, "else")) {
+            advance(p); /* consume 'else' */
+
+            /* "else if" chains recursively */
+            if (token_is_keyword(&p->current, "if")) {
+                else_body = parse_if(p);
+            } else {
+                /* Single else-body expression */
+                if (token_is_keyword(&p->current, "end")) {
+                    parser_error(p, p->current.line, p->current.col,
+                                 "expected expression in 'else' body");
+                    ast_free(condition);
+                    ast_free(then_body);
+                    return NULL;
+                }
+                else_body = parse_assignment(p);
+            }
+            if (!else_body) {
+                ast_free(condition);
+                ast_free(then_body);
+                return NULL;
+            }
+        }
+
+        /* Optional 'end' — accepted but not required in single-line mode */
+        if (token_is_keyword(&p->current, "end")) {
+            advance(p);
+        }
+
+        AstNode *if_node = make_if(condition, then_body, else_body, if_tok.line);
+        if (!if_node) {
+            ast_free(condition);
+            ast_free(then_body);
+            ast_free(else_body);
+            parser_error(p, if_tok.line, if_tok.col, "memory allocation failed");
+            return NULL;
+        }
+        return if_node;
+    }
+
+    /* Multi-line mode: newline after 'then', collect body until 'else'/'end'.
+     * 'end' is mandatory. */
     skip_newlines(p);
 
     /* Parse then-body: collect expressions until 'else' or 'end' */
@@ -1153,7 +1215,40 @@ static AstNode *parse_while(Parser *p) {
         ast_free(condition);
         return NULL;
     }
-    advance(p);
+    advance(p); /* consume 'do' */
+
+    /* Single-line mode: no newline after 'do' means body is one expression
+     * on the same line. 'end' is accepted but not required. */
+    if (p->current.type != TOK_NEWLINE) {
+        if (token_is_keyword(&p->current, "end")) {
+            parser_error(p, p->current.line, p->current.col, "expected expression in 'while' body");
+            ast_free(condition);
+            return NULL;
+        }
+
+        AstNode *body = parse_assignment(p);
+        if (!body) {
+            ast_free(condition);
+            return NULL;
+        }
+
+        /* Optional 'end' */
+        if (token_is_keyword(&p->current, "end")) {
+            advance(p);
+        }
+
+        AstNode *while_node = make_while(condition, body, while_tok.line);
+        if (!while_node) {
+            ast_free(condition);
+            ast_free(body);
+            parser_error(p, while_tok.line, while_tok.col, "memory allocation failed");
+            return NULL;
+        }
+        return while_node;
+    }
+
+    /* Multi-line mode: newline after 'do', collect body until 'end'.
+     * 'end' is mandatory. */
     skip_newlines(p);
 
     /* Parse body: collect expressions until 'end' */
@@ -1394,7 +1489,74 @@ static AstNode *parse_fn(Parser *p) {
         ptr_array_destroy(&param_names);
         return NULL;
     }
-    advance(p);
+    advance(p); /* consume 'is' */
+
+    /* Single-line mode: no newline after 'is' means body is one expression
+     * on the same line. 'end' is accepted but not required. */
+    if (p->current.type != TOK_NEWLINE) {
+        if (token_is_keyword(&p->current, "end")) {
+            parser_error(p, p->current.line, p->current.col,
+                         "expected expression in function body");
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            return NULL;
+        }
+
+        AstNode *body = parse_assignment(p);
+        if (!body) {
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            return NULL;
+        }
+
+        /* Optional 'end' */
+        if (token_is_keyword(&p->current, "end")) {
+            advance(p);
+        }
+
+        /* Build AST_FUNCTION node */
+        AstNode *node = malloc(sizeof(AstNode));
+        if (!node) {
+            free(fn_name);
+            free_params((char **)param_names.items, param_names.count);
+            param_names.items = NULL;
+            param_names.count = 0;
+            ptr_array_destroy(&param_names);
+            ast_free(body);
+            parser_error(p, fn_tok.line, fn_tok.col, "memory allocation failed");
+            return NULL;
+        }
+
+        size_t pc = param_names.count;
+        char **params_arr = NULL;
+        if (pc > 0) {
+            params_arr = (char **)ptr_array_release(&param_names);
+        } else {
+            ptr_array_destroy(&param_names);
+        }
+
+        node->type = AST_FUNCTION;
+        node->value = fn_name;
+        node->left = body;
+        node->right = NULL;
+        node->grouped = false;
+        node->line = fn_tok.line;
+        node->children = NULL;
+        node->child_count = 0;
+        node->params = params_arr;
+        node->param_count = pc;
+
+        return node;
+    }
+
+    /* Multi-line mode: newline after 'is', collect body until 'end'.
+     * 'end' is mandatory. */
     skip_newlines(p);
 
     /* Parse body: collect expressions until 'end' */

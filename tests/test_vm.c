@@ -1400,18 +1400,18 @@ TEST(test_fn_param_falls_back_to_global) {
 
 /* fn foo(x) is my y = x + 1\ny end\nfoo(10) → 11 */
 TEST(test_fn_local_decl_and_use) {
-    assert_vm_number("fn foo(x) is my y = x + 1\ny end\nfoo(10)", 11.0, "local decl in function");
+    assert_vm_number("fn foo(x) is\nmy y = x + 1\ny\nend\nfoo(10)", 11.0, "local decl in function");
 }
 
 /* fn foo() is my a = 1\nmy b = 2\na + b end\nfoo() → 3 */
 TEST(test_fn_multiple_locals) {
-    assert_vm_number("fn foo() is my a = 1\nmy b = 2\na + b end\nfoo()", 3.0,
+    assert_vm_number("fn foo() is\nmy a = 1\nmy b = 2\na + b\nend\nfoo()", 3.0,
                      "multiple locals in function");
 }
 
 /* fn foo(x) is x = x + 1\nx end\nfoo(10) → 11 (reassign parameter) */
 TEST(test_fn_reassign_param) {
-    assert_vm_number("fn foo(x) is x = x + 1\nx end\nfoo(10)", 11.0, "reassign parameter");
+    assert_vm_number("fn foo(x) is\nx = x + 1\nx\nend\nfoo(10)", 11.0, "reassign parameter");
 }
 
 /* Local variable doesn't leak to global scope */
@@ -1432,9 +1432,7 @@ TEST(test_fn_local_doesnt_leak) {
 /* Factorial via recursion: factorial(5) = 120 */
 TEST(test_recursion_factorial) {
     assert_vm_number("fn factorial(n) is\n"
-                     "  if n <= 1 then 1\n"
-                     "  else n * factorial(n - 1)\n"
-                     "  end\n"
+                     "  if n <= 1 then 1 else n * factorial(n - 1)\n"
                      "end\n"
                      "factorial(5)",
                      120.0, "factorial(5) = 120");
@@ -1443,9 +1441,7 @@ TEST(test_recursion_factorial) {
 /* Fibonacci via recursion: fib(10) = 55 */
 TEST(test_recursion_fibonacci) {
     assert_vm_number("fn fib(n) is\n"
-                     "  if n < 2 then n\n"
-                     "  else fib(n - 1) + fib(n - 2)\n"
-                     "  end\n"
+                     "  if n < 2 then n else fib(n - 1) + fib(n - 2)\n"
                      "end\n"
                      "fib(10)",
                      55.0, "fib(10) = 55");
@@ -1454,14 +1450,10 @@ TEST(test_recursion_fibonacci) {
 /* Mutual recursion: is_even calls is_odd and vice versa */
 TEST(test_recursion_mutual) {
     assert_vm_bool("fn is_even(n) is\n"
-                   "  if n == 0 then true\n"
-                   "  else is_odd(n - 1)\n"
-                   "  end\n"
+                   "  if n == 0 then true else is_odd(n - 1)\n"
                    "end\n"
                    "fn is_odd(n) is\n"
-                   "  if n == 0 then false\n"
-                   "  else is_even(n - 1)\n"
-                   "  end\n"
+                   "  if n == 0 then false else is_even(n - 1)\n"
                    "end\n"
                    "is_even(10)",
                    true, "is_even(10) via mutual recursion");
@@ -1691,6 +1683,51 @@ TEST(test_decimal_literal_say) {
     value_free(&v);
     test_buffer_free(&buf);
     PASS();
+}
+
+/* ============================================================
+ * Single-line forms (if, while, fn without end)
+ * ============================================================ */
+
+TEST(test_sl_if_true) { assert_vm_number("if true then 42", 42.0, "single-line if true"); }
+
+TEST(test_sl_if_false_nothing) {
+    assert_vm_nothing("if false then 42", "single-line if false → nothing");
+}
+
+TEST(test_sl_if_else_true) {
+    assert_vm_number("if true then 1 else 2", 1.0, "single-line if/else true");
+}
+
+TEST(test_sl_if_else_false) {
+    assert_vm_number("if false then 1 else 2", 2.0, "single-line if/else false");
+}
+
+TEST(test_sl_while_counter) {
+    assert_vm_number("my sl_x = 0\nwhile sl_x < 5 do sl_x = sl_x + 1\nsl_x", 5.0,
+                     "single-line while counter");
+}
+
+TEST(test_sl_while_break_value) {
+    assert_vm_number("while true do break 42", 42.0, "single-line while with break value");
+}
+
+TEST(test_sl_fn_named_call) {
+    assert_vm_number("fn sl_double(x) is x * 2\nsl_double(5)", 10.0, "single-line named fn call");
+}
+
+TEST(test_sl_fn_anon_call) {
+    assert_vm_number("my sl_f = fn(x) is x + 1\nsl_f(10)", 11.0, "single-line anon fn call");
+}
+
+TEST(test_sl_nested_if) {
+    assert_vm_number("if true then if false then 1 else 2", 2.0, "nested single-line if");
+}
+
+TEST(test_sl_fn_as_arg) {
+    /* Define apply, then pass a single-line anon fn as argument */
+    assert_vm_number("fn sl_apply(f, x) is f(x)\nsl_apply(fn(x) is x + 1, 42)", 43.0,
+                     "single-line fn as argument to function call");
 }
 
 /* ============================================================
@@ -2016,6 +2053,18 @@ int main(void) {
     RUN_TEST(test_decimal_literal_mul);
     RUN_TEST(test_decimal_literal_eq_int);
     RUN_TEST(test_decimal_literal_say);
+
+    printf("\nSingle-line forms (if, while, fn):\n");
+    RUN_TEST(test_sl_if_true);
+    RUN_TEST(test_sl_if_false_nothing);
+    RUN_TEST(test_sl_if_else_true);
+    RUN_TEST(test_sl_if_else_false);
+    RUN_TEST(test_sl_while_counter);
+    RUN_TEST(test_sl_while_break_value);
+    RUN_TEST(test_sl_fn_named_call);
+    RUN_TEST(test_sl_fn_anon_call);
+    RUN_TEST(test_sl_nested_if);
+    RUN_TEST(test_sl_fn_as_arg);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

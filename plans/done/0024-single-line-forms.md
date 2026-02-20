@@ -189,3 +189,19 @@ Create `examples/single-line.cutlet` demonstrating the feature with `say()` outp
 - The tokenizer and compiler are **not modified**. All changes are in `src/parser.c` and test files.
 - Existing code with `end` must continue to work identically — this is purely additive syntax sugar.
 - When tests fail, do NOT proceed to implementation without user confirmation (per `AGENTS.md`).
+
+## Completion summary
+
+**Status:** Done
+
+**What changed:** After consuming `then`/`do`/`is`, the parser checks whether the next token is a newline. If not, it enters single-line mode: parses exactly one expression as the body, optionally consumes `end`, and returns. If a newline follows, the existing multi-line logic runs unchanged. For `if`, single-line `else` and `else if` chains are also supported.
+
+**Files touched:**
+- `src/parser.c` — Added single-line paths to `parse_if`, `parse_while`, `parse_fn` (+168 lines)
+- `tests/test_parser.c` — 26 new parser tests for all single-line forms; updated 8 existing tests to use multiline syntax
+- `tests/test_vm.c` — 10 new VM integration tests; updated 6 existing tests to use multiline syntax
+- `tests/test_compiler.c` — Updated 2 existing tests to use multiline fn syntax
+- `tests/test_cli.sh` — Updated recursive factorial CLI test to use single-line if/else
+- `examples/functions.cutlet` — Updated factorial example to use single-line if/else
+- `examples/single-line.cutlet` — New example demonstrating the feature
+- `examples/single-line.expected` — Expected output for the new example
