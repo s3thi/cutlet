@@ -279,3 +279,18 @@ and note that the closures implementation should coordinate with this.
 
 ---
 End of plan.
+
+---
+
+## Completion summary
+
+**Implemented block-level scoping** for `my` declarations inside `if` and `while` bodies.
+
+### What changed
+
+- **`src/compiler.c`**: Added `scope_depth` to `Compiler` struct and `depth` to `Local` struct. Added `begin_scope()`/`end_scope()` helpers that emit stack cleanup bytecode (save-and-pop pattern preserving block result). Wrapped `if` then/else bodies and `while` body in `begin_scope`/`end_scope` calls (COMPILE_FUNCTION context only). Updated `compile_break` and `compile_continue` to clean up block-scoped locals before jumping. Added `scope_depth` to `LoopContext` for break/continue cleanup tracking.
+- **`tests/test_vm.c`**: Added 16 tests covering if body scoping (visible inside, not visible outside, shadowing, else scope), while body scoping (no stack corruption across iterations, not visible outside, accumulator with block locals), break/continue cleanup with block locals, and nested scopes (nested if, sequential if, if-inside-while, three-level nesting).
+
+### Step 7 (closures) deferred
+
+Closures are not yet implemented. When closures are added, `end_scope` and break/continue cleanup should emit `OP_CLOSE_UPVALUE` instead of `OP_POP` for captured locals. An `is_captured` field should be added to `Local`.

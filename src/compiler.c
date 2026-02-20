@@ -22,6 +22,7 @@ typedef struct LoopContext {
     size_t *break_jumps;   /* Dynamic array of forward-jump offsets to patch at BREAK_TARGET. */
     size_t break_count;    /* Number of recorded break jumps. */
     size_t break_capacity; /* Capacity of break_jumps array. */
+    int scope_depth;       /* Scope depth at loop entry (before body's begin_scope). */
     struct LoopContext *enclosing; /* Enclosing loop context (for nested loops). */
 } LoopContext;
 
@@ -43,6 +44,7 @@ typedef enum {
 typedef struct {
     const char *name; /* Variable name (points into AST — not owned). */
     int length;       /* Length of the name string. */
+    int depth;        /* Scope depth at which this local was declared. */
 } Local;
 
 /* Maximum number of local variables per function (1-byte slot index). */
@@ -57,6 +59,7 @@ typedef struct {
     CompileContext context;    /* Script vs function body. */
     Local locals[LOCALS_MAX];  /* Local variable slots (params, then declarations). */
     int local_count;           /* Number of locals currently in scope. */
+    int scope_depth;           /* Current scope nesting depth (0=script, 1=function body). */
 } Compiler;
 
 /* ---- Helpers ---- */
@@ -147,6 +150,50 @@ static void emit_loop(Compiler *c, size_t loop_start, int line) {
     }
     emit_byte(c, (uint8_t)((offset >> 8) & 0xFF), line);
     emit_byte(c, (uint8_t)(offset & 0xFF), line);
+}
+
+/* ---- Scope management ---- */
+
+/*
+ * Begin a new scope. Increments scope_depth so that locals declared
+ * hereafter are tagged with the new depth. Used by if/while bodies.
+ */
+static void begin_scope(Compiler *c) { c->scope_depth++; }
+
+/*
+ * End the current scope. Emits bytecode to clean up locals declared
+ * in the ending scope while preserving the block's result value (TOS).
+ *
+ * Cleanup strategy (expression-based blocks leave one result on stack):
+ *   1. OP_SET_LOCAL [first_departing_slot] — save result into the first
+ *      local's position.
+ *   2. OP_POP x N — pop the result copy plus the remaining N-1 locals.
+ *   3. Result now occupies the first departing slot, which is TOS.
+ *
+ * If the scope declares 0 locals, no cleanup is needed.
+ */
+static void end_scope(Compiler *c, int line) {
+    /* Count locals at the current depth (scan backwards). */
+    int n = 0;
+    while (n < c->local_count && c->locals[c->local_count - 1 - n].depth == c->scope_depth) {
+        n++;
+    }
+
+    if (n > 0) {
+        int first_slot = c->local_count - n;
+
+        /* Save the block result (TOS) into the first departing local's slot. */
+        emit_bytes(c, OP_SET_LOCAL, (uint8_t)first_slot, line);
+
+        /* Pop the result copy and all remaining departing locals. */
+        for (int i = 0; i < n; i++) {
+            emit_byte(c, OP_POP, line);
+        }
+
+        c->local_count = first_slot;
+    }
+
+    c->scope_depth--;
 }
 
 /* ---- AST node compilation ---- */
@@ -313,8 +360,8 @@ static void compile_decl(Compiler *c, const AstNode *node) {
             compiler_error(c, "too many local variables");
             return;
         }
-        c->locals[c->local_count++] =
-            (Local){.name = node->value, .length = (int)strlen(node->value)};
+        c->locals[c->local_count++] = (Local){
+            .name = node->value, .length = (int)strlen(node->value), .depth = c->scope_depth};
 
         /* Push a clone of the local as the expression result.
          * compile_block will OP_POP this clone; the local stays. */
@@ -456,8 +503,12 @@ static void compile_if(Compiler *c, const AstNode *node) {
     /* Pop the condition value (it was truthy). */
     emit_byte(c, OP_POP, line);
 
-    /* Compile then-body. */
+    /* Compile then-body with block scoping (function context only). */
+    if (c->context == COMPILE_FUNCTION)
+        begin_scope(c);
     compile_node(c, node->children[1]);
+    if (c->context == COMPILE_FUNCTION)
+        end_scope(c, line);
 
     /* Jump over else-body. */
     size_t end_jump = emit_jump(c, OP_JUMP, line);
@@ -469,8 +520,12 @@ static void compile_if(Compiler *c, const AstNode *node) {
     emit_byte(c, OP_POP, line);
 
     if (node->child_count >= 3) {
-        /* Compile else-body. */
+        /* Compile else-body with block scoping (function context only). */
+        if (c->context == COMPILE_FUNCTION)
+            begin_scope(c);
         compile_node(c, node->children[2]);
+        if (c->context == COMPILE_FUNCTION)
+            end_scope(c, line);
     } else {
         /* No else clause: push nothing. */
         emit_byte(c, OP_NOTHING, line);
@@ -513,12 +568,15 @@ static void compile_while(Compiler *c, const AstNode *node) {
     /* LOOP_START: remember this position for the backward jump. */
     size_t loop_start = c->chunk->count;
 
-    /* Set up loop context for break/continue. */
+    /* Set up loop context for break/continue.
+     * scope_depth is recorded BEFORE begin_scope so that break/continue
+     * can clean up all locals declared inside the loop body. */
     LoopContext loop_ctx = {
         .loop_start = loop_start,
         .break_jumps = NULL,
         .break_count = 0,
         .break_capacity = 0,
+        .scope_depth = c->scope_depth,
         .enclosing = c->current_loop,
     };
     c->current_loop = &loop_ctx;
@@ -533,8 +591,12 @@ static void compile_while(Compiler *c, const AstNode *node) {
     emit_byte(c, OP_POP, line);
     emit_byte(c, OP_POP, line);
 
-    /* Compile body (pushes new accumulator). */
+    /* Compile body with block scoping (function context only). */
+    if (c->context == COMPILE_FUNCTION)
+        begin_scope(c);
     compile_node(c, node->children[1]);
+    if (c->context == COMPILE_FUNCTION)
+        end_scope(c, line);
 
     /* Jump back to LOOP_START. */
     emit_loop(c, loop_start, line);
@@ -572,11 +634,31 @@ static void compile_break(Compiler *c, const AstNode *node) {
 
     int line = (int)node->line;
 
-    /* Compile the break value, or push nothing for bare break. */
+    /* Compile the break value, or push nothing for bare break.
+     * The value is compiled BEFORE cleanup so it can reference
+     * block-scoped locals that are about to be popped. */
     if (node->left) {
         compile_node(c, node->left);
     } else {
         emit_byte(c, OP_NOTHING, line);
+    }
+
+    /* Clean up block-scoped locals (those deeper than the loop's entry scope).
+     * Uses the same save-and-pop trick as end_scope: save the break value
+     * into the first departing local's slot, pop N times, result is at TOS. */
+    if (c->context == COMPILE_FUNCTION) {
+        int n = 0;
+        while (n < c->local_count &&
+               c->locals[c->local_count - 1 - n].depth > c->current_loop->scope_depth) {
+            n++;
+        }
+        if (n > 0) {
+            int first_slot = c->local_count - n;
+            emit_bytes(c, OP_SET_LOCAL, (uint8_t)first_slot, line);
+            for (int i = 0; i < n; i++) {
+                emit_byte(c, OP_POP, line);
+            }
+        }
     }
 
     /* Emit a forward jump to be patched to BREAK_TARGET. */
@@ -610,6 +692,19 @@ static void compile_continue(Compiler *c, const AstNode *node) {
     }
 
     int line = (int)node->line;
+
+    /* Clean up block-scoped locals before jumping back to LOOP_START.
+     * No value to preserve, so just emit OP_POP for each departing local. */
+    if (c->context == COMPILE_FUNCTION) {
+        int n = 0;
+        while (n < c->local_count &&
+               c->locals[c->local_count - 1 - n].depth > c->current_loop->scope_depth) {
+            n++;
+        }
+        for (int i = 0; i < n; i++) {
+            emit_byte(c, OP_POP, line);
+        }
+    }
 
     /* Push nothing as the new accumulator for this iteration. */
     emit_byte(c, OP_NOTHING, line);
@@ -650,13 +745,16 @@ static void compile_function(Compiler *c, const AstNode *node) {
         .current_loop = NULL,
         .context = COMPILE_FUNCTION,
         .local_count = 0,
+        .scope_depth = 1, /* Function body starts at scope depth 1. */
     };
 
     /* Reserve slot 0 for the callee (the function value itself).
      * This matches the call frame layout where slots[0] = callee. */
-    body_compiler.locals[body_compiler.local_count++] = (Local){.name = "", .length = 0};
+    body_compiler.locals[body_compiler.local_count++] =
+        (Local){.name = "", .length = 0, .depth = 1};
 
-    /* Add each parameter as a local variable (slots 1..arity). */
+    /* Add each parameter as a local variable (slots 1..arity).
+     * Parameters live at the function body scope (depth 1). */
     for (size_t i = 0; i < node->param_count; i++) {
         if (body_compiler.local_count >= LOCALS_MAX) {
             compiler_error(c, "too many local variables");
@@ -665,7 +763,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
             return;
         }
         body_compiler.locals[body_compiler.local_count++] =
-            (Local){.name = node->params[i], .length = (int)strlen(node->params[i])};
+            (Local){.name = node->params[i], .length = (int)strlen(node->params[i]), .depth = 1};
     }
 
     /* Compile the body (node->left holds the body expression). */
@@ -831,6 +929,7 @@ Chunk *compile(const AstNode *node, CompileError *err) {
         .current_loop = NULL,
         .context = COMPILE_SCRIPT,
         .local_count = 0,
+        .scope_depth = 0, /* Script context starts at scope depth 0. */
     };
 
     compile_node(&c, node);
