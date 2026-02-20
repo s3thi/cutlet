@@ -33,14 +33,14 @@ xs                   # => [99, 20, 30, 40, 50]
 
 Out-of-bounds indices produce a runtime error.
 
-### Array concatenation with `..`
+### Array concatenation with `++`
 
 ```cutlet
-[1, 2] .. [3, 4]         # => [1, 2, 3, 4]
-[1, 2] .. [3]             # => [1, 2, 3]
+[1, 2] ++ [3, 4]         # => [1, 2, 3, 4]
+[1, 2] ++ [3]             # => [1, 2, 3]
 ```
 
-Both operands must be arrays. `[1, 2] .. 3` is an error (use `push()` to append a single element). When neither operand is an array, `..` retains its existing string concatenation behavior.
+Both operands must be arrays. `[1, 2] ++ 3` is an error (use `push()` to append a single element). When neither operand is an array, `++` retains its existing string concatenation behavior.
 
 ### `@` meta-operator
 
@@ -51,7 +51,7 @@ Both operands must be arrays. `[1, 2] .. 3` is an error (use `push()` to append 
 ```cutlet
 @+ [1, 2, 3, 4, 5]       # => 15       (1+2+3+4+5)
 @* [1, 2, 3, 4, 5]       # => 120      (1*2*3*4*5)
-@.. ["a", "b", "c"]      # => "abc"
+@++ ["a", "b", "c"]      # => "abc"
 @and [true, true, false]  # => false
 @or [false, false, true]  # => true
 ```
@@ -138,7 +138,7 @@ The tokenizer recognizes `@` as the start of a meta-operator token. It consumes 
 @+       → TOK_META  value="+"
 @*       → TOK_META  value="*"
 @**      → TOK_META  value="**"
-@..      → TOK_META  value=".."
+@++      → TOK_META  value="++"
 @==      → TOK_META  value="=="
 @and     → TOK_META  value="and"
 @or      → TOK_META  value="or"
@@ -237,7 +237,7 @@ Each step follows the required process: tests first, confirm failures, get user 
 - `@+` → `TOK_META "+"`.
 - `@*` → `TOK_META "*"`.
 - `@**` → `TOK_META "**"`.
-- `@..` → `TOK_META ".."`.
+- `@++` → `TOK_META "++"`.
 - `@==` → `TOK_META "=="`.
 - `@my_func` → `TOK_META "my_func"`.
 - `@and` → `TOK_META "and"`.
@@ -363,7 +363,7 @@ Add `expr[expr]` for reading and `expr[expr] = value` for writing.
 
 **Files touched**: `src/parser.h`, `src/parser.c`, `src/chunk.h`, `src/chunk.c`, `src/compiler.c`, `src/vm.c`, tests.
 
-### Step 5: Array concatenation with `..`
+### Step 5: Array concatenation with `++`
 
 Extend the existing `OP_CONCAT` to support array-array concatenation.
 
@@ -373,14 +373,14 @@ Extend the existing `OP_CONCAT` to support array-array concatenation.
 - If neither is an array → existing string concatenation behavior (unchanged).
 
 **Tests**:
-- `[1, 2] .. [3, 4]` → `[1, 2, 3, 4]`.
-- `[] .. [1]` → `[1]`.
-- `[1] .. []` → `[1]`.
-- `[] .. []` → `[]`.
-- `[[1]] .. [[2]]` → `[[1], [2]]`.
-- `[1] .. 2` → error.
-- `1 .. [2]` → error.
-- `"a" .. "b"` → `"ab"` (unchanged).
+- `[1, 2] ++ [3, 4]` → `[1, 2, 3, 4]`.
+- `[] ++ [1]` → `[1]`.
+- `[1] ++ []` → `[1]`.
+- `[] ++ []` → `[]`.
+- `[[1]] ++ [[2]]` → `[[1], [2]]`.
+- `[1] ++ 2` → error.
+- `1 ++ [2]` → error.
+- `"a" ++ "b"` → `"ab"` (unchanged).
 
 **Files touched**: `src/vm.c`, tests.
 
@@ -401,7 +401,7 @@ Parse `@op expr` as a reduction, compile to `OP_REDUCE`, execute in VM.
 
 **Compiler** (`compiler.c`):
 - `compile_reduce()`: check `node->value`. If it's a known operator name, map to opcode:
-  - `"+"` → `OP_ADD`, `"-"` → `OP_SUBTRACT`, `"*"` → `OP_MULTIPLY`, `"/"` → `OP_DIVIDE`, `"%"` → `OP_MODULO`, `"**"` → `OP_POWER`, `".."` → `OP_CONCAT`, `"=="` → `OP_EQUAL`, `"!="` → `OP_NOT_EQUAL`, `"<"` → `OP_LESS`, `">"` → `OP_GREATER`, `"<="` → `OP_LESS_EQUAL`, `">="` → `OP_GREATER_EQUAL`.
+  - `"+"` → `OP_ADD`, `"-"` → `OP_SUBTRACT`, `"*"` → `OP_MULTIPLY`, `"/"` → `OP_DIVIDE`, `"%"` → `OP_MODULO`, `"**"` → `OP_POWER`, `"++"` → `OP_CONCAT`, `"=="` → `OP_EQUAL`, `"!="` → `OP_NOT_EQUAL`, `"<"` → `OP_LESS`, `">"` → `OP_GREATER`, `"<="` → `OP_LESS_EQUAL`, `">="` → `OP_GREATER_EQUAL`.
   - `"and"` / `"or"` → dedicated op bytes (add `OP_REDUCE_AND` / `OP_REDUCE_OR` as op-byte constants, or reserve values in the opcode enum).
 - Compile operand (pushes the array). Emit `OP_REDUCE [op_byte]`.
 - If `node->value` is not a known operator → this is a custom function reduction (handled in step 9). For now, emit a compile error.
@@ -421,7 +421,7 @@ Parse `@op expr` as a reduction, compile to `OP_REDUCE`, execute in VM.
 - `@+ [1, 2, 3, 4, 5]` → 15.
 - `@* [1, 2, 3, 4, 5]` → 120.
 - `@- [10, 3, 2]` → 5 (left fold: (10-3)-2).
-- `@.. ["a", "b", "c"]` → `"abc"`.
+- `@++ ["a", "b", "c"]` → `"abc"`.
 - `@+ [42]` → 42 (single element).
 - `@+ []` → error "cannot reduce empty array".
 - `@and [true, true, false]` → false (short-circuit).
@@ -472,7 +472,7 @@ Parse `expr @op expr` as vectorized operation, compile to `OP_VECTORIZE`, execut
 - `[1, 2, 3] @> 2` → `[false, false, true]`.
 - `[1, 2] @+ [1, 2, 3]` → error "array length mismatch".
 - `1 @+ 2` → error "@ requires at least one array operand".
-- `["a", "b"] @.. ["1", "2"]` → `["a1", "b2"]`.
+- `["a", "b"] @++ ["1", "2"]` → `["a1", "b2"]`.
 - `[true, false] @and [true, true]` → `[true, false]`.
 - Precedence: `[1, 2] @+ [3, 4] @* [5, 6]` → `[1, 2] @+ [15, 24]` → `[16, 26]` (since `@*` has higher precedence than `@+`).
 
@@ -607,7 +607,7 @@ End-to-end integration, REPL support, disassembly, and polish.
 
 ### Array slicing
 
-`xs[1..3]` to extract a sub-array. Requires reusing `..` as a range operator inside `[]` context, or introducing a separate range syntax. Design after arrays and `@` are stable.
+`xs[1..3]` to extract a sub-array. Now that concatenation uses `++`, `..` is free for use as a range operator. Design after arrays and `@` are stable.
 
 ### More array built-ins
 

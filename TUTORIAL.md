@@ -62,23 +62,23 @@ Cutlet is a dynamic programming language written in C. It aims to be a small
 # No escape sequences yet. What you type is what you get.
 # Strings can contain any characters except newlines and double quotes.
 
-# Concatenation with .. (two dots).
-"hello" .. " world"     # => hello world
-"a" .. "b" .. "c"       # => abc
+# Concatenation with ++ (two plusses).
+"hello" ++ " world"     # => hello world
+"a" ++ "b" ++ "c"       # => abc
 
-# .. auto-coerces any value to a string.
-"score: " .. 42         # => score: 42
-"alive: " .. true       # => alive: true
-"value: " .. nothing    # => value: nothing
+# ++ auto-coerces any value to a string.
+"score: " ++ 42         # => score: 42
+"alive: " ++ true       # => alive: true
+"value: " ++ nothing    # => value: nothing
 
 # + does NOT work on strings — it's only for numbers.
 # "a" + "b"             # => ERR arithmetic requires numbers
 
-# .. binds looser than + but tighter than comparison.
-1 + 2 .. 3 + 4          # => 37 (same as (1+2) .. (3+4))
+# ++ binds looser than + but tighter than comparison.
+1 + 2 ++ 3 + 4          # => 37 (same as (1+2) ++ (3+4))
 
-# .. is right-associative (like Lua).
-"a" .. "b" .. "c"       # => abc (same as "a" .. ("b" .. "c"))
+# ++ is right-associative (like Lua).
+"a" ++ "b" ++ "c"       # => abc (same as "a" ++ ("b" ++ "c"))
 
 # ============================================================
 # 3. Booleans and nothing
@@ -281,7 +281,7 @@ while q < 3 do
   while r < 3 do
     r = r + 1
     if r == 2 then continue end
-    say(q .. "-" .. r)
+    say(q ++ "-" ++ r)
   end
 end
 # prints: 1-1, 1-3, 2-1, 2-3, 3-1, 3-3
@@ -296,7 +296,7 @@ end
 
 # Define a function with `fn name(params) is body end`.
 fn greet(name) is
-  say("hello " .. name)
+  say("hello " ++ name)
 end
 
 greet("world")      # prints: hello world
@@ -423,7 +423,7 @@ fn times(n, f) is
     i = i + 1
   end
 end
-times(3, fn(i) is say("iteration " .. i) end)
+times(3, fn(i) is say("iteration " ++ i) end)
 # prints: iteration 0, iteration 1, iteration 2
 
 # ============================================================

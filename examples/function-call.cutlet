@@ -3,4 +3,4 @@
 
 say("hello")
 say(1 + 2)
-say("result: " .. (10 * 5))
+say("result: " ++ (10 * 5))

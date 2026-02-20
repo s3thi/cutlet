@@ -13,4 +13,4 @@ else if score >= 80 then
 else
   "C"
 end
-say("grade: " .. grade)
+say("grade: " ++ grade)

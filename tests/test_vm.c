@@ -1080,7 +1080,7 @@ TEST(test_nested_continue_affects_inner) {
     Value v = run_input(
         "my cnt_out = 0\nwhile cnt_out < 2 do\n  cnt_out = cnt_out + 1\n  my cnt_in = 0\n  while "
         "cnt_in < 3 do\n    cnt_in = cnt_in + 1\n    if cnt_in == 2 then continue end\n    "
-        "say(cnt_out .. \"-\" .. cnt_in)\n    cnt_in\n  end\n  cnt_out\nend",
+        "say(cnt_out ++ \"-\" ++ cnt_in)\n    cnt_in\n  end\n  cnt_out\nend",
         &ctx);
     /* Should print: 1-1, 1-3, 2-1, 2-3 (skipping cnt_in==2 each time) */
     ASSERT_STR_EQ_CLEANUP(buf.data, "1-1\n1-3\n2-1\n2-3\n", "continue affects inner loop only", v,
@@ -1112,38 +1112,38 @@ TEST(test_break_with_say) {
 }
 
 /* ============================================================
- * String concatenation operator (..)
+ * String concatenation operator (++)
  * ============================================================ */
 
 /* Basic string concatenation */
 TEST(test_concat_strings) {
-    assert_vm_string("\"hello\" .. \" world\"", "hello world", "basic concat");
+    assert_vm_string("\"hello\" ++ \" world\"", "hello world", "basic concat");
 }
-TEST(test_concat_empty_left) { assert_vm_string("\"\" .. \"a\"", "a", "empty left"); }
-TEST(test_concat_empty_right) { assert_vm_string("\"a\" .. \"\"", "a", "empty right"); }
-TEST(test_concat_both_empty) { assert_vm_string("\"\" .. \"\"", "", "both empty"); }
+TEST(test_concat_empty_left) { assert_vm_string("\"\" ++ \"a\"", "a", "empty left"); }
+TEST(test_concat_empty_right) { assert_vm_string("\"a\" ++ \"\"", "a", "empty right"); }
+TEST(test_concat_both_empty) { assert_vm_string("\"\" ++ \"\"", "", "both empty"); }
 
 /* Auto-coercion: any value type to string */
-TEST(test_concat_str_num) { assert_vm_string("\"x\" .. 42", "x42", "string .. number"); }
-TEST(test_concat_num_str) { assert_vm_string("42 .. \"x\"", "42x", "number .. string"); }
-TEST(test_concat_bool_str) { assert_vm_string("true .. \"!\"", "true!", "bool .. string"); }
+TEST(test_concat_str_num) { assert_vm_string("\"x\" ++ 42", "x42", "string ++ number"); }
+TEST(test_concat_num_str) { assert_vm_string("42 ++ \"x\"", "42x", "number ++ string"); }
+TEST(test_concat_bool_str) { assert_vm_string("true ++ \"!\"", "true!", "bool ++ string"); }
 TEST(test_concat_nothing_str) {
-    assert_vm_string("nothing .. \"x\"", "nothingx", "nothing .. string");
+    assert_vm_string("nothing ++ \"x\"", "nothingx", "nothing ++ string");
 }
-TEST(test_concat_num_num) { assert_vm_string("1 .. 2", "12", "number .. number"); }
-TEST(test_concat_float_str) { assert_vm_string("(7 / 2) .. \"x\"", "3.5x", "float .. string"); }
+TEST(test_concat_num_num) { assert_vm_string("1 ++ 2", "12", "number ++ number"); }
+TEST(test_concat_float_str) { assert_vm_string("(7 / 2) ++ \"x\"", "3.5x", "float ++ string"); }
 
-/* Chained: right-associative, "a" .. "b" .. "c" → "abc" */
-TEST(test_concat_chained) { assert_vm_string("\"a\" .. \"b\" .. \"c\"", "abc", "chained concat"); }
+/* Chained: right-associative, "a" ++ "b" ++ "c" → "abc" */
+TEST(test_concat_chained) { assert_vm_string("\"a\" ++ \"b\" ++ \"c\"", "abc", "chained concat"); }
 
 /* With variables */
 TEST(test_concat_with_var) {
-    assert_vm_string("my xc = \"hello\"\nxc .. \" world\"", "hello world", "concat with var");
+    assert_vm_string("my xc = \"hello\"\nxc ++ \" world\"", "hello world", "concat with var");
 }
 
-/* Precedence: 1 + 2 .. 3 + 4 → "3" .. "7" → "37"
- * + binds tighter than .., so (1+2) .. (3+4) = "3" .. "7" = "37" */
-TEST(test_concat_precedence) { assert_vm_string("1 + 2 .. 3 + 4", "37", "concat precedence"); }
+/* Precedence: 1 + 2 ++ 3 + 4 → "3" ++ "7" → "37"
+ * + binds tighter than ++, so (1+2) ++ (3+4) = "3" ++ "7" = "37" */
+TEST(test_concat_precedence) { assert_vm_string("1 + 2 ++ 3 + 4", "37", "concat precedence"); }
 
 /* Confirm + with strings still errors */
 TEST(test_add_strings_error) { assert_vm_error("\"a\" + \"b\"", "add strings error"); }
@@ -1258,7 +1258,7 @@ TEST(test_native_fn_format) {
 
 /* String concatenation with function auto-coerces */
 TEST(test_fn_concat_coercion) {
-    assert_vm_string("\"val: \" .. true", "val: true", "concat sanity check");
+    assert_vm_string("\"val: \" ++ true", "val: true", "concat sanity check");
     /* Once fn defs are compilable, test fn concat too. For now,
      * verify value_format("<fn foo>") works via direct construction. */
     ObjFunction *fn = test_make_obj_function("foo", 0, NULL);
@@ -1930,7 +1930,7 @@ int main(void) {
     RUN_TEST(test_continue_outside_loop_error);
     RUN_TEST(test_break_with_say);
 
-    printf("\nString concatenation operator (..):\n");
+    printf("\nString concatenation operator (++):\n");
     RUN_TEST(test_concat_strings);
     RUN_TEST(test_concat_empty_left);
     RUN_TEST(test_concat_empty_right);

@@ -5,7 +5,7 @@
 my found = while true do
   break "done"
 end
-say("break value: " .. found)
+say("break value: " ++ found)
 
 # continue to skip even numbers
 my i = 0

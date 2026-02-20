@@ -1875,17 +1875,17 @@ TEST(test_tok_modulo_solo_symbol) {
 }
 
 /* ============================================================
- * String concatenation operator (..) tokenization tests
+ * String concatenation operator (++) tokenization tests
  * ============================================================ */
 
-/* .. tokenizes as a single TOK_OPERATOR with value ".." */
+/* ++ tokenizes as a single TOK_OPERATOR with value "++" */
 TEST(test_tok_concat_operator) {
-    Tokenizer *tok = tokenizer_create("..");
+    Tokenizer *tok = tokenizer_create("++");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "expected OPERATOR '..'");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "++", 2), "expected OPERATOR '++'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
@@ -1894,9 +1894,9 @@ TEST(test_tok_concat_operator) {
     PASS();
 }
 
-/* .. in an expression: "a" .. "b" */
+/* ++ in an expression: "a" ++ "b" */
 TEST(test_tok_concat_in_expr) {
-    Tokenizer *tok = tokenizer_create("\"a\" .. \"b\"");
+    Tokenizer *tok = tokenizer_create("\"a\" ++ \"b\"");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
@@ -1904,7 +1904,7 @@ TEST(test_tok_concat_in_expr) {
     ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "string a");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "next");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "operator ..");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "++", 2), "operator ++");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "next");
     ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "string b");
@@ -1916,9 +1916,11 @@ TEST(test_tok_concat_in_expr) {
     PASS();
 }
 
-/* .. without spaces: "a".."b" — dots group since . is not a solo symbol */
+/* ++ without spaces: "a"++"b" — ++ is emitted as a single token even
+ * though + is normally a solo symbol, because the tokenizer has a
+ * special case for ++ (concatenation operator). */
 TEST(test_tok_concat_no_spaces) {
-    Tokenizer *tok = tokenizer_create("\"a\"..\"b\"");
+    Tokenizer *tok = tokenizer_create("\"a\"++\"b\"");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
@@ -1926,10 +1928,54 @@ TEST(test_tok_concat_no_spaces) {
     ASSERT_TRUE(token_matches(&t, TOK_STRING, "a", 1), "string a");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "next");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "..", 2), "operator ..");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "++", 2), "operator ++");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "next");
     ASSERT_TRUE(token_matches(&t, TOK_STRING, "b", 1), "string b");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ++ after a number: 5++10 → NUMBER "5", OPERATOR "++", NUMBER "10" */
+TEST(test_tok_concat_after_number) {
+    Tokenizer *tok = tokenizer_create("5++10");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "5", 1), "number 5");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "++", 2), "operator ++");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "10", 2), "number 10");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* + alone still tokenizes as a solo symbol (arithmetic plus) */
+TEST(test_tok_plus_still_solo) {
+    Tokenizer *tok = tokenizer_create("a+b");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "ident a");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "+", 1), "operator +");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "ident b");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "next");
     ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
@@ -2240,10 +2286,12 @@ int main(void) {
     RUN_TEST(test_tok_modulo_operator);
     RUN_TEST(test_tok_modulo_solo_symbol);
 
-    printf("\nString concatenation operator (..) tokenization:\n");
+    printf("\nString concatenation operator (++) tokenization:\n");
     RUN_TEST(test_tok_concat_operator);
     RUN_TEST(test_tok_concat_in_expr);
     RUN_TEST(test_tok_concat_no_spaces);
+    RUN_TEST(test_tok_concat_after_number);
+    RUN_TEST(test_tok_plus_still_solo);
 
     printf("\nDecimal number literal tokenization:\n");
     RUN_TEST(test_tok_decimal_simple);

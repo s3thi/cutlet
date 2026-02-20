@@ -263,7 +263,7 @@ static void compile_binop(Compiler *c, const AstNode *node) {
         emit_byte(c, OP_MODULO, line);
     } else if (strcmp(op, "**") == 0) {
         emit_byte(c, OP_POWER, line);
-    } else if (strcmp(op, "..") == 0) {
+    } else if (strcmp(op, "++") == 0) {
         emit_byte(c, OP_CONCAT, line);
     } else if (strcmp(op, "==") == 0) {
         emit_byte(c, OP_EQUAL, line);

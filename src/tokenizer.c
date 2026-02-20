@@ -250,8 +250,8 @@ static void set_error(Tokenizer *tok, Token *out, const char *msg, size_t error_
  *
  * Consumes a run of digits, then optionally a '.' followed by more
  * digits (decimal part). The '.' is only consumed if the character
- * after it is a digit — this avoids eating the '..' concat operator
- * or a trailing dot.
+ * after it is a digit — this avoids eating a trailing dot (which
+ * remains a separate operator token).
  *
  * After consuming the number, the only error is if the next char is
  * an ident-start character (letter or underscore). All other adjacency
@@ -268,9 +268,8 @@ static bool read_number(Tokenizer *tok, Token *out, size_t start_pos, size_t sta
     }
 
     /* Consume optional decimal part: '.' followed by one or more digits.
-     * Do NOT consume if the dot is followed by another dot (that's the
-     * '..' concat operator) or by a non-digit character (trailing dot
-     * remains a separate operator token). */
+     * Do NOT consume if the dot is followed by a non-digit character
+     * (trailing dot remains a separate operator token). */
     if (tok->pos < tok->input_len && tok->input[tok->pos] == '.' && tok->pos + 1 < tok->input_len &&
         is_ascii_digit(tok->input[tok->pos + 1])) {
         tok->pos++; /* consume '.' */
@@ -435,12 +434,23 @@ static bool is_solo_symbol(char c) {
  * Consumes a run of symbol chars, except that '(' and ')' are always
  * emitted as single-character tokens (they are structural delimiters,
  * not combinable operators).
+ *
+ * Special case: '++' is the concatenation operator. Even though '+'
+ * is normally a solo symbol, when two '+' appear consecutively they
+ * are consumed together and emitted as a single "++" operator token.
  */
 static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
                           size_t start_col) {
     size_t value_start = tok->pos;
 
-    if (is_solo_symbol(tok->input[tok->pos])) {
+    /* Special case: ++ (concatenation operator).
+     * '+' is a solo symbol, but '++' must be emitted as a single
+     * two-character operator token. Peek ahead before the solo check. */
+    if (tok->input[tok->pos] == '+' && tok->pos + 1 < tok->input_len &&
+        tok->input[tok->pos + 1] == '+') {
+        tok->pos += 2;
+        tok->col += 2;
+    } else if (is_solo_symbol(tok->input[tok->pos])) {
         /* Solo symbol: emit exactly one character */
         tok->pos++;
         tok->col++;

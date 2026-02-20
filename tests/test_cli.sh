@@ -827,10 +827,10 @@ test_run_file "comment-only file" '# just a comment' ""
 test_run_file "modulo operator" 'say(10 % 3)' "1"
 test_run_file_error "modulo by zero" '5 % 0' "modulo by zero"
 
-# String concatenation operator (..)
-test_run_file "concat strings" 'say("hello" .. " world")' "hello world"
-test_run_file "concat auto-coerce" 'say("score: " .. 42)' "score: 42"
-test_run_file "concat chained" 'say("a" .. "b" .. "c")' "abc"
+# String concatenation operator (++)
+test_run_file "concat strings" 'say("hello" ++ " world")' "hello world"
+test_run_file "concat auto-coerce" 'say("score: " ++ 42)' "score: 42"
+test_run_file "concat chained" 'say("a" ++ "b" ++ "c")' "abc"
 
 # While loop in file execution
 test_run_file "while loop basic" 'my i = 0
@@ -928,7 +928,7 @@ echo "User-defined functions:"
 
 # Basic function definition and call via cutlet run
 test_run_file "define and call function" 'fn greet(name) is
-  say("hello " .. name)
+  say("hello " ++ name)
 end
 greet("world")' "hello world"
 

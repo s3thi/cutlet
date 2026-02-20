@@ -39,4 +39,4 @@ fn times(n, f) is
   end
 end
 
-times(4, fn(i) is say("step " .. i) end)
+times(4, fn(i) is say("step " ++ i) end)

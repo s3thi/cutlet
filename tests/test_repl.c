@@ -664,31 +664,31 @@ TEST(test_continue_repl_basic) {
 }
 
 /* ============================================================
- * String concatenation operator (..)
+ * String concatenation operator (++)
  * ============================================================ */
 
 TEST(test_concat_basic) {
-    ASSERT(eval_value_matches("\"hello\" .. \" world\"", "hello world"), "basic concat");
+    ASSERT(eval_value_matches("\"hello\" ++ \" world\"", "hello world"), "basic concat");
     PASS();
 }
 
 TEST(test_concat_auto_coerce_num) {
-    ASSERT(eval_value_matches("\"score: \" .. 42", "score: 42"), "coerce number");
+    ASSERT(eval_value_matches("\"score: \" ++ 42", "score: 42"), "coerce number");
     PASS();
 }
 
 TEST(test_concat_auto_coerce_bool) {
-    ASSERT(eval_value_matches("true .. \"!\"", "true!"), "coerce bool");
+    ASSERT(eval_value_matches("true ++ \"!\"", "true!"), "coerce bool");
     PASS();
 }
 
 TEST(test_concat_auto_coerce_nothing) {
-    ASSERT(eval_value_matches("nothing .. \"x\"", "nothingx"), "coerce nothing");
+    ASSERT(eval_value_matches("nothing ++ \"x\"", "nothingx"), "coerce nothing");
     PASS();
 }
 
 TEST(test_concat_chained_repl) {
-    ASSERT(eval_value_matches("\"a\" .. \"b\" .. \"c\"", "abc"), "chained concat");
+    ASSERT(eval_value_matches("\"a\" ++ \"b\" ++ \"c\"", "abc"), "chained concat");
     PASS();
 }
 
@@ -878,7 +878,7 @@ int main(void) {
     RUN_TEST(test_eval_line_bytecode_with_expression);
     RUN_TEST(test_eval_line_all_three_debug);
 
-    printf("\nString concatenation operator (..):\n");
+    printf("\nString concatenation operator (++):\n");
     RUN_TEST(test_concat_basic);
     RUN_TEST(test_concat_auto_coerce_num);
     RUN_TEST(test_concat_auto_coerce_bool);
