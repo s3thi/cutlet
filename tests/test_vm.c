@@ -1772,6 +1772,130 @@ TEST(test_sl_fn_as_arg) {
 }
 
 /* ============================================================
+ * Block scoping (Steps 3-6)
+ * ============================================================ */
+
+/* Step 3: if body scoping */
+
+/* my inside if body is visible inside that scope */
+TEST(test_block_scope_if_visible_inside) {
+    assert_vm_number("fn bs1() is\nif true then\nmy x = 5\nx\nend\nend\nbs1()", 5.0,
+                     "local visible inside if scope");
+}
+
+/* my inside if body is NOT visible outside the if.
+ * Uses a unique name to avoid colliding with globals from other tests. */
+TEST(test_block_scope_if_not_visible_outside) {
+    assert_vm_error("fn bs2() is\nif true then\nmy bs_inner1 = 5\nend\nbs_inner1\nend\nbs2()",
+                    "local not visible outside if scope");
+}
+
+/* Shadowing: inner x = 2 inside if, outer x = 1 preserved */
+TEST(test_block_scope_if_shadow_inner) {
+    assert_vm_number("fn bs3() is\nmy x = 1\nif true then\nmy x = 2\nx\nend\nend\nbs3()", 2.0,
+                     "inner shadows outer in if");
+}
+
+/* After if with shadowed x, outer x is still 1 */
+TEST(test_block_scope_if_shadow_outer_preserved) {
+    assert_vm_number("fn bs4() is\nmy x = 1\nif true then\nmy x = 2\nend\nx\nend\nbs4()", 1.0,
+                     "outer x preserved after if scope");
+}
+
+/* else branch has its own scope */
+TEST(test_block_scope_else_own_scope) {
+    assert_vm_number("fn bs5() is\nif false then\nmy x = 1\nelse\nmy y = 2\ny\nend\nend\nbs5()",
+                     2.0, "else branch has own scope");
+}
+
+/* Step 4: while body scoping */
+
+/* my inside while body works across multiple iterations (no stack corruption).
+ * Each iteration declares x, uses it, and the scope cleanup removes x.
+ * After the loop, i should be 3. */
+TEST(test_block_scope_while_no_corruption) {
+    assert_vm_number(
+        "fn bs6() is\nmy i = 0\nwhile i < 3 do\nmy x = i * 10\ni = i + 1\nend\ni\nend\nbs6()", 3.0,
+        "while body cleans up locals each iteration");
+}
+
+/* my inside while body is NOT visible outside.
+ * Uses a unique name to avoid colliding with globals from other tests. */
+TEST(test_block_scope_while_not_visible_outside) {
+    assert_vm_error("fn bs7() is\nwhile false do\nmy bs_inner2 = 1\nend\nbs_inner2\nend\nbs7()",
+                    "local not visible outside while scope");
+}
+
+/* Accumulator with block-scoped locals: sum = 1+2+3 = 6. */
+TEST(test_block_scope_while_accumulator) {
+    assert_vm_number("fn bs8() is\nmy sum = 0\nmy i = 0\nwhile i < 3 do\n"
+                     "my x = i + 1\nsum = sum + x\ni = i + 1\nend\nsum\nend\nbs8()",
+                     6.0, "while accumulator with block-scoped locals (1+2+3)");
+}
+
+/* Step 5: break and continue with block-scoped locals */
+
+/* break with value cleans up block-scoped locals */
+TEST(test_block_scope_break_cleanup) {
+    assert_vm_number("fn bs9() is\nwhile true do\nmy x = 42\nbreak x\nend\nend\nbs9()", 42.0,
+                     "break cleans up block-scoped locals");
+}
+
+/* break from nested if inside while with block-scoped locals */
+TEST(test_block_scope_break_from_if) {
+    assert_vm_number("fn bs10() is\nmy i = 0\nwhile i < 5 do\nmy x = i\n"
+                     "if x == 3 then break x end\ni = i + 1\nend\nend\nbs10()",
+                     3.0, "break from if cleans up block-scoped locals");
+}
+
+/* continue cleans up block-scoped locals.
+ * Skips iteration where x==2. Body result on non-skipped iterations is x.
+ * iter 0: x=0, i=1, body=0.  iter 1: x=1, i=2, body=1.
+ * iter 2: x=2, i=3, continue.  iter 3: x=3, i=4, body=3.
+ * iter 4: x=4, i=5, body=4.  While result = 4. */
+TEST(test_block_scope_continue_cleanup) {
+    assert_vm_number("fn bs11() is\nmy i = 0\nwhile i < 5 do\nmy x = i\n"
+                     "i = i + 1\nif x == 2 then continue end\nx\nend\nend\nbs11()",
+                     4.0, "continue cleans up block-scoped locals");
+}
+
+/* Step 6: nested scopes */
+
+/* Nested if scopes: inner sees outer locals */
+TEST(test_block_scope_nested_if_inner_sees_outer) {
+    assert_vm_number("fn bs12() is\nif true then\nmy a = 1\nif true then\nmy b = 2\na + "
+                     "b\nend\nend\nend\nbs12()",
+                     3.0, "nested if inner sees outer local");
+}
+
+/* Sequential if blocks: first block's locals not visible in second */
+TEST(test_block_scope_sequential_if) {
+    assert_vm_number(
+        "fn bs13() is\nif true then\nmy a = 1\nend\nif true then\nmy b = 2\nb\nend\nend\nbs13()",
+        2.0, "sequential if blocks have separate scopes");
+}
+
+/* if inside while: locals scoped correctly, no crash.
+ * While body result is i = i + 1. After 2 iterations, while result = 2. */
+TEST(test_block_scope_if_inside_while) {
+    assert_vm_number("fn bs14() is\nmy i = 0\nwhile i < 2 do\n"
+                     "if true then\nmy x = i\nend\ni = i + 1\nend\nend\nbs14()",
+                     2.0, "if inside while scopes correctly");
+}
+
+/* Three-level nesting: while > if > if with my at each level.
+ * Inner expression a+b+c = 10+20+30 = 60. Stored in result. */
+TEST(test_block_scope_three_level_nesting) {
+    assert_vm_number("fn bs15() is\nmy result = 0\nmy i = 0\n"
+                     "while i < 1 do\nmy a = 10\n"
+                     "if true then\nmy b = 20\n"
+                     "if true then\nmy c = 30\nresult = a + b + c\nend\n"
+                     "end\ni = i + 1\nend\n"
+                     "result\nend\nbs15()",
+                     60.0, "three-level nesting works");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2118,6 +2242,29 @@ int main(void) {
     RUN_TEST(test_sl_fn_anon_call);
     RUN_TEST(test_sl_nested_if);
     RUN_TEST(test_sl_fn_as_arg);
+
+    printf("\nBlock scoping — if body:\n");
+    RUN_TEST(test_block_scope_if_visible_inside);
+    RUN_TEST(test_block_scope_if_not_visible_outside);
+    RUN_TEST(test_block_scope_if_shadow_inner);
+    RUN_TEST(test_block_scope_if_shadow_outer_preserved);
+    RUN_TEST(test_block_scope_else_own_scope);
+
+    printf("\nBlock scoping — while body:\n");
+    RUN_TEST(test_block_scope_while_no_corruption);
+    RUN_TEST(test_block_scope_while_not_visible_outside);
+    RUN_TEST(test_block_scope_while_accumulator);
+
+    printf("\nBlock scoping — break/continue cleanup:\n");
+    RUN_TEST(test_block_scope_break_cleanup);
+    RUN_TEST(test_block_scope_break_from_if);
+    RUN_TEST(test_block_scope_continue_cleanup);
+
+    printf("\nBlock scoping — nested scopes:\n");
+    RUN_TEST(test_block_scope_nested_if_inner_sees_outer);
+    RUN_TEST(test_block_scope_sequential_if);
+    RUN_TEST(test_block_scope_if_inside_while);
+    RUN_TEST(test_block_scope_three_level_nesting);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
