@@ -1,0 +1,5 @@
+inner x: 99
+outer x: 1
+sum 1..3: 6
+first multiple of 7 > 20: 21
+nested: 30

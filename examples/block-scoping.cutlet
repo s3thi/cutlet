@@ -1,0 +1,49 @@
+# Feature: block scoping
+# Exercises: my inside if/while bodies scoped to that block
+
+# Shadowing: inner x doesn't affect outer x
+fn shadow_demo() is
+  my x = 1
+  if true then
+    my x = 99
+    say("inner x: " ++ str(x))
+  end
+  say("outer x: " ++ str(x))
+end
+shadow_demo()
+
+# While body locals are fresh each iteration
+fn sum_first_three() is
+  my total = 0
+  my i = 0
+  while i < 3 do
+    my x = i + 1
+    total = total + x
+    i = i + 1
+  end
+  total
+end
+say("sum 1..3: " ++ str(sum_first_three()))
+
+# break cleans up block-scoped locals
+fn find_value() is
+  my i = 0
+  while i < 10 do
+    my x = i * 7
+    if x > 20 then break x end
+    i = i + 1
+  end
+end
+say("first multiple of 7 > 20: " ++ str(find_value()))
+
+# Nested scopes: inner block sees outer block's locals
+fn nested() is
+  if true then
+    my a = 10
+    if true then
+      my b = 20
+      a + b
+    end
+  end
+end
+say("nested: " ++ str(nested()))
