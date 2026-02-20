@@ -19,14 +19,14 @@ previously relied on.
 
 ## Acceptance criteria
 
-- [ ] `str()` native built-in registered, converts any value to string via `value_format()`
-- [ ] `OP_CONCAT` in VM rejects non-string operands with a clear error message
-- [ ] Tests for `str()`: number, bool, nothing, string (identity), error, function
-- [ ] Coercion tests converted: tests that previously asserted successful coercion now assert runtime errors
-- [ ] New tests added: `str(x) ++ str(y)` patterns work correctly
-- [ ] `test_concat_precedence` updated to use string operands (tests precedence, not coercion)
-- [ ] `examples/strings.cutlet` and `examples/strings.expected` updated to use `str()` for non-string values
-- [ ] `make test && make check` pass
+- [x] `str()` native built-in registered, converts any value to string via `value_format()`
+- [x] `OP_CONCAT` in VM rejects non-string operands with a clear error message
+- [x] Tests for `str()`: number, bool, nothing, string (identity), error, function
+- [x] Coercion tests converted: tests that previously asserted successful coercion now assert runtime errors
+- [x] New tests added: `str(x) ++ str(y)` patterns work correctly
+- [x] `test_concat_precedence` updated to use string operands (tests precedence, not coercion)
+- [x] `examples/strings.cutlet` and `examples/strings.expected` updated to use `str()` for non-string values
+- [x] `make test && make check` pass
 
 ## Dependencies
 
@@ -154,3 +154,22 @@ Run `make test && make check` (includes `make test-examples`).
 4. Implement the feature.
 5. Run `make test && make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
+
+---
+
+## Summary
+
+Removed implicit type coercion from `++`. The operator now requires both operands to be strings; any other combination produces a runtime error like `"++ requires strings, got string and number"`. Added `str()` built-in for explicit conversion via `value_format()`. `say()` continues to auto-format any value.
+
+**Files changed:**
+- `src/vm.c` — added `native_str()`, registered `str` built-in, replaced `OP_CONCAT` auto-coercion with strict type check
+- `tests/test_vm.c` — added 7 `str()` tests, converted 7 coercion tests to error tests, added 3 explicit `str() ++ str()` tests, updated `test_concat_precedence` and `test_fn_concat_coercion`, fixed `test_nested_continue_affects_inner` to use `str()`
+- `tests/test_repl.c` — converted 3 REPL coercion tests to error tests
+- `tests/test_cli.sh` — converted coercion CLI test to error test, added `str()` CLI test
+- `examples/anonymous-functions.cutlet` — use `str()` for number concat
+- `examples/function-call.cutlet` — use `str()` for number concat
+- `examples/functions.cutlet` — use `str()` for number concat
+- `examples/higher-order.cutlet` — use `str()` for number concat
+- `examples/single-line.cutlet` — use `str()` for number concat
+- `examples/strings.cutlet` — use `str()` for non-string concat
+- `examples/while-loop.cutlet` — use `str()` for number concat

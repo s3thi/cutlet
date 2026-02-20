@@ -1,0 +1,19 @@
+# Feature: str() built-in for explicit type conversion
+# Exercises: str(), ++ with explicit conversion
+
+# str() converts any value to its string representation
+say(str(42))
+say(str(3.14))
+say(str(true))
+say(str(false))
+say(str(nothing))
+say(str("hello"))
+
+# Use str() with ++ to build mixed-type strings
+say("score: " ++ str(100))
+say("pi is " ++ str(355 / 113))
+say("done: " ++ str(true))
+
+# ++ requires both sides to be strings — str() bridges the gap
+my x = 7
+say("x = " ++ str(x) ++ ", x^2 = " ++ str(x ** 2))

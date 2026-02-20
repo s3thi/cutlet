@@ -1,7 +1,7 @@
-# Feature: strings and concatenation
-# Exercises: STRING, ++ operator, auto-coercion
+# Feature: strings, concatenation, and str()
+# Exercises: STRING, ++ operator, str() for explicit conversion
 
 say("hello" ++ " " ++ "world")
-say("score: " ++ 42)
-say("alive: " ++ true)
-say("value: " ++ nothing)
+say("score: " ++ str(42))
+say("alive: " ++ str(true))
+say("value: " ++ str(nothing))

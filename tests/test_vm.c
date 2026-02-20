@@ -1080,7 +1080,7 @@ TEST(test_nested_continue_affects_inner) {
     Value v = run_input(
         "my cnt_out = 0\nwhile cnt_out < 2 do\n  cnt_out = cnt_out + 1\n  my cnt_in = 0\n  while "
         "cnt_in < 3 do\n    cnt_in = cnt_in + 1\n    if cnt_in == 2 then continue end\n    "
-        "say(cnt_out ++ \"-\" ++ cnt_in)\n    cnt_in\n  end\n  cnt_out\nend",
+        "say(str(cnt_out) ++ \"-\" ++ str(cnt_in))\n    cnt_in\n  end\n  cnt_out\nend",
         &ctx);
     /* Should print: 1-1, 1-3, 2-1, 2-3 (skipping cnt_in==2 each time) */
     ASSERT_STR_EQ_CLEANUP(buf.data, "1-1\n1-3\n2-1\n2-3\n", "continue affects inner loop only", v,
@@ -1123,15 +1123,24 @@ TEST(test_concat_empty_left) { assert_vm_string("\"\" ++ \"a\"", "a", "empty lef
 TEST(test_concat_empty_right) { assert_vm_string("\"a\" ++ \"\"", "a", "empty right"); }
 TEST(test_concat_both_empty) { assert_vm_string("\"\" ++ \"\"", "", "both empty"); }
 
-/* Auto-coercion: any value type to string */
-TEST(test_concat_str_num) { assert_vm_string("\"x\" ++ 42", "x42", "string ++ number"); }
-TEST(test_concat_num_str) { assert_vm_string("42 ++ \"x\"", "42x", "number ++ string"); }
-TEST(test_concat_bool_str) { assert_vm_string("true ++ \"!\"", "true!", "bool ++ string"); }
-TEST(test_concat_nothing_str) {
-    assert_vm_string("nothing ++ \"x\"", "nothingx", "nothing ++ string");
+/* Strict: ++ rejects non-string operands with a runtime error */
+TEST(test_concat_str_num) { assert_vm_error("\"x\" ++ 42", "string ++ number"); }
+TEST(test_concat_num_str) { assert_vm_error("42 ++ \"x\"", "number ++ string"); }
+TEST(test_concat_bool_str) { assert_vm_error("true ++ \"!\"", "bool ++ string"); }
+TEST(test_concat_nothing_str) { assert_vm_error("nothing ++ \"x\"", "nothing ++ string"); }
+TEST(test_concat_num_num) { assert_vm_error("1 ++ 2", "number ++ number"); }
+TEST(test_concat_float_str) { assert_vm_error("(7 / 2) ++ \"x\"", "float ++ string"); }
+
+/* Explicit conversion via str() works with ++ */
+TEST(test_concat_str_explicit_num) {
+    assert_vm_string("str(\"x\") ++ str(42)", "x42", "explicit str ++ num");
 }
-TEST(test_concat_num_num) { assert_vm_string("1 ++ 2", "12", "number ++ number"); }
-TEST(test_concat_float_str) { assert_vm_string("(7 / 2) ++ \"x\"", "3.5x", "float ++ string"); }
+TEST(test_concat_str_explicit_bool) {
+    assert_vm_string("str(true) ++ \"!\"", "true!", "explicit bool ++ str");
+}
+TEST(test_concat_str_explicit_nothing) {
+    assert_vm_string("str(nothing) ++ \"x\"", "nothingx", "explicit nothing ++ str");
+}
 
 /* Chained: right-associative, "a" ++ "b" ++ "c" → "abc" */
 TEST(test_concat_chained) { assert_vm_string("\"a\" ++ \"b\" ++ \"c\"", "abc", "chained concat"); }
@@ -1141,12 +1150,43 @@ TEST(test_concat_with_var) {
     assert_vm_string("my xc = \"hello\"\nxc ++ \" world\"", "hello world", "concat with var");
 }
 
-/* Precedence: 1 + 2 ++ 3 + 4 → "3" ++ "7" → "37"
- * + binds tighter than ++, so (1+2) ++ (3+4) = "3" ++ "7" = "37" */
-TEST(test_concat_precedence) { assert_vm_string("1 + 2 ++ 3 + 4", "37", "concat precedence"); }
+/* Precedence: + binds tighter than ++, so (1+2) ++ (3+4).
+ * Use str() to convert the sums to strings for concatenation. */
+TEST(test_concat_precedence) {
+    assert_vm_string("str(1 + 2) ++ str(3 + 4)", "37", "concat precedence");
+}
 
 /* Confirm + with strings still errors */
 TEST(test_add_strings_error) { assert_vm_error("\"a\" + \"b\"", "add strings error"); }
+
+/* ============================================================
+ * str() built-in
+ * ============================================================ */
+
+/* str(42) → "42" */
+TEST(test_str_integer) { assert_vm_string("str(42)", "42", "str integer"); }
+
+/* str(3.5) → "3.5" */
+TEST(test_str_float) { assert_vm_string("str(7 / 2)", "3.5", "str float"); }
+
+/* str(true) → "true" */
+TEST(test_str_true) { assert_vm_string("str(true)", "true", "str true"); }
+
+/* str(false) → "false" */
+TEST(test_str_false) { assert_vm_string("str(false)", "false", "str false"); }
+
+/* str(nothing) → "nothing" */
+TEST(test_str_nothing) { assert_vm_string("str(nothing)", "nothing", "str nothing"); }
+
+/* str("hello") → "hello" (identity — already a string) */
+TEST(test_str_string_identity) {
+    assert_vm_string("str(\"hello\")", "hello", "str string identity");
+}
+
+/* str(42) ++ str(true) → "42true" (compose with ++) */
+TEST(test_str_compose_concat) {
+    assert_vm_string("str(42) ++ str(true)", "42true", "str compose concat");
+}
 
 /* ============================================================
  * VAL_FUNCTION value type
@@ -1256,16 +1296,17 @@ TEST(test_native_fn_format) {
     PASS();
 }
 
-/* String concatenation with function auto-coerces */
+/* ++ now rejects non-string operands — "val: " ++ true is an error.
+ * value_format() still works for direct formatting (used by say/str). */
 TEST(test_fn_concat_coercion) {
-    assert_vm_string("\"val: \" ++ true", "val: true", "concat sanity check");
-    /* Once fn defs are compilable, test fn concat too. For now,
-     * verify value_format("<fn foo>") works via direct construction. */
+    assert_vm_error("\"val: \" ++ true", "concat rejects bool");
+    /* Verify value_format("<fn foo>") still works via direct construction
+     * — it is used by say() and str(), not by ++. */
     ObjFunction *fn = test_make_obj_function("foo", 0, NULL);
     Value v = make_function(fn);
     char *s = value_format(&v);
     ASSERT(s != NULL, "format not null");
-    ASSERT_STR_EQ(s, "<fn foo>", "fn formats for concat");
+    ASSERT_STR_EQ(s, "<fn foo>", "fn formats for say/str");
     free(s);
     value_free(&v);
     PASS();
@@ -1978,10 +2019,22 @@ int main(void) {
     RUN_TEST(test_concat_nothing_str);
     RUN_TEST(test_concat_num_num);
     RUN_TEST(test_concat_float_str);
+    RUN_TEST(test_concat_str_explicit_num);
+    RUN_TEST(test_concat_str_explicit_bool);
+    RUN_TEST(test_concat_str_explicit_nothing);
     RUN_TEST(test_concat_chained);
     RUN_TEST(test_concat_with_var);
     RUN_TEST(test_concat_precedence);
     RUN_TEST(test_add_strings_error);
+
+    printf("\nstr() built-in:\n");
+    RUN_TEST(test_str_integer);
+    RUN_TEST(test_str_float);
+    RUN_TEST(test_str_true);
+    RUN_TEST(test_str_false);
+    RUN_TEST(test_str_nothing);
+    RUN_TEST(test_str_string_identity);
+    RUN_TEST(test_str_compose_concat);
 
     printf("\nVAL_FUNCTION value type:\n");
     RUN_TEST(test_fn_format_named);

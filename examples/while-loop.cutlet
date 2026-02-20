@@ -7,5 +7,5 @@ while i < 5 do
   i = i + 1
   sum = sum + i
 end
-say("sum 1..5: " ++ sum)
-say("counted to: " ++ i)
+say("sum 1..5: " ++ str(sum))
+say("counted to: " ++ str(i))

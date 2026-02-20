@@ -203,6 +203,20 @@ static Value native_say(int argc, Value *args, EvalContext *ctx) {
     return make_nothing();
 }
 
+/* str(x) — convert any value to its string representation via
+ * value_format(). This is the explicit conversion counterpart to
+ * the implicit coercion that say() does internally. */
+static Value native_str(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
+    (void)ctx;
+
+    char *formatted = value_format(&args[0]);
+    if (!formatted)
+        return make_error("memory allocation failed");
+
+    return make_string(formatted);
+}
+
 /*
  * Register built-in functions as native VAL_FUNCTION values in the
  * global variable environment. Called at the start of each vm_execute()
@@ -213,6 +227,10 @@ static void register_builtins(void) {
     Value say_fn = make_native("say", 1, native_say);
     runtime_var_define("say", &say_fn);
     value_free(&say_fn); /* runtime_var_define clones it. */
+
+    Value str_fn = make_native("str", 1, native_str);
+    runtime_var_define("str", &str_fn);
+    value_free(&str_fn);
 }
 
 /* ---- Type name helper ---- */
@@ -436,8 +454,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_CONCAT: {
-            /* String concatenation: pop two values, coerce each to string
-             * via value_format(), concatenate, and push the result. */
+            /* String concatenation: both operands must be strings.
+             * Use str() for explicit conversion of non-string values. */
             Value b, a;
             if (!vm_pop(&vm, &b)) {
                 return vm_runtime_error(&vm, "stack underflow");
@@ -446,28 +464,27 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 value_free(&b);
                 return vm_runtime_error(&vm, "stack underflow");
             }
-            char *sa = value_format(&a);
-            char *sb = value_format(&b);
-            value_free(&a);
-            value_free(&b);
-            if (!sa || !sb) {
-                free(sa);
-                free(sb);
-                return vm_runtime_error(&vm, "memory allocation failed");
+            /* Reject non-string operands with a clear error. */
+            if (a.type != VAL_STRING || b.type != VAL_STRING) {
+                const char *ta = value_type_name(a.type);
+                const char *tb = value_type_name(b.type);
+                value_free(&a);
+                value_free(&b);
+                return vm_runtime_error(&vm, "++ requires strings, got %s and %s", ta, tb);
             }
-            size_t la = strlen(sa);
-            size_t lb = strlen(sb);
+            size_t la = strlen(a.string);
+            size_t lb = strlen(b.string);
             char *result = malloc(la + lb + 1);
             if (!result) {
-                free(sa);
-                free(sb);
+                value_free(&a);
+                value_free(&b);
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
-            memcpy(result, sa, la);
-            memcpy(result + la, sb, lb);
+            memcpy(result, a.string, la);
+            memcpy(result + la, b.string, lb);
             result[la + lb] = '\0';
-            free(sa);
-            free(sb);
+            value_free(&a);
+            value_free(&b);
             if (!vm_push(&vm, make_string(result))) {
                 return vm_runtime_error(&vm, "stack overflow");
             }

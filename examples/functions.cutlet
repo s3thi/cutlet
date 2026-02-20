@@ -9,7 +9,7 @@ greet("world")
 
 # Function with return value
 fn double(x) is x * 2 end
-say("double 21: " ++ double(21))
+say("double 21: " ++ str(double(21)))
 
 # Function with local variables
 fn sum_of_squares(a, b) is
@@ -17,14 +17,14 @@ fn sum_of_squares(a, b) is
   my b2 = b ** 2
   a2 + b2
 end
-say("sum of squares 3,4: " ++ sum_of_squares(3, 4))
+say("sum of squares 3,4: " ++ str(sum_of_squares(3, 4)))
 
 # Recursion
 fn factorial(n) is
   if n <= 1 then 1 else n * factorial(n - 1)
 end
-say("5! = " ++ factorial(5))
+say("5! = " ++ str(factorial(5)))
 
 # Functions are first-class values
 my f = fn square(x) is x ** 2 end
-say("7 squared: " ++ f(7))
+say("7 squared: " ++ str(f(7)))

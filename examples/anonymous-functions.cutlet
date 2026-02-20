@@ -3,7 +3,7 @@
 
 # Anonymous function assigned to a variable
 my double = fn(x) is x * 2 end
-say("double 21: " ++ double(21))
+say("double 21: " ++ str(double(21)))
 
 # Anonymous function with no parameters
 my greeting = fn() is "hello world" end
@@ -11,7 +11,7 @@ say(greeting())
 
 # Anonymous function with multiple parameters
 my add = fn(a, b) is a + b end
-say("3 + 4 = " ++ add(3, 4))
+say("3 + 4 = " ++ str(add(3, 4)))
 
 # Anonymous function with multi-line body
 my sum_of_squares = fn(a, b) is
@@ -19,13 +19,13 @@ my sum_of_squares = fn(a, b) is
   my b2 = b ** 2
   a2 + b2
 end
-say("sum of squares 3,4: " ++ sum_of_squares(3, 4))
+say("sum of squares 3,4: " ++ str(sum_of_squares(3, 4)))
 
 # Anonymous functions are expressions (they return a value)
 say(fn(x) is x + 1 end)
 
 # Reassigning a variable to different anonymous functions
 my op = fn(x) is x + 10 end
-say("add 10 to 5: " ++ op(5))
+say("add 10 to 5: " ++ str(op(5)))
 op = fn(x) is x * 10 end
-say("mul 10 by 5: " ++ op(5))
+say("mul 10 by 5: " ++ str(op(5)))
