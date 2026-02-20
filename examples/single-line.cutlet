@@ -17,19 +17,19 @@ say("x is " ++ sign)
 # Single-line while
 my i = 0
 while i < 5 do i = i + 1
-say("counted to " ++ i)
+say("counted to " ++ str(i))
 
 # Single-line fn (named)
 fn double(n) is n * 2
-say("double 6: " ++ double(6))
+say("double 6: " ++ str(double(6)))
 
 # Single-line fn (anonymous)
 my square = fn(n) is n ** 2
-say("square 4: " ++ square(4))
+say("square 4: " ++ str(square(4)))
 
 # Single-line fn as argument
 fn apply(f, val) is f(val)
-say("apply inc to 9: " ++ apply(fn(n) is n + 1, 9))
+say("apply inc to 9: " ++ str(apply(fn(n) is n + 1, 9)))
 
 # Nested single-line if
 say(if true then if false then "a" else "b" else "c")

@@ -672,18 +672,25 @@ TEST(test_concat_basic) {
     PASS();
 }
 
+/* ++ rejects non-string operands — use str() for explicit conversion */
 TEST(test_concat_auto_coerce_num) {
-    ASSERT(eval_value_matches("\"score: \" ++ 42", "score: 42"), "coerce number");
+    ASSERT(eval_error_matches("\"score: \" ++ 42",
+                              "line 1: ++ requires strings, got string and number"),
+           "reject number");
     PASS();
 }
 
 TEST(test_concat_auto_coerce_bool) {
-    ASSERT(eval_value_matches("true ++ \"!\"", "true!"), "coerce bool");
+    ASSERT(
+        eval_error_matches("true ++ \"!\"", "line 1: ++ requires strings, got boolean and string"),
+        "reject bool");
     PASS();
 }
 
 TEST(test_concat_auto_coerce_nothing) {
-    ASSERT(eval_value_matches("nothing ++ \"x\"", "nothingx"), "coerce nothing");
+    ASSERT(eval_error_matches("nothing ++ \"x\"",
+                              "line 1: ++ requires strings, got nothing and string"),
+           "reject nothing");
     PASS();
 }
 

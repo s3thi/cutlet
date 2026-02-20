@@ -829,7 +829,8 @@ test_run_file_error "modulo by zero" '5 % 0' "modulo by zero"
 
 # String concatenation operator (++)
 test_run_file "concat strings" 'say("hello" ++ " world")' "hello world"
-test_run_file "concat auto-coerce" 'say("score: " ++ 42)' "score: 42"
+test_run_file_error "concat rejects non-string" 'say("score: " ++ 42)' "++ requires strings"
+test_run_file "concat with str()" 'say("score: " ++ str(42))' "score: 42"
 test_run_file "concat chained" 'say("a" ++ "b" ++ "c")' "abc"
 
 # While loop in file execution
