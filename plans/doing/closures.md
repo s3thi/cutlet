@@ -123,6 +123,7 @@ Reference counting, following the same pattern as `ObjArray` in the arrays plan:
 - [ ] Deeply nested capture (3+ levels) works
 - [ ] Functions with no captures work as before (trivial closures with 0 upvalues)
 - [ ] Named and anonymous functions both produce closures
+- [ ] Named functions inside other functions are lexically scoped (local, not global)
 - [ ] Native functions (`say`) still work
 - [ ] `value_format` for `VAL_CLOSURE` shows `<fn name>` / `<fn>`
 - [ ] Bytecode disassembly shows `OP_CLOSURE`, `OP_GET_UPVALUE`, `OP_SET_UPVALUE`
@@ -239,7 +240,7 @@ validates that the refactor is correct.
 
 ---
 
-### Step 4: Emit OP_CLOSURE in compiler (no captures yet)
+### Step 4: Emit OP_CLOSURE in compiler (no captures yet) and lexically scope named functions
 
 **`src/compiler.c`:**
 - In `compile_function`: replace the `emit_constant(c, fn_val, line)` call
@@ -250,9 +251,18 @@ validates that the refactor is correct.
 - Set `fn->upvalue_count = 0`.
 - Do NOT change `make_function` to `make_closure` here — OP_CLOSURE in the VM
   (next step) will create the closure from the ObjFunction constant.
+- **Lexically scope named functions:** Currently, named functions always emit
+  `OP_DEFINE_GLOBAL` for their name. Change the named-function binding to follow
+  the same pattern as `compile_decl`: when `c->context == COMPILE_FUNCTION`,
+  register the function name as a local (add to `c->locals`, emit
+  `OP_GET_LOCAL` to push a clone as the expression result) instead of emitting
+  `OP_DEFINE_GLOBAL`. At the top level (`COMPILE_SCRIPT`), keep the existing
+  `OP_DEFINE_GLOBAL` behavior.
 
 **Tests:** Existing function tests should pass. Update bytecode tests to expect
-`OP_CLOSURE` instead of `OP_CONSTANT` for function definitions.
+`OP_CLOSURE` instead of `OP_CONSTANT` for function definitions. Add tests
+verifying that a named function inside another function is local (not visible
+as a global).
 
 **Files touched:** `src/compiler.c`, tests.
 
