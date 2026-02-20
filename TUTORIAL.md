@@ -407,6 +407,71 @@ op = fn(x) is x * 10
 say(op(5))              # prints: 50
 
 # ============================================================
+# 9c. Block scoping
+# ============================================================
+
+# Inside a function, `my` inside an if or while body is scoped
+# to that block. It's not visible after the `end`.
+
+fn scoping_demo() is
+  my x = 1
+  if true then
+    my x = 99        # shadows the outer x inside this block
+    say(x)           # prints: 99
+  end
+  x                  # => 1 (outer x is unchanged)
+end
+say(scoping_demo())  # prints: 1
+
+# Variables declared in a while body are cleaned up each iteration.
+fn loop_scoping() is
+  my total = 0
+  my i = 0
+  while i < 3 do
+    my x = i + 1     # x is fresh each iteration
+    total = total + x
+    i = i + 1
+  end
+  total               # => 6 (1 + 2 + 3)
+end
+say(loop_scoping())   # prints: 6
+
+# Else branches have their own scope too.
+fn else_scope() is
+  if false then
+    my a = 1
+  else
+    my b = 2
+    b                 # => 2 (b is visible here)
+  end
+  # a and b are both out of scope here
+end
+
+# break and continue properly clean up block-scoped variables.
+fn break_cleanup() is
+  while true do
+    my x = 42
+    break x           # x is cleaned up before the jump
+  end                 # => 42
+end
+say(break_cleanup())  # prints: 42
+
+# Nested blocks work as expected — inner scopes can see outer locals.
+fn nested_scopes() is
+  if true then
+    my a = 10
+    if true then
+      my b = 20
+      a + b           # => 30 (inner sees outer)
+    end
+  end
+end
+say(nested_scopes())  # prints: 30
+
+# Note: at the top level (outside functions), `my` always creates
+# a global variable. Block scoping only applies inside functions.
+
+# ============================================================
 # 10. Higher-order functions
 # ============================================================
 
