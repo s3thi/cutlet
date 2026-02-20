@@ -144,8 +144,8 @@ Reference counting, following the same pattern as `ObjArray` in the arrays plan:
 - **No garbage collector.** Use reference counting for `ObjClosure`,
   `ObjUpvalue`, and `ObjFunction`.
 - **No syntax changes.**
-- **Top-level variables remain globals.** The Lua model for top-level is a
-  separate task (`plans/doing/script-as-function.md`).
+- **Top-level variables remain globals.** Top-level closures work through
+  the global table (OP_GET_GLOBAL/OP_SET_GLOBAL) rather than upvalues.
 
 ---
 
