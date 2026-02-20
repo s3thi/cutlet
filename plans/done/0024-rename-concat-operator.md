@@ -134,3 +134,29 @@ Run `make test && make check`. All tests must pass with zero failures and zero w
 4. Implement the feature.
 5. Run `make test && make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
+
+---
+
+## Completion summary
+
+**Status:** Done. All acceptance criteria met. `make test && make check` pass.
+
+**What changed:**
+- `++` is now the concatenation operator (was `..`). `..` is no longer recognized as an infix operator, freeing it for future range/slice syntax.
+- Tokenizer special-cases `++`: when `+` is followed by `+`, both chars are consumed and emitted as a single `"++"` operator token (even though `+` is normally a solo symbol).
+- Parser gives `++` precedence 5 and right-associativity (identical to the old `..`).
+- Compiler matches `"++"` to emit `OP_CONCAT` (no opcode changes).
+
+**Files touched (20):**
+- `src/tokenizer.c` — `read_operator()` ++ special case, updated comments in `read_number()`
+- `src/parser.c` — `infix_precedence()`, `is_right_assoc()`, comments
+- `src/compiler.c` — `compile_binop()` strcmp match
+- `tests/test_tokenizer.c` — updated 3 concat tests + added 2 new tests (++ after number, + still solo)
+- `tests/test_parser.c` — updated 6 concat tests
+- `tests/test_vm.c` — updated 14 concat tests + 1 nested-continue test that used `..`
+- `tests/test_repl.c` — updated 5 concat tests
+- `tests/test_cli.sh` — updated 4 concat test cases
+- `examples/*.cutlet` (8 files) — replaced `..` with `++`
+- `examples/*.expected` (2 files) — regenerated (trailing newline normalization only)
+- `TUTORIAL.md` — replaced `..` with `++` in all concatenation examples
+- `plans/doing/arrays.md` — replaced `..`/`@..` with `++`/`@++` in array plan
