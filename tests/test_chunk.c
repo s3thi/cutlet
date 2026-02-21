@@ -404,6 +404,309 @@ TEST(test_disassemble_recursive_anonymous_function) {
 }
 
 /* ============================================================
+ * New closure opcode tests (Step 2)
+ * ============================================================ */
+
+TEST(test_opcode_names_closure_opcodes) {
+    /* Verify opcode_name returns correct strings for the 4 new closure opcodes. */
+    ASSERT(strcmp(opcode_name(OP_CLOSURE), "OP_CLOSURE") == 0, "OP_CLOSURE name");
+    ASSERT(strcmp(opcode_name(OP_GET_UPVALUE), "OP_GET_UPVALUE") == 0, "OP_GET_UPVALUE name");
+    ASSERT(strcmp(opcode_name(OP_SET_UPVALUE), "OP_SET_UPVALUE") == 0, "OP_SET_UPVALUE name");
+    ASSERT(strcmp(opcode_name(OP_CLOSE_UPVALUE), "OP_CLOSE_UPVALUE") == 0, "OP_CLOSE_UPVALUE name");
+    PASS();
+}
+
+TEST(test_disassemble_get_upvalue) {
+    /* OP_GET_UPVALUE has a 1-byte upvalue index operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_GET_UPVALUE, 1);
+    chunk_write(&c, 3, 1); /* upvalue index 3 */
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_GET_UPVALUE") != NULL, "should contain OP_GET_UPVALUE");
+    ASSERT(strstr(s, "3") != NULL, "should contain upvalue index 3");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_set_upvalue) {
+    /* OP_SET_UPVALUE has a 1-byte upvalue index operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_SET_UPVALUE, 1);
+    chunk_write(&c, 5, 1); /* upvalue index 5 */
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_SET_UPVALUE") != NULL, "should contain OP_SET_UPVALUE");
+    ASSERT(strstr(s, "5") != NULL, "should contain upvalue index 5");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_close_upvalue) {
+    /* OP_CLOSE_UPVALUE is a simple instruction with no operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_CLOSE_UPVALUE, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSE_UPVALUE") != NULL, "should contain OP_CLOSE_UPVALUE");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_closure_no_upvalues) {
+    /*
+     * OP_CLOSURE with 0 upvalues: [OP_CLOSURE] [const_idx]
+     * The function in the constant pool has upvalue_count == 0,
+     * so no upvalue descriptor pairs follow.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    /* Build a minimal inner function. */
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    chunk_write(inner, OP_NOTHING, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("my_closure");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CLOSURE, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    /* No upvalue descriptors (upvalue_count == 0) */
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSURE") != NULL, "should contain OP_CLOSURE");
+    ASSERT(strstr(s, "my_closure") != NULL, "should show function name");
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
+TEST(test_disassemble_closure_with_upvalues) {
+    /*
+     * OP_CLOSURE with 2 upvalues:
+     * [OP_CLOSURE] [const_idx] [is_local=1, index=0] [is_local=0, index=1]
+     * The disassembler should show each upvalue descriptor.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    chunk_write(inner, OP_NOTHING, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("capturing");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 2;
+
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CLOSURE, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    /* Upvalue descriptor 0: is_local=1, index=0 */
+    chunk_write(&outer, 1, 1);
+    chunk_write(&outer, 0, 1);
+    /* Upvalue descriptor 1: is_local=0, index=1 */
+    chunk_write(&outer, 0, 1);
+    chunk_write(&outer, 1, 1);
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSURE") != NULL, "should contain OP_CLOSURE");
+    ASSERT(strstr(s, "capturing") != NULL, "should show function name");
+    /* Should show upvalue descriptors: local and upvalue indicators */
+    ASSERT(strstr(s, "local") != NULL, "should show 'local' for is_local=1 upvalue");
+    ASSERT(strstr(s, "upvalue") != NULL, "should show 'upvalue' for is_local=0 upvalue");
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
+/* ============================================================
+ * ObjUpvalue and ObjClosure tests
+ * ============================================================ */
+
+TEST(test_obj_upvalue_new) {
+    /* Create an ObjUpvalue pointing to a stack value and verify location. */
+    Value slot = make_number(99.0);
+    ObjUpvalue *uv = obj_upvalue_new(&slot);
+    ASSERT(uv != NULL, "upvalue should be allocated");
+    ASSERT(uv->refcount == 1, "initial refcount should be 1");
+    ASSERT(uv->location == &slot, "location should point to the slot");
+    ASSERT(uv->location->number == 99.0, "should read value through location");
+    ASSERT(uv->next == NULL, "next should be NULL");
+    obj_upvalue_free(uv);
+    value_free(&slot);
+    PASS();
+}
+
+TEST(test_obj_closure_new) {
+    /* Create an ObjClosure wrapping a simple ObjFunction. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("test_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    ASSERT(cl != NULL, "closure should be allocated");
+    ASSERT(cl->refcount == 1, "closure initial refcount should be 1");
+    ASSERT(cl->function == fn, "closure should reference the function");
+    ASSERT(cl->upvalue_count == 0, "upvalue_count should be 0");
+    /* obj_closure_new increments fn->refcount */
+    ASSERT(fn->refcount == 2, "function refcount should be 2 after closure creation");
+
+    obj_closure_free(cl);
+    /* After closure free, fn refcount should be decremented back to 1 */
+    ASSERT(fn->refcount == 1, "function refcount should be 1 after closure free");
+    obj_function_free(fn);
+    PASS();
+}
+
+TEST(test_closure_value_format_named) {
+    /* value_format for VAL_CLOSURE with a named function shows "<fn name>". */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("greet");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    char *fmt = value_format(&v);
+    ASSERT(fmt != NULL, "format should return non-NULL");
+    ASSERT(strcmp(fmt, "<fn greet>") == 0, "should format as <fn greet>");
+    free(fmt);
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_value_format_anonymous) {
+    /* value_format for VAL_CLOSURE with anonymous function shows "<fn>". */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = NULL;
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    char *fmt = value_format(&v);
+    ASSERT(fmt != NULL, "format should return non-NULL");
+    ASSERT(strcmp(fmt, "<fn>") == 0, "should format as <fn>");
+    free(fmt);
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_clone_refcount) {
+    /* Clone a VAL_CLOSURE, verify refcount is 2. Free clone, verify refcount is 1. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("cloned_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    ASSERT(cl->refcount == 1, "initial closure refcount should be 1");
+
+    Value cloned;
+    bool ok = value_clone(&cloned, &v);
+    ASSERT(ok, "clone should succeed");
+    ASSERT(cloned.type == VAL_CLOSURE, "cloned type should be VAL_CLOSURE");
+    ASSERT(cloned.closure == cl, "cloned should share same ObjClosure");
+    ASSERT(cl->refcount == 2, "refcount should be 2 after clone");
+
+    value_free(&cloned);
+    ASSERT(cl->refcount == 1, "refcount should be 1 after freeing clone");
+
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_is_truthy) {
+    /* Closures are always truthy. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = NULL;
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    ASSERT(is_truthy(&v) == true, "closure should be truthy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_function_refcount_clone) {
+    /* VAL_FUNCTION clone should increment refcount (not deep-copy). */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("native_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    Value v = make_function(fn);
+    ASSERT(fn->refcount == 1, "initial refcount should be 1");
+
+    Value cloned;
+    bool ok = value_clone(&cloned, &v);
+    ASSERT(ok, "clone should succeed");
+    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
+
+    value_free(&cloned);
+    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
+
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -445,6 +748,23 @@ int main(void) {
     printf("\nRecursive function disassembly:\n");
     RUN_TEST(test_disassemble_recursive_function);
     RUN_TEST(test_disassemble_recursive_anonymous_function);
+
+    printf("\nClosure opcodes:\n");
+    RUN_TEST(test_opcode_names_closure_opcodes);
+    RUN_TEST(test_disassemble_get_upvalue);
+    RUN_TEST(test_disassemble_set_upvalue);
+    RUN_TEST(test_disassemble_close_upvalue);
+    RUN_TEST(test_disassemble_closure_no_upvalues);
+    RUN_TEST(test_disassemble_closure_with_upvalues);
+
+    printf("\nObjUpvalue and ObjClosure:\n");
+    RUN_TEST(test_obj_upvalue_new);
+    RUN_TEST(test_obj_closure_new);
+    RUN_TEST(test_closure_value_format_named);
+    RUN_TEST(test_closure_value_format_anonymous);
+    RUN_TEST(test_closure_clone_refcount);
+    RUN_TEST(test_closure_is_truthy);
+    RUN_TEST(test_function_refcount_clone);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

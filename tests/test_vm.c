@@ -1237,20 +1237,24 @@ TEST(test_fn_format_anonymous) {
 
 /* Clone a function: deep copy with independent ownership */
 TEST(test_fn_clone_independence) {
+    /* VAL_FUNCTION clone uses shared ownership via refcount (not deep copy). */
     const char *params[] = {"x", "y"};
     ObjFunction *fn = test_make_obj_function("add", 2, params);
     Value orig = make_function(fn);
+    ASSERT(fn->refcount == 1, "initial refcount should be 1");
     Value cloned;
     bool ok = value_clone(&cloned, &orig);
     ASSERT(ok, "clone succeeds");
     ASSERT(cloned.type == VAL_FUNCTION, "clone is function");
-    ASSERT(cloned.function != orig.function, "clone has different pointer");
+    ASSERT(cloned.function == orig.function, "clone shares same ObjFunction pointer");
+    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
     ASSERT(strcmp(cloned.function->name, "add") == 0, "clone name correct");
     ASSERT(cloned.function->arity == 2, "clone arity correct");
     ASSERT(strcmp(cloned.function->params[0], "x") == 0, "clone param 0");
     ASSERT(strcmp(cloned.function->params[1], "y") == 0, "clone param 1");
-    value_free(&orig);
     value_free(&cloned);
+    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
+    value_free(&orig);
     PASS();
 }
 
@@ -1319,17 +1323,18 @@ TEST(test_fn_concat_coercion) {
 /* fn foo() is 42 end → foo is a VAL_FUNCTION in globals */
 TEST(test_fn_def_creates_global) {
     Value v = run_input("fn fndef1() is 42 end\nfndef1", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "fn def creates a function value");
-    ASSERT(v.function != NULL, "function pointer is non-NULL");
-    ASSERT(strcmp(v.function->name, "fndef1") == 0, "function name is fndef1");
+    ASSERT(v.type == VAL_CLOSURE, "fn def creates a closure value");
+    ASSERT(v.closure != NULL, "closure pointer is non-NULL");
+    ASSERT(v.closure->function != NULL, "function pointer is non-NULL");
+    ASSERT(strcmp(v.closure->function->name, "fndef1") == 0, "function name is fndef1");
     value_free(&v);
     PASS();
 }
 
-/* fn foo() is 42 end evaluates to the function value itself */
+/* fn foo() is 42 end evaluates to the closure value itself */
 TEST(test_fn_def_evaluates_to_function) {
     Value v = run_input("fn fndef2() is 42 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "fn def expression returns function");
+    ASSERT(v.type == VAL_CLOSURE, "fn def expression returns closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn fndef2>") == 0, "formats as <fn fndef2>");
     free(s);
@@ -1341,7 +1346,7 @@ TEST(test_fn_def_evaluates_to_function) {
 TEST(test_fn_def_format_via_global) {
     /* Define then read back. */
     Value v = run_input("fn fndef3(x, y) is x end\nfndef3", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "is function");
+    ASSERT(v.type == VAL_CLOSURE, "is closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn fndef3>") == 0, "formats as <fn fndef3>");
     free(s);
@@ -1607,7 +1612,7 @@ TEST(test_anon_fn_two_params) {
 /* Anonymous fn value formats as "<fn>" (no name) */
 TEST(test_anon_fn_formats_as_fn) {
     Value v = run_input("fn() is 42 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "anon fn evaluates to function");
+    ASSERT(v.type == VAL_CLOSURE, "anon fn evaluates to closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn>") == 0, "anonymous fn formats as <fn>");
     free(s);
@@ -1642,10 +1647,11 @@ TEST(test_anon_fn_arity_error) {
 /* Anonymous fn is an expression (can be used inline) */
 TEST(test_anon_fn_as_expression) {
     Value v = run_input("fn(x) is x * 2 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "anon fn as expression returns function");
-    ASSERT(v.function != NULL, "function pointer is non-NULL");
-    ASSERT(v.function->name == NULL, "anonymous function has no name");
-    ASSERT(v.function->arity == 1, "arity is 1");
+    ASSERT(v.type == VAL_CLOSURE, "anon fn as expression returns closure");
+    ASSERT(v.closure != NULL, "closure pointer is non-NULL");
+    ASSERT(v.closure->function != NULL, "function pointer is non-NULL");
+    ASSERT(v.closure->function->name == NULL, "anonymous function has no name");
+    ASSERT(v.closure->function->arity == 1, "arity is 1");
     value_free(&v);
     PASS();
 }
@@ -1694,6 +1700,184 @@ TEST(test_local_var_as_callee) {
                      "end\n"
                      "foo()",
                      15.0, "my-declared local function as callee");
+}
+
+/* ============================================================
+ * Nested named functions (lexical scoping, Step 4)
+ * ============================================================ */
+
+/* Named function inside another function works (callable from within) */
+TEST(test_nested_fn_call_works) {
+    assert_vm_number("fn outer() is\n"
+                     "  fn inner() is 42 end\n"
+                     "  inner()\n"
+                     "end\n"
+                     "outer()",
+                     42.0, "nested named fn callable from outer");
+}
+
+/* Named function inside another function is NOT visible as a global */
+TEST(test_nested_fn_not_visible_globally) {
+    Value v = run_input("fn outer2() is\n"
+                        "  fn inner2() is 42 end\n"
+                        "  inner2()\n"
+                        "end\n"
+                        "outer2()\n"
+                        "inner2()",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "inner2 should not be visible globally");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "inner2") != NULL, "error mentions inner2");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
+ * Closure infrastructure (Step 5)
+ * ============================================================ */
+
+/* say(fn() is 42 end) should display "<fn>" — closure passed to native fn */
+TEST(test_say_displays_closure) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("say(fn() is 42 end)", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "say(fn()) should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "<fn>\n", "say(fn()) prints '<fn>\\n'", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say("hello") still works — native fn interop with closure infrastructure */
+TEST(test_say_hello_with_closures) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("say(\"hello\")", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "say(hello) should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hello\n", "say(hello) prints 'hello\\n'", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Function returning a closure: the closure can be called successfully */
+TEST(test_closure_as_return_value) {
+    assert_vm_number("fn maker() is\n"
+                     "  fn inner(x) is x * 2 end\n"
+                     "  inner\n"
+                     "end\n"
+                     "my f = maker()\n"
+                     "f(5)",
+                     10.0, "closure returned from function is callable");
+}
+
+/* Two closures from the same definition are not equal (identity-based) */
+TEST(test_closure_equality_different_instances) {
+    assert_vm_bool("fn maker2() is fn() is 1 end end\n"
+                   "my a = maker2()\n"
+                   "my b = maker2()\n"
+                   "a == b",
+                   false, "two closure instances are not equal");
+}
+
+/* Same closure variable compared to itself is equal */
+TEST(test_closure_equality_same_instance) {
+    assert_vm_bool("fn maker3() is fn() is 1 end end\n"
+                   "my a = maker3()\n"
+                   "a == a",
+                   true, "same closure compared to itself is equal");
+}
+
+/* ============================================================
+ * Upvalue capture: OP_GET_UPVALUE / OP_SET_UPVALUE (Step 2)
+ * ============================================================ */
+
+/* Inner function reads a variable from the outer function via upvalue. */
+TEST(test_upvalue_read_outer) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn inner() is x end\n"
+                     "  inner()\n"
+                     "end\n"
+                     "outer()",
+                     10.0, "inner fn reads outer variable via upvalue");
+}
+
+/* Mutation through a closure is visible to the enclosing scope. */
+TEST(test_upvalue_mutation_visible) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn inner() is x = 20 end\n"
+                     "  inner()\n"
+                     "  x\n"
+                     "end\n"
+                     "outer()",
+                     20.0, "mutation through closure visible to encloser");
+}
+
+/* Two closures sharing the same captured variable share the same ObjUpvalue. */
+TEST(test_upvalue_shared_between_closures) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn a() is x end\n"
+                     "  fn b() is x = 20 end\n"
+                     "  b()\n"
+                     "  a()\n"
+                     "end\n"
+                     "outer()",
+                     20.0, "two closures share same upvalue");
+}
+
+/* ============================================================
+ * Closing upvalues on function return (Step 3)
+ * ============================================================ */
+
+/* Closure that outlives its enclosing function still works
+ * because the upvalue is closed (value moved from stack to heap). */
+TEST(test_close_upvalue_outlive_creator) {
+    assert_vm_number("fn make() is\n"
+                     "  my x = 42\n"
+                     "  fn get() is x end\n"
+                     "end\n"
+                     "my g = make()\n"
+                     "g()",
+                     42.0, "closure outlives creator via closed upvalue");
+}
+
+/* Counter pattern: closed upvalue retains state across calls. */
+TEST(test_close_upvalue_counter) {
+    assert_vm_number("fn make() is\n"
+                     "  my x = 0\n"
+                     "  fn inc() is\n"
+                     "    x = x + 1\n"
+                     "    x\n"
+                     "  end\n"
+                     "end\n"
+                     "my f = make()\n"
+                     "f()\n"
+                     "f()",
+                     2.0, "counter pattern with closed upvalue");
+}
+
+/* Two closures from the same factory share a closed upvalue:
+ * one writes, the other reads, both see the same variable. */
+TEST(test_close_upvalue_shared) {
+    assert_vm_number("my setter = nothing\n"
+                     "fn make() is\n"
+                     "  my x = 0\n"
+                     "  fn set(v) is x = v end\n"
+                     "  setter = set\n"
+                     "  fn() is x end\n"
+                     "end\n"
+                     "my getter = make()\n"
+                     "setter(42)\n"
+                     "getter()",
+                     42.0, "two closures share closed upvalue");
 }
 
 /* ============================================================
@@ -1893,6 +2077,256 @@ TEST(test_block_scope_three_level_nesting) {
                      "end\ni = i + 1\nend\n"
                      "result\nend\nbs15()",
                      60.0, "three-level nesting works");
+}
+
+/* ============================================================
+ * Closure integration tests (Step 4)
+ * ============================================================ */
+
+/* Counter pattern: make_counter returns a closure that increments and returns */
+TEST(test_closure_counter_pattern) {
+    assert_vm_number("fn make_counter() is\n"
+                     "  my n = 0\n"
+                     "  fn() is\n"
+                     "    n = n + 1\n"
+                     "    n\n"
+                     "  end\n"
+                     "end\n"
+                     "my c = make_counter()\n"
+                     "c()\n"
+                     "c()\n"
+                     "c()",
+                     3.0, "counter pattern: 3 increments → 3");
+}
+
+/* Adder factory: make_adder(x) returns fn(y) → x + y */
+TEST(test_closure_adder_factory) {
+    assert_vm_number("fn make_adder(x) is\n"
+                     "  fn(y) is x + y end\n"
+                     "end\n"
+                     "my add5 = make_adder(5)\n"
+                     "add5(3)",
+                     8.0, "adder factory: make_adder(5)(3) → 8");
+}
+
+/* Two adders from same factory are independent */
+TEST(test_closure_adder_independent) {
+    assert_vm_number("fn make_adder(x) is\n"
+                     "  fn(y) is x + y end\n"
+                     "end\n"
+                     "my add5 = make_adder(5)\n"
+                     "my add10 = make_adder(10)\n"
+                     "add5(1) + add10(1)",
+                     17.0, "two adders are independent: 6 + 11 = 17");
+}
+
+/* Shared capture: two closures from same encloser, one reads, one writes */
+TEST(test_closure_shared_capture) {
+    assert_vm_number("fn make_pair() is\n"
+                     "  my val = 0\n"
+                     "  fn get() is val end\n"
+                     "  fn set(v) is val = v end\n"
+                     "end\n"
+                     "my setter = nothing\n"
+                     "fn make() is\n"
+                     "  my val = 0\n"
+                     "  fn get() is val end\n"
+                     "  fn set(v) is val = v end\n"
+                     "end\n"
+                     "# Use global variables for setter/getter\n"
+                     "my s = nothing\n"
+                     "fn mk() is\n"
+                     "  my x = 0\n"
+                     "  fn get() is x end\n"
+                     "  fn set(v) is x = v end\n"
+                     "  s = set\n"
+                     "  get\n"
+                     "end\n"
+                     "my g = mk()\n"
+                     "s(99)\n"
+                     "g()",
+                     99.0, "shared capture: setter and getter share upvalue");
+}
+
+/* Deep nesting: 3-level function nesting, innermost captures from outermost */
+TEST(test_closure_deep_nesting) {
+    assert_vm_number("fn level1() is\n"
+                     "  my x = 100\n"
+                     "  fn level2() is\n"
+                     "    fn level3() is x end\n"
+                     "    level3()\n"
+                     "  end\n"
+                     "  level2()\n"
+                     "end\n"
+                     "level1()",
+                     100.0, "3-level nesting: innermost reads outermost");
+}
+
+/* Deep nesting: innermost mutates outermost variable */
+TEST(test_closure_deep_nesting_mutation) {
+    assert_vm_number("fn level1() is\n"
+                     "  my x = 1\n"
+                     "  fn level2() is\n"
+                     "    fn level3() is x = x + 10 end\n"
+                     "    level3()\n"
+                     "  end\n"
+                     "  level2()\n"
+                     "  x\n"
+                     "end\n"
+                     "level1()",
+                     11.0, "3-level nesting: innermost mutates outermost");
+}
+
+/* Deep nesting with closure outliving creator */
+TEST(test_closure_deep_nesting_outlive) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 42\n"
+                     "  fn middle() is\n"
+                     "    fn inner() is x end\n"
+                     "  end\n"
+                     "end\n"
+                     "my get_inner = outer()\n"
+                     "my inner = get_inner()\n"
+                     "inner()",
+                     42.0, "3-level nesting: innermost outlives all enclosers");
+}
+
+/* Closure + parameters: capture a parameter (not just `my` locals) */
+TEST(test_closure_capture_parameter) {
+    assert_vm_number("fn greet(name) is\n"
+                     "  fn() is name end\n"
+                     "end\n"
+                     "my f = greet(42)\n"
+                     "f()",
+                     42.0, "closure captures parameter from enclosing function");
+}
+
+/* Closure captures multiple parameters */
+TEST(test_closure_capture_multiple_params) {
+    assert_vm_number("fn make(a, b) is\n"
+                     "  fn() is a + b end\n"
+                     "end\n"
+                     "my f = make(3, 7)\n"
+                     "f()",
+                     10.0, "closure captures multiple parameters");
+}
+
+/* Closure + recursion: a globally-defined recursive function is captured
+ * and used as a closure value. (Local recursive functions can't reference
+ * themselves because the local variable isn't defined until after the body
+ * is compiled.) */
+TEST(test_closure_with_recursion) {
+    assert_vm_number("fn fact(n) is\n"
+                     "  if n <= 1 then 1 else n * fact(n - 1) end\n"
+                     "end\n"
+                     "fn apply_to_5(f) is f(5) end\n"
+                     "apply_to_5(fact)",
+                     120.0, "recursive function captured as closure argument");
+}
+
+/* Closure + control flow: closure captures variable modified by while loop */
+TEST(test_closure_with_while_loop) {
+    assert_vm_number("fn make() is\n"
+                     "  my total = 0\n"
+                     "  my i = 0\n"
+                     "  while i < 5 do\n"
+                     "    total = total + i\n"
+                     "    i = i + 1\n"
+                     "  end\n"
+                     "  fn() is total end\n"
+                     "end\n"
+                     "my f = make()\n"
+                     "f()",
+                     10.0, "closure captures variable modified by while loop (0+1+2+3+4=10)");
+}
+
+/* Closure capturing a variable modified by while, called inside loop */
+TEST(test_closure_called_in_loop) {
+    assert_vm_number("fn make_counter() is\n"
+                     "  my n = 0\n"
+                     "  fn() is\n"
+                     "    n = n + 1\n"
+                     "    n\n"
+                     "  end\n"
+                     "end\n"
+                     "my c = make_counter()\n"
+                     "my i = 0\n"
+                     "while i < 10 do\n"
+                     "  c()\n"
+                     "  i = i + 1\n"
+                     "end\n"
+                     "c()",
+                     11.0, "closure called in loop: 10 loop calls + 1 final = 11");
+}
+
+/* Error case: calling a non-function still errors correctly */
+TEST(test_closure_error_call_non_function) {
+    Value v = run_input("my x = 42\nx()", &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "calling a number should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "cannot call") != NULL, "error mentions 'cannot call'");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Error case: arity mismatch on closure still reports function name */
+TEST(test_closure_error_arity_named) {
+    Value v = run_input("fn make() is\n"
+                        "  fn adder(x, y) is x + y end\n"
+                        "end\n"
+                        "my f = make()\n"
+                        "f(1)",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "arity mismatch should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "adder") != NULL, "error mentions function name 'adder'");
+    ASSERT(strstr(msg, "2") != NULL, "error mentions expected arity 2");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Error case: arity mismatch on anonymous closure reports <fn> */
+TEST(test_closure_error_arity_anonymous) {
+    Value v = run_input("fn make() is\n"
+                        "  fn(x, y) is x + y end\n"
+                        "end\n"
+                        "my f = make()\n"
+                        "f(1)",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "arity mismatch on anon closure should error");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "<fn>") != NULL, "error mentions '<fn>' for anon closure");
+    ASSERT(strstr(msg, "2") != NULL, "error mentions expected arity 2");
+    free(msg);
+    value_free(&v);
+    PASS();
+}
+
+/* Counter pattern with say() to verify output */
+TEST(test_closure_counter_with_say) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("fn make_counter() is\n"
+                        "  my count = 0\n"
+                        "  fn() is\n"
+                        "    count = count + 1\n"
+                        "    say(count)\n"
+                        "  end\n"
+                        "end\n"
+                        "my counter = make_counter()\n"
+                        "counter()\n"
+                        "counter()\n"
+                        "counter()",
+                        &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "counter with say should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "1\n2\n3\n", "counter prints 1, 2, 3", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
 }
 
 /* ============================================================
@@ -2224,6 +2658,27 @@ int main(void) {
     RUN_TEST(test_higher_order_nested);
     RUN_TEST(test_local_var_as_callee);
 
+    printf("\nNested named functions (lexical scoping):\n");
+    RUN_TEST(test_nested_fn_call_works);
+    RUN_TEST(test_nested_fn_not_visible_globally);
+
+    printf("\nClosure infrastructure:\n");
+    RUN_TEST(test_say_displays_closure);
+    RUN_TEST(test_say_hello_with_closures);
+    RUN_TEST(test_closure_as_return_value);
+    RUN_TEST(test_closure_equality_different_instances);
+    RUN_TEST(test_closure_equality_same_instance);
+
+    printf("\nUpvalue capture (OP_GET_UPVALUE / OP_SET_UPVALUE):\n");
+    RUN_TEST(test_upvalue_read_outer);
+    RUN_TEST(test_upvalue_mutation_visible);
+    RUN_TEST(test_upvalue_shared_between_closures);
+
+    printf("\nClosing upvalues on function return:\n");
+    RUN_TEST(test_close_upvalue_outlive_creator);
+    RUN_TEST(test_close_upvalue_counter);
+    RUN_TEST(test_close_upvalue_shared);
+
     printf("\nDecimal number literals:\n");
     RUN_TEST(test_decimal_literal_half);
     RUN_TEST(test_decimal_literal_add);
@@ -2265,6 +2720,24 @@ int main(void) {
     RUN_TEST(test_block_scope_sequential_if);
     RUN_TEST(test_block_scope_if_inside_while);
     RUN_TEST(test_block_scope_three_level_nesting);
+
+    printf("\nClosure integration tests:\n");
+    RUN_TEST(test_closure_counter_pattern);
+    RUN_TEST(test_closure_adder_factory);
+    RUN_TEST(test_closure_adder_independent);
+    RUN_TEST(test_closure_shared_capture);
+    RUN_TEST(test_closure_deep_nesting);
+    RUN_TEST(test_closure_deep_nesting_mutation);
+    RUN_TEST(test_closure_deep_nesting_outlive);
+    RUN_TEST(test_closure_capture_parameter);
+    RUN_TEST(test_closure_capture_multiple_params);
+    RUN_TEST(test_closure_with_recursion);
+    RUN_TEST(test_closure_with_while_loop);
+    RUN_TEST(test_closure_called_in_loop);
+    RUN_TEST(test_closure_error_call_non_function);
+    RUN_TEST(test_closure_error_arity_named);
+    RUN_TEST(test_closure_error_arity_anonymous);
+    RUN_TEST(test_closure_counter_with_say);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

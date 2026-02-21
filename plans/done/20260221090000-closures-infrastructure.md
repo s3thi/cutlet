@@ -260,4 +260,32 @@ At this point, `OP_CLOSURE` works but no functions actually capture anything
 6. Do not remove or modify existing tests without user confirmation.
 
 ---
+
+## Progress
+
+- [x] Step 1: Add ObjUpvalue, ObjClosure types and VAL_CLOSURE — added types, constructors, refcounting, value_format/clone/free/truthy support, and 7 unit tests
+- [x] Step 2: Add new opcodes and update disassembler — added OP_CLOSURE, OP_GET_UPVALUE, OP_SET_UPVALUE, OP_CLOSE_UPVALUE to enum, opcode_name(), and disassembler with 6 unit tests
+- [x] Step 3: Change CallFrame to use ObjClosure and refactor VM — CallFrame uses ObjClosure *closure, VM has open_upvalues list, OP_CALL dispatches on VAL_CLOSURE vs VAL_FUNCTION, script wrapped in stack-allocated ObjClosure
+- [x] Step 4: Emit OP_CLOSURE in compiler and lexically scope named functions — compiler emits OP_CLOSURE instead of OP_CONSTANT, nested named fns are locals not globals, VM OP_CLOSURE handler creates ObjClosure from constant pool, removed transitional VAL_FUNCTION wrapping
+- [x] Step 5: Implement capture_upvalue in VM and wire into OP_CLOSURE — added capture_upvalue helper (open-upvalue linked list walk/insert), wired into OP_CLOSURE handler for is_local and inherited upvalue paths, added 5 integration tests
+
+---
+
+## Summary
+
+All 5 steps complete. Changes across the plan:
+
+**Files touched:** `src/value.h`, `src/value.c`, `src/chunk.h`, `src/chunk.c`, `src/vm.h`, `src/vm.c`, `src/compiler.c`, `tests/test_vm.c`, `tests/test_chunk.c`, `tests/test_compiler.c`
+
+**What changed:**
+- `ObjClosure` and `ObjUpvalue` types with refcounting (value.h/c)
+- `VAL_CLOSURE` value type with format/clone/free/truthy support
+- `OP_CLOSURE`, `OP_GET_UPVALUE`, `OP_SET_UPVALUE`, `OP_CLOSE_UPVALUE` opcodes (chunk.h/c)
+- `CallFrame` uses `ObjClosure *closure` instead of `ObjFunction *function` (vm.h/c)
+- Compiler emits `OP_CLOSURE` for all `fn` expressions; nested named fns are locals (compiler.c)
+- VM `OP_CLOSURE` handler creates closures with `capture_upvalue` infrastructure (vm.c)
+- `OP_CALL` dispatches on `VAL_CLOSURE` (user functions) vs `VAL_FUNCTION` (natives)
+- Native functions (`say`, `str`) still work as `VAL_FUNCTION`
+
+---
 End of plan.

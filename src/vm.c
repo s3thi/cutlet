@@ -89,7 +89,7 @@ static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
     int line = 0;
     if (vm->frame_count > 0) {
         CallFrame *frame = &vm->frames[vm->frame_count - 1];
-        Chunk *chunk = frame->function->chunk;
+        Chunk *chunk = frame->closure->function->chunk;
         if (frame->ip > chunk->code) {
             size_t offset = (size_t)(frame->ip - chunk->code - 1);
             if (offset < chunk->count) {
@@ -128,6 +128,9 @@ static bool values_equal(const Value *a, const Value *b) {
     case VAL_FUNCTION:
         /* Identity-based: only equal if pointing to the same ObjFunction. */
         return a->function == b->function;
+    case VAL_CLOSURE:
+        /* Identity-based: only equal if pointing to the same ObjClosure. */
+        return a->closure == b->closure;
     default:
         return false;
     }
@@ -247,11 +250,82 @@ static const char *value_type_name(ValueType type) {
     case VAL_NOTHING:
         return "nothing";
     case VAL_FUNCTION:
+    case VAL_CLOSURE:
         return "function";
     case VAL_ERROR:
         return "error";
     default:
         return "value";
+    }
+}
+
+/* ---- Upvalue capture helper ----
+ *
+ * Find or create an ObjUpvalue for the given stack slot.
+ * Walks the VM's open-upvalue linked list (sorted by slot address,
+ * descending) looking for an existing upvalue pointing to `slot`.
+ * If found, increments its refcount and returns it.
+ * If not found, creates a new ObjUpvalue and inserts it into the
+ * list at the correct position (maintaining descending order).
+ * Returns NULL on allocation failure.
+ */
+static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
+    ObjUpvalue *prev = NULL;
+    ObjUpvalue *curr = vm->open_upvalues;
+
+    /* Walk the list until we find an upvalue at or below our slot.
+     * The list is sorted by slot address descending (higher addresses first). */
+    while (curr != NULL && curr->location > slot) {
+        prev = curr;
+        curr = curr->next;
+    }
+
+    /* If we found an existing upvalue for this exact slot, reuse it. */
+    if (curr != NULL && curr->location == slot) {
+        curr->refcount++;
+        return curr;
+    }
+
+    /* Create a new upvalue for this slot. */
+    ObjUpvalue *uv = obj_upvalue_new(slot);
+    if (!uv)
+        return NULL;
+
+    /* Insert into the linked list between prev and curr. */
+    uv->next = curr;
+    if (prev == NULL) {
+        vm->open_upvalues = uv;
+    } else {
+        prev->next = uv;
+    }
+
+    return uv;
+}
+
+/* ---- Close upvalues ----
+ *
+ * Close all open upvalues whose stack location is at or above `last`.
+ * "Closing" an upvalue means copying the value from its stack slot into
+ * the upvalue's `closed` field, then redirecting `location` to point to
+ * `&closed` instead of the (soon-to-be-reclaimed) stack slot.
+ *
+ * Called from OP_RETURN (to close all upvalues in the returning frame's
+ * stack window) and OP_CLOSE_UPVALUE (to close a single local before
+ * popping it).
+ *
+ * The open_upvalues list is sorted by slot address descending, so we
+ * walk from the head and stop once we reach a location below `last`.
+ */
+static void close_upvalues(VM *vm, Value *last) {
+    while (vm->open_upvalues != NULL && vm->open_upvalues->location >= last) {
+        ObjUpvalue *uv = vm->open_upvalues;
+        /* Copy the stack value into the upvalue's closed field. */
+        uv->closed = *uv->location;
+        /* Redirect location to the upvalue's own closed field. */
+        uv->location = &uv->closed;
+        /* Remove from the open list. */
+        vm->open_upvalues = uv->next;
+        uv->next = NULL;
     }
 }
 
@@ -265,22 +339,35 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
     VM vm;
     vm.ctx = ctx;
+    vm.open_upvalues = NULL;
     vm_reset_stack(&vm);
 
     /* Create a "script" ObjFunction that wraps the top-level chunk.
      * This lives on the C stack — it's only used for the duration of
      * this vm_execute() call. The chunk pointer is borrowed (not owned). */
     ObjFunction script_fn = {
+        .refcount = 1,
         .name = NULL,
         .arity = 0,
+        .upvalue_count = 0,
         .params = NULL,
         .chunk = chunk,
         .native = NULL,
     };
 
+    /* Wrap the script function in a stack-allocated ObjClosure with
+     * 0 upvalues. No heap allocation needed — this closure lives on
+     * the C stack alongside script_fn for the duration of vm_execute(). */
+    ObjClosure script_closure = {
+        .refcount = 1,
+        .function = &script_fn,
+        .upvalues = NULL,
+        .upvalue_count = 0,
+    };
+
     /* Push frame 0: the top-level script. */
     CallFrame *frame = &vm.frames[vm.frame_count++];
-    frame->function = &script_fn;
+    frame->closure = &script_closure;
     frame->ip = chunk->code;
     frame->slots = vm.stack;
 
@@ -293,7 +380,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         case OP_CONSTANT: {
             uint8_t idx = read_byte(frame);
             Value v;
-            if (!value_clone(&v, &frame->function->chunk->constants[idx])) {
+            if (!value_clone(&v, &frame->closure->function->chunk->constants[idx])) {
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
             if (!vm_push(&vm, v)) {
@@ -653,7 +740,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_DEFINE_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — the value stays as the expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -668,7 +755,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_GET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             Value val = {0};
             RuntimeVarStatus status = runtime_var_get(name, &val);
             if (status == RUNTIME_VAR_NOT_FOUND) {
@@ -685,7 +772,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_SET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — value stays as expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -731,6 +818,50 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             }
             value_free(&frame->slots[slot]);
             frame->slots[slot] = cloned;
+            break;
+        }
+
+        case OP_GET_UPVALUE: {
+            /* Read a captured variable through upvalue indirection.
+             * The 1-byte operand indexes into the current closure's
+             * upvalue array. The upvalue's location pointer points to
+             * either a live stack slot (open) or the upvalue's own
+             * closed field (closed). Clone the value and push it. */
+            uint8_t slot = read_byte(frame);
+            if (!frame->closure->upvalues) {
+                return vm_runtime_error(&vm, "no upvalues in current closure");
+            }
+            ObjUpvalue *uv = frame->closure->upvalues[slot];
+            Value v;
+            if (!value_clone(&v, uv->location)) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            if (!vm_push(&vm, v)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_SET_UPVALUE: {
+            /* Write TOS into a captured variable through upvalue indirection.
+             * Like OP_SET_LOCAL, TOS stays on the stack as the expression result.
+             * The old value at the upvalue's location is freed, then TOS is
+             * cloned into it. */
+            uint8_t slot = read_byte(frame);
+            if (!frame->closure->upvalues) {
+                return vm_runtime_error(&vm, "no upvalues in current closure");
+            }
+            ObjUpvalue *uv = frame->closure->upvalues[slot];
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            Value cloned;
+            if (!value_clone(&cloned, &tos)) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            value_free(uv->location);
+            *uv->location = cloned;
             break;
         }
 
@@ -780,6 +911,20 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_CLOSE_UPVALUE: {
+            /* Close the upvalue pointing at TOS, then pop and free the
+             * value (same effect as OP_POP but closes first). Used by
+             * block scoping to close captured locals before they leave
+             * scope. */
+            close_upvalues(&vm, vm.stack_top - 1);
+            Value v;
+            if (!vm_pop(&vm, &v)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            value_free(&v);
+            break;
+        }
+
         case OP_CALL: {
             uint8_t argc = read_byte(frame);
 
@@ -792,24 +937,17 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 return vm_runtime_error(&vm, "stack underflow");
             }
 
-            /* Callee must be a function. Error paths let vm_runtime_error
-             * call vm_free_stack to clean up the stack (args + callee). */
-            if (callee.type != VAL_FUNCTION) {
-                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
-            }
+            if (callee.type == VAL_FUNCTION) {
+                /* VAL_FUNCTION is only used for native functions (say, str, etc.).
+                 * User-defined functions are always VAL_CLOSURE (created by OP_CLOSURE). */
+                ObjFunction *fn = callee.function;
 
-            ObjFunction *fn = callee.function;
+                if (argc != fn->arity) {
+                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                                            fn->name ? fn->name : "<fn>", fn->arity,
+                                            fn->arity == 1 ? "" : "s", argc);
+                }
 
-            /* Check arity. fn->name is still valid because the callee
-             * Value is on the stack; vm_runtime_error formats the message
-             * BEFORE vm_free_stack frees it. */
-            if (argc != fn->arity) {
-                return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
-                                        fn->name ? fn->name : "<fn>", fn->arity,
-                                        fn->arity == 1 ? "" : "s", argc);
-            }
-
-            if (fn->native) {
                 /* Native function: pop args into temp array, call, push result. */
                 Value args[256];
                 for (int i = argc - 1; i >= 0; i--) {
@@ -836,19 +974,72 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 if (!vm_push(&vm, result)) {
                     return vm_runtime_error(&vm, "stack overflow");
                 }
-            } else {
-                /* User-defined function: push a new call frame.
-                 * The callee value sits at stack_top[-argc-1]; arguments
-                 * are above it. The new frame's slots point to the callee
-                 * slot (slot 0 = the function itself, not used yet but
-                 * reserves the position for future local variable support). */
+            } else if (callee.type == VAL_CLOSURE) {
+                /* User-defined function via closure. The closure is
+                 * already on the stack in the callee slot. */
+                ObjClosure *cl = callee.closure;
+                ObjFunction *fn = cl->function;
+
+                if (argc != fn->arity) {
+                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                                            fn->name ? fn->name : "<fn>", fn->arity,
+                                            fn->arity == 1 ? "" : "s", argc);
+                }
+
                 if (vm.frame_count >= FRAMES_MAX) {
                     return vm_runtime_error(&vm, "stack overflow");
                 }
                 CallFrame *new_frame = &vm.frames[vm.frame_count++];
-                new_frame->function = fn;
+                new_frame->closure = cl;
                 new_frame->ip = fn->chunk->code;
                 new_frame->slots = vm.stack_top - argc - 1;
+            } else {
+                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
+            }
+            break;
+        }
+
+        case OP_CLOSURE: {
+            /* Create an ObjClosure from a constant pool ObjFunction.
+             * The constant index points to a VAL_FUNCTION in the pool.
+             * After the constant index, there are fn->upvalue_count pairs
+             * of (is_local, index) bytes describing captured variables.
+             * For now, upvalue_count is always 0 (no captures yet). */
+            uint8_t idx = read_byte(frame);
+            ObjFunction *fn = frame->closure->function->chunk->constants[idx].function;
+            ObjClosure *cl = obj_closure_new(fn, fn->upvalue_count);
+            if (!cl) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            /* Read upvalue descriptors and populate the closure's upvalue array.
+             * Each descriptor is a pair of (is_local, index) bytes:
+             * - is_local=1: capture a local from the enclosing frame's stack slot.
+             * - is_local=0: copy an upvalue from the enclosing closure's upvalue array.
+             * Currently upvalue_count is always 0 (capture emitted in closures-capture). */
+            for (int i = 0; i < fn->upvalue_count; i++) {
+                uint8_t is_local = read_byte(frame);
+                uint8_t index = read_byte(frame);
+                if (is_local) {
+                    cl->upvalues[i] = capture_upvalue(&vm, &frame->slots[index]);
+                } else {
+                    /* Copy an upvalue from the enclosing closure.
+                     * The enclosing closure must have upvalues for this path. */
+                    if (frame->closure->upvalues != NULL) {
+                        cl->upvalues[i] = frame->closure->upvalues[index];
+                        if (cl->upvalues[i])
+                            cl->upvalues[i]->refcount++;
+                    } else {
+                        cl->upvalues[i] = NULL;
+                    }
+                }
+                if (!cl->upvalues[i]) {
+                    /* Free the partially-constructed closure on failure. */
+                    value_free(&(Value){.type = VAL_CLOSURE, .closure = cl});
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
+            }
+            if (!vm_push(&vm, make_closure(cl))) {
+                return vm_runtime_error(&vm, "stack overflow");
             }
             break;
         }
@@ -871,6 +1062,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 vm_free_stack(&vm);
                 return result; // NOLINT(clang-analyzer-core.StackAddressEscape)
             }
+
+            /* Close any open upvalues pointing into this frame's stack
+             * window before we pop those slots. This moves captured
+             * values from the stack into the upvalue's closed field,
+             * so closures that outlive this call frame still work. */
+            close_upvalues(&vm, frame->slots);
 
             /* Returning from a user function: discard the called
              * function's stack window (callee + args + locals), then

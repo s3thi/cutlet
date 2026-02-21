@@ -50,16 +50,34 @@ typedef struct {
 /* Maximum number of local variables per function (1-byte slot index). */
 #define LOCALS_MAX 256
 
-/* Internal compiler state. */
+/*
+ * CompilerUpvalue: tracks one captured variable in the compiler.
+ * index:    If is_local, the stack slot in the enclosing function.
+ *           Otherwise, the upvalue index in the enclosing function's upvalue array.
+ * is_local: true if capturing directly from the enclosing function's locals,
+ *           false if capturing from the enclosing function's upvalue array.
+ */
 typedef struct {
-    Chunk *chunk;              /* The chunk being compiled into. */
-    CompileError *err;         /* Where to report errors. */
-    bool had_error;            /* Set to true on first error. */
-    LoopContext *current_loop; /* Current innermost loop context (NULL if not in a loop). */
-    CompileContext context;    /* Script vs function body. */
-    Local locals[LOCALS_MAX];  /* Local variable slots (params, then declarations). */
-    int local_count;           /* Number of locals currently in scope. */
-    int scope_depth;           /* Current scope nesting depth (0=script, 1=function body). */
+    uint8_t index;
+    bool is_local;
+} CompilerUpvalue;
+
+/* Maximum number of upvalues per function (1-byte upvalue index). */
+#define UPVALUES_MAX 256
+
+/* Internal compiler state. */
+typedef struct Compiler {
+    Chunk *chunk;               /* The chunk being compiled into. */
+    CompileError *err;          /* Where to report errors. */
+    bool had_error;             /* Set to true on first error. */
+    LoopContext *current_loop;  /* Current innermost loop context (NULL if not in a loop). */
+    CompileContext context;     /* Script vs function body. */
+    Local locals[LOCALS_MAX];   /* Local variable slots (params, then declarations). */
+    int local_count;            /* Number of locals currently in scope. */
+    int scope_depth;            /* Current scope nesting depth (0=script, 1=function body). */
+    struct Compiler *enclosing; /* Enclosing compiler (NULL for top-level script). */
+    CompilerUpvalue upvalues[UPVALUES_MAX]; /* Upvalue descriptors for this function. */
+    int upvalue_count;                      /* Number of captured upvalues. */
 } Compiler;
 
 /* ---- Helpers ---- */
@@ -244,8 +262,58 @@ static int resolve_local(Compiler *c, const char *name) {
     return -1;
 }
 
+/*
+ * Add an upvalue to the compiler's upvalue array.
+ * Deduplicates: if an entry with the same (index, is_local) already exists,
+ * returns its index. Otherwise appends a new entry.
+ * Returns the upvalue index, or -1 on overflow.
+ */
+static int add_upvalue(Compiler *c, uint8_t index, bool is_local) {
+    /* Check for existing entry with same (index, is_local). */
+    for (int i = 0; i < c->upvalue_count; i++) {
+        if (c->upvalues[i].index == index && c->upvalues[i].is_local == is_local) {
+            return i;
+        }
+    }
+    if (c->upvalue_count >= UPVALUES_MAX) {
+        compiler_error(c, "too many upvalues in function");
+        return -1;
+    }
+    c->upvalues[c->upvalue_count] = (CompilerUpvalue){.index = index, .is_local = is_local};
+    return c->upvalue_count++;
+}
+
+/*
+ * Resolve a variable name as an upvalue (captured from an enclosing scope).
+ * Walks the enclosing compiler chain:
+ *   1. If the variable is a local in the immediate encloser, capture it
+ *      directly (is_local=true).
+ *   2. If the variable is an upvalue in an ancestor, capture it indirectly
+ *      (is_local=false) — each intermediate compiler adds a forwarding upvalue.
+ *   3. If not found in any enclosing function, return -1 (fall through to global).
+ */
+static int resolve_upvalue(Compiler *c, const char *name) {
+    if (c->enclosing == NULL)
+        return -1;
+
+    /* Try resolving as a local in the immediately enclosing function. */
+    int local = resolve_local(c->enclosing, name);
+    if (local >= 0) {
+        return add_upvalue(c, (uint8_t)local, true);
+    }
+
+    /* Recursively try the enclosing function's upvalues. */
+    int upvalue = resolve_upvalue(c->enclosing, name);
+    if (upvalue >= 0) {
+        return add_upvalue(c, (uint8_t)upvalue, false);
+    }
+
+    return -1;
+}
+
 /* Compile an identifier (variable read).
  * In function context, check locals first (emit OP_GET_LOCAL).
+ * Try upvalue resolution next (emit OP_GET_UPVALUE).
  * Fall back to OP_GET_GLOBAL for globals or script context. */
 static void compile_ident(Compiler *c, const AstNode *node) {
     /* In function context, try resolving as a local variable. */
@@ -253,6 +321,13 @@ static void compile_ident(Compiler *c, const AstNode *node) {
         int slot = resolve_local(c, node->value);
         if (slot >= 0) {
             emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, (int)node->line);
+            return;
+        }
+
+        /* Try resolving as an upvalue (captured from enclosing scope). */
+        int upvalue = resolve_upvalue(c, node->value);
+        if (upvalue >= 0) {
+            emit_bytes(c, OP_GET_UPVALUE, (uint8_t)upvalue, (int)node->line);
             return;
         }
     }
@@ -398,6 +473,13 @@ static void compile_assign(Compiler *c, const AstNode *node) {
             emit_bytes(c, OP_SET_LOCAL, (uint8_t)slot, (int)node->line);
             return;
         }
+
+        /* Try resolving as an upvalue (captured from enclosing scope). */
+        int upvalue = resolve_upvalue(c, node->value);
+        if (upvalue >= 0) {
+            emit_bytes(c, OP_SET_UPVALUE, (uint8_t)upvalue, (int)node->line);
+            return;
+        }
     }
 
     /* Fall back to global variable assignment. */
@@ -444,11 +526,18 @@ static void compile_call(Compiler *c, const AstNode *node) {
     }
     int line = (int)node->line;
 
-    /* Push the callee: in function context, try local resolution first. */
+    /* Push the callee: in function context, try local then upvalue resolution. */
     if (c->context == COMPILE_FUNCTION) {
         int slot = resolve_local(c, node->value);
         if (slot >= 0) {
             emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+            goto args;
+        }
+
+        /* Try resolving callee as an upvalue (captured from enclosing scope). */
+        int upvalue = resolve_upvalue(c, node->value);
+        if (upvalue >= 0) {
+            emit_bytes(c, OP_GET_UPVALUE, (uint8_t)upvalue, line);
             goto args;
         }
     }
@@ -736,7 +825,9 @@ static void compile_function(Compiler *c, const AstNode *node) {
     chunk_init(body_chunk);
 
     /* Set up a temporary Compiler for the function body.
-     * Function context enables local variable resolution. */
+     * Function context enables local variable resolution.
+     * The enclosing pointer links to the parent compiler for
+     * upvalue resolution (walking the chain to find captured locals). */
     CompileError body_err;
     Compiler body_compiler = {
         .chunk = body_chunk,
@@ -746,6 +837,8 @@ static void compile_function(Compiler *c, const AstNode *node) {
         .context = COMPILE_FUNCTION,
         .local_count = 0,
         .scope_depth = 1, /* Function body starts at scope depth 1. */
+        .enclosing = c,
+        .upvalue_count = 0,
     };
 
     /* Reserve slot 0 for the callee (the function value itself).
@@ -800,6 +893,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
         fn->name = NULL;
     }
     fn->arity = (int)node->param_count;
+    fn->upvalue_count = body_compiler.upvalue_count;
     fn->chunk = body_chunk;
     fn->native = NULL;
 
@@ -830,22 +924,56 @@ static void compile_function(Compiler *c, const AstNode *node) {
         }
     }
 
-    /* Add the function as a constant in the enclosing chunk. */
+    /* Add the function as a constant in the enclosing chunk and emit
+     * OP_CLOSURE to wrap it in a closure at runtime. The constant pool
+     * stores the raw ObjFunction; the VM's OP_CLOSURE handler creates
+     * an ObjClosure from it. */
     Value fn_val = make_function(fn);
-    emit_constant(c, fn_val, line);
+    int fn_idx = chunk_find_or_add_constant(c->chunk, fn_val);
+    if (fn_idx < 0) {
+        compiler_error(c, "too many constants in one chunk");
+        return;
+    }
+    emit_bytes(c, OP_CLOSURE, (uint8_t)fn_idx, line);
+    /* Emit upvalue descriptor pairs: each captured variable adds a
+     * (is_local, index) byte pair that the VM reads to build the closure. */
+    for (int i = 0; i < body_compiler.upvalue_count; i++) {
+        emit_byte(c, body_compiler.upvalues[i].is_local ? 1 : 0, line);
+        emit_byte(c, body_compiler.upvalues[i].index, line);
+    }
 
-    /* For named functions, emit OP_DEFINE_GLOBAL to bind the name globally.
-     * For anonymous functions, just leave the value on the stack. */
+    /* For named functions, bind the name. In function context, register
+     * as a local variable (lexical scoping). In script context, define
+     * as a global. */
     if (node->value) {
-        char *name = compiler_strdup(c, node->value);
-        if (!name)
-            return;
-        int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
-        if (name_idx < 0) {
-            compiler_error(c, "too many constants");
-            return;
+        if (c->context == COMPILE_FUNCTION) {
+            /* Same pattern as compile_decl in COMPILE_FUNCTION:
+             * the OP_CLOSURE already placed the closure value at
+             * the local_count position on the stack. Register the
+             * local, then push a clone as the expression result. */
+            int slot = c->local_count;
+            if (c->local_count >= LOCALS_MAX) {
+                compiler_error(c, "too many local variables");
+                return;
+            }
+            c->locals[c->local_count++] = (Local){
+                .name = node->value,
+                .length = (int)strlen(node->value),
+                .depth = c->scope_depth,
+            };
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+        } else {
+            /* Script context: global variable binding. */
+            char *name = compiler_strdup(c, node->value);
+            if (!name)
+                return;
+            int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
+            if (name_idx < 0) {
+                compiler_error(c, "too many constants");
+                return;
+            }
+            emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
         }
-        emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
     }
 }
 
@@ -930,6 +1058,8 @@ Chunk *compile(const AstNode *node, CompileError *err) {
         .context = COMPILE_SCRIPT,
         .local_count = 0,
         .scope_depth = 0, /* Script context starts at scope depth 0. */
+        .enclosing = NULL,
+        .upvalue_count = 0,
     };
 
     compile_node(&c, node);

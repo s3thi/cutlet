@@ -238,4 +238,22 @@ Run `make test && make check` for final verification.
 6. Do not remove or modify existing tests without user confirmation.
 
 ---
+
+## Progress
+
+- [x] Step 1: Add upvalue resolution to compiler — added `enclosing` pointer, `CompilerUpvalue` array, `resolve_upvalue`/`add_upvalue`, updated `compile_ident`/`compile_assign`/`compile_call` for upvalue resolution, emit upvalue descriptors after `OP_CLOSURE`, 5 new compiler tests
+- [x] Step 2: Implement OP_GET_UPVALUE and OP_SET_UPVALUE in VM — added dispatch handlers for reading/writing captured variables through upvalue indirection, 3 new VM tests (read, mutate, shared upvalue)
+- [x] Step 3: Close upvalues on function return — added close_upvalues() to VM, called from OP_RETURN and OP_CLOSE_UPVALUE handler, 3 new tests (outlive creator, counter pattern, shared closed upvalue)
+- [x] Step 4: Integration tests and example program — 16 new end-to-end VM tests (counter, adder factory, shared capture, deep nesting, parameter capture, recursion, control flow, error cases), new `examples/closures.cutlet` with expected output
+
+## Summary
+
+Closures with upvalue capture are fully implemented. Files touched across all steps:
+- `src/compiler.c` — upvalue resolution, `CompilerUpvalue` tracking, `enclosing` pointer, upvalue descriptor emission
+- `src/vm.c` — `OP_GET_UPVALUE`, `OP_SET_UPVALUE`, `OP_CLOSE_UPVALUE` dispatch, `close_upvalues()` in `OP_RETURN`
+- `tests/test_compiler.c` — 5 compiler tests for upvalue resolution
+- `tests/test_vm.c` — 22 VM tests (3 upvalue read/write, 3 close upvalue, 16 integration)
+- `examples/closures.cutlet` + `examples/closures.expected` — example program
+
+---
 End of plan.
