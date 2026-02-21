@@ -404,6 +404,150 @@ TEST(test_disassemble_recursive_anonymous_function) {
 }
 
 /* ============================================================
+ * New closure opcode tests (Step 2)
+ * ============================================================ */
+
+TEST(test_opcode_names_closure_opcodes) {
+    /* Verify opcode_name returns correct strings for the 4 new closure opcodes. */
+    ASSERT(strcmp(opcode_name(OP_CLOSURE), "OP_CLOSURE") == 0, "OP_CLOSURE name");
+    ASSERT(strcmp(opcode_name(OP_GET_UPVALUE), "OP_GET_UPVALUE") == 0, "OP_GET_UPVALUE name");
+    ASSERT(strcmp(opcode_name(OP_SET_UPVALUE), "OP_SET_UPVALUE") == 0, "OP_SET_UPVALUE name");
+    ASSERT(strcmp(opcode_name(OP_CLOSE_UPVALUE), "OP_CLOSE_UPVALUE") == 0, "OP_CLOSE_UPVALUE name");
+    PASS();
+}
+
+TEST(test_disassemble_get_upvalue) {
+    /* OP_GET_UPVALUE has a 1-byte upvalue index operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_GET_UPVALUE, 1);
+    chunk_write(&c, 3, 1); /* upvalue index 3 */
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_GET_UPVALUE") != NULL, "should contain OP_GET_UPVALUE");
+    ASSERT(strstr(s, "3") != NULL, "should contain upvalue index 3");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_set_upvalue) {
+    /* OP_SET_UPVALUE has a 1-byte upvalue index operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_SET_UPVALUE, 1);
+    chunk_write(&c, 5, 1); /* upvalue index 5 */
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_SET_UPVALUE") != NULL, "should contain OP_SET_UPVALUE");
+    ASSERT(strstr(s, "5") != NULL, "should contain upvalue index 5");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_close_upvalue) {
+    /* OP_CLOSE_UPVALUE is a simple instruction with no operand. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_CLOSE_UPVALUE, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSE_UPVALUE") != NULL, "should contain OP_CLOSE_UPVALUE");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+TEST(test_disassemble_closure_no_upvalues) {
+    /*
+     * OP_CLOSURE with 0 upvalues: [OP_CLOSURE] [const_idx]
+     * The function in the constant pool has upvalue_count == 0,
+     * so no upvalue descriptor pairs follow.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    /* Build a minimal inner function. */
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    chunk_write(inner, OP_NOTHING, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("my_closure");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CLOSURE, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    /* No upvalue descriptors (upvalue_count == 0) */
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSURE") != NULL, "should contain OP_CLOSURE");
+    ASSERT(strstr(s, "my_closure") != NULL, "should show function name");
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
+TEST(test_disassemble_closure_with_upvalues) {
+    /*
+     * OP_CLOSURE with 2 upvalues:
+     * [OP_CLOSURE] [const_idx] [is_local=1, index=0] [is_local=0, index=1]
+     * The disassembler should show each upvalue descriptor.
+     */
+    Chunk outer;
+    chunk_init(&outer);
+
+    Chunk *inner = malloc(sizeof(Chunk));
+    chunk_init(inner);
+    chunk_write(inner, OP_NOTHING, 1);
+    chunk_write(inner, OP_RETURN, 1);
+
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("capturing");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = inner;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 2;
+
+    int fn_idx = chunk_add_constant(&outer, make_function(fn));
+    chunk_write(&outer, OP_CLOSURE, 1);
+    chunk_write(&outer, (uint8_t)fn_idx, 1);
+    /* Upvalue descriptor 0: is_local=1, index=0 */
+    chunk_write(&outer, 1, 1);
+    chunk_write(&outer, 0, 1);
+    /* Upvalue descriptor 1: is_local=0, index=1 */
+    chunk_write(&outer, 0, 1);
+    chunk_write(&outer, 1, 1);
+    chunk_write(&outer, OP_RETURN, 1);
+
+    char *s = chunk_disassemble_to_string(&outer, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_CLOSURE") != NULL, "should contain OP_CLOSURE");
+    ASSERT(strstr(s, "capturing") != NULL, "should show function name");
+    /* Should show upvalue descriptors: local and upvalue indicators */
+    ASSERT(strstr(s, "local") != NULL, "should show 'local' for is_local=1 upvalue");
+    ASSERT(strstr(s, "upvalue") != NULL, "should show 'upvalue' for is_local=0 upvalue");
+    free(s);
+    chunk_free(&outer);
+    PASS();
+}
+
+/* ============================================================
  * ObjUpvalue and ObjClosure tests
  * ============================================================ */
 
@@ -604,6 +748,14 @@ int main(void) {
     printf("\nRecursive function disassembly:\n");
     RUN_TEST(test_disassemble_recursive_function);
     RUN_TEST(test_disassemble_recursive_anonymous_function);
+
+    printf("\nClosure opcodes:\n");
+    RUN_TEST(test_opcode_names_closure_opcodes);
+    RUN_TEST(test_disassemble_get_upvalue);
+    RUN_TEST(test_disassemble_set_upvalue);
+    RUN_TEST(test_disassemble_close_upvalue);
+    RUN_TEST(test_disassemble_closure_no_upvalues);
+    RUN_TEST(test_disassemble_closure_with_upvalues);
 
     printf("\nObjUpvalue and ObjClosure:\n");
     RUN_TEST(test_obj_upvalue_new);

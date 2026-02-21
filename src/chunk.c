@@ -159,6 +159,14 @@ const char *opcode_name(OpCode op) {
         return "OP_SET_LOCAL";
     case OP_CALL:
         return "OP_CALL";
+    case OP_CLOSURE:
+        return "OP_CLOSURE";
+    case OP_GET_UPVALUE:
+        return "OP_GET_UPVALUE";
+    case OP_SET_UPVALUE:
+        return "OP_SET_UPVALUE";
+    case OP_CLOSE_UPVALUE:
+        return "OP_CLOSE_UPVALUE";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -266,6 +274,7 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_GREATER_EQUAL:
     case OP_NOT:
     case OP_POP:
+    case OP_CLOSE_UPVALUE:
     case OP_RETURN:
         dynbuf_printf(b, "%s\n", opcode_name((OpCode)instruction));
         return offset + 1;
@@ -319,6 +328,44 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         uint8_t argc = chunk->code[offset + 1];
         dynbuf_printf(b, "%-20s argc=%d\n", opcode_name((OpCode)instruction), argc);
         return offset + 2;
+    }
+
+    /* OP_GET_UPVALUE / OP_SET_UPVALUE: 1-byte upvalue index */
+    case OP_GET_UPVALUE:
+    case OP_SET_UPVALUE: {
+        uint8_t uv_idx = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s %4d\n", opcode_name((OpCode)instruction), uv_idx);
+        return offset + 2;
+    }
+
+    /* OP_CLOSURE: 1-byte constant index, then N x (is_local, index) pairs.
+     * N is determined by the ObjFunction's upvalue_count in the constant pool. */
+    case OP_CLOSURE: {
+        uint8_t const_idx = chunk->code[offset + 1];
+        offset += 2;
+        dynbuf_printf(b, "%-20s %4d '", opcode_name(OP_CLOSURE), const_idx);
+        /* Show the function name from the constant pool. */
+        if (const_idx < chunk->const_count) {
+            char *s = value_format(&chunk->constants[const_idx]);
+            if (s) {
+                dynbuf_printf(b, "%s", s);
+                free(s);
+            }
+        }
+        dynbuf_printf(b, "'\n");
+        /* Read upvalue descriptor pairs from the ObjFunction in the constant pool. */
+        int uv_count = 0;
+        if (const_idx < chunk->const_count && chunk->constants[const_idx].type == VAL_FUNCTION &&
+            chunk->constants[const_idx].function != NULL) {
+            uv_count = chunk->constants[const_idx].function->upvalue_count;
+        }
+        for (int i = 0; i < uv_count; i++) {
+            uint8_t is_local = chunk->code[offset];
+            uint8_t index = chunk->code[offset + 1];
+            dynbuf_printf(b, "%04zu    |   %s %d\n", offset, is_local ? "local" : "upvalue", index);
+            offset += 2;
+        }
+        return offset;
     }
 
     default:

@@ -11,6 +11,9 @@
  *   a 1-byte constant index operand.
  * - OP_CALL has a 1-byte argc operand (callee is on the stack).
  * - OP_JUMP, OP_JUMP_IF_FALSE, OP_JUMP_IF_TRUE have a 2-byte offset.
+ * - OP_CLOSURE has a 1-byte constant index, then N x (is_local, index)
+ *   pairs where N is the function's upvalue_count.
+ * - OP_GET_UPVALUE, OP_SET_UPVALUE have a 1-byte upvalue index.
  */
 
 #ifndef CUTLET_CHUNK_H
@@ -71,6 +74,14 @@ typedef enum {
 
     /* Function calls (stack-based: callee is on the stack) */
     OP_CALL, /* Operand: 1-byte argc. Callee at stack_top[-argc-1]. */
+
+    /* Closure opcodes */
+    OP_CLOSURE,       /* Create closure from constant pool ObjFunction.
+                       * Operand: 1-byte constant index, then N x (1-byte is_local, 1-byte index)
+                       * where N = fn->upvalue_count. Push 1 closure. */
+    OP_GET_UPVALUE,   /* Read captured variable. Operand: 1-byte upvalue index. Push 1. */
+    OP_SET_UPVALUE,   /* Write captured variable. Operand: 1-byte upvalue index. Peek TOS. */
+    OP_CLOSE_UPVALUE, /* Close the topmost open upvalue at TOS slot. Pop 1. */
 
     /* End of program */
     OP_RETURN, /* End execution. TOS is the result. */
