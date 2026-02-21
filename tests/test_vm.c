@@ -1734,6 +1734,66 @@ TEST(test_nested_fn_not_visible_globally) {
 }
 
 /* ============================================================
+ * Closure infrastructure (Step 5)
+ * ============================================================ */
+
+/* say(fn() is 42 end) should display "<fn>" — closure passed to native fn */
+TEST(test_say_displays_closure) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("say(fn() is 42 end)", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "say(fn()) should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "<fn>\n", "say(fn()) prints '<fn>\\n'", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say("hello") still works — native fn interop with closure infrastructure */
+TEST(test_say_hello_with_closures) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+
+    Value v = run_input("say(\"hello\")", &ctx);
+    ASSERT_CLEANUP(v.type != VAL_ERROR, "say(hello) should not error", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "hello\n", "say(hello) prints 'hello\\n'", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* Function returning a closure: the closure can be called successfully */
+TEST(test_closure_as_return_value) {
+    assert_vm_number("fn maker() is\n"
+                     "  fn inner(x) is x * 2 end\n"
+                     "  inner\n"
+                     "end\n"
+                     "my f = maker()\n"
+                     "f(5)",
+                     10.0, "closure returned from function is callable");
+}
+
+/* Two closures from the same definition are not equal (identity-based) */
+TEST(test_closure_equality_different_instances) {
+    assert_vm_bool("fn maker2() is fn() is 1 end end\n"
+                   "my a = maker2()\n"
+                   "my b = maker2()\n"
+                   "a == b",
+                   false, "two closure instances are not equal");
+}
+
+/* Same closure variable compared to itself is equal */
+TEST(test_closure_equality_same_instance) {
+    assert_vm_bool("fn maker3() is fn() is 1 end end\n"
+                   "my a = maker3()\n"
+                   "a == a",
+                   true, "same closure compared to itself is equal");
+}
+
+/* ============================================================
  * Decimal number literal tests
  * ============================================================ */
 
@@ -2264,6 +2324,13 @@ int main(void) {
     printf("\nNested named functions (lexical scoping):\n");
     RUN_TEST(test_nested_fn_call_works);
     RUN_TEST(test_nested_fn_not_visible_globally);
+
+    printf("\nClosure infrastructure:\n");
+    RUN_TEST(test_say_displays_closure);
+    RUN_TEST(test_say_hello_with_closures);
+    RUN_TEST(test_closure_as_return_value);
+    RUN_TEST(test_closure_equality_different_instances);
+    RUN_TEST(test_closure_equality_same_instance);
 
     printf("\nDecimal number literals:\n");
     RUN_TEST(test_decimal_literal_half);

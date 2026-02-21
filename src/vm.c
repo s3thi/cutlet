@@ -259,6 +259,49 @@ static const char *value_type_name(ValueType type) {
     }
 }
 
+/* ---- Upvalue capture helper ----
+ *
+ * Find or create an ObjUpvalue for the given stack slot.
+ * Walks the VM's open-upvalue linked list (sorted by slot address,
+ * descending) looking for an existing upvalue pointing to `slot`.
+ * If found, increments its refcount and returns it.
+ * If not found, creates a new ObjUpvalue and inserts it into the
+ * list at the correct position (maintaining descending order).
+ * Returns NULL on allocation failure.
+ */
+static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
+    ObjUpvalue *prev = NULL;
+    ObjUpvalue *curr = vm->open_upvalues;
+
+    /* Walk the list until we find an upvalue at or below our slot.
+     * The list is sorted by slot address descending (higher addresses first). */
+    while (curr != NULL && curr->location > slot) {
+        prev = curr;
+        curr = curr->next;
+    }
+
+    /* If we found an existing upvalue for this exact slot, reuse it. */
+    if (curr != NULL && curr->location == slot) {
+        curr->refcount++;
+        return curr;
+    }
+
+    /* Create a new upvalue for this slot. */
+    ObjUpvalue *uv = obj_upvalue_new(slot);
+    if (!uv)
+        return NULL;
+
+    /* Insert into the linked list between prev and curr. */
+    uv->next = curr;
+    if (prev == NULL) {
+        vm->open_upvalues = uv;
+    } else {
+        prev->next = uv;
+    }
+
+    return uv;
+}
+
 /* ---- Main dispatch loop ---- */
 
 Value vm_execute(Chunk *chunk, EvalContext *ctx) {
@@ -883,14 +926,32 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (!cl) {
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
-            /* Read upvalue descriptors (0 for now). When upvalue capture
-             * is implemented, this loop will populate cl->upvalues[]. */
+            /* Read upvalue descriptors and populate the closure's upvalue array.
+             * Each descriptor is a pair of (is_local, index) bytes:
+             * - is_local=1: capture a local from the enclosing frame's stack slot.
+             * - is_local=0: copy an upvalue from the enclosing closure's upvalue array.
+             * Currently upvalue_count is always 0 (capture emitted in closures-capture). */
             for (int i = 0; i < fn->upvalue_count; i++) {
                 uint8_t is_local = read_byte(frame);
                 uint8_t index = read_byte(frame);
-                (void)is_local;
-                (void)index;
-                /* TODO: capture_upvalue implementation in closures-capture step */
+                if (is_local) {
+                    cl->upvalues[i] = capture_upvalue(&vm, &frame->slots[index]);
+                } else {
+                    /* Copy an upvalue from the enclosing closure.
+                     * The enclosing closure must have upvalues for this path. */
+                    if (frame->closure->upvalues != NULL) {
+                        cl->upvalues[i] = frame->closure->upvalues[index];
+                        if (cl->upvalues[i])
+                            cl->upvalues[i]->refcount++;
+                    } else {
+                        cl->upvalues[i] = NULL;
+                    }
+                }
+                if (!cl->upvalues[i]) {
+                    /* Free the partially-constructed closure on failure. */
+                    value_free(&(Value){.type = VAL_CLOSURE, .closure = cl});
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
             }
             if (!vm_push(&vm, make_closure(cl))) {
                 return vm_runtime_error(&vm, "stack overflow");
