@@ -265,6 +265,7 @@ At this point, `OP_CLOSURE` works but no functions actually capture anything
 
 - [x] Step 1: Add ObjUpvalue, ObjClosure types and VAL_CLOSURE — added types, constructors, refcounting, value_format/clone/free/truthy support, and 7 unit tests
 - [x] Step 2: Add new opcodes and update disassembler — added OP_CLOSURE, OP_GET_UPVALUE, OP_SET_UPVALUE, OP_CLOSE_UPVALUE to enum, opcode_name(), and disassembler with 6 unit tests
+- [x] Step 3: Change CallFrame to use ObjClosure and refactor VM — CallFrame uses ObjClosure *closure, VM has open_upvalues list, OP_CALL dispatches on VAL_CLOSURE vs VAL_FUNCTION, script wrapped in stack-allocated ObjClosure
 
 ---
 End of plan.

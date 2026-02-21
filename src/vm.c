@@ -89,7 +89,7 @@ static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
     int line = 0;
     if (vm->frame_count > 0) {
         CallFrame *frame = &vm->frames[vm->frame_count - 1];
-        Chunk *chunk = frame->function->chunk;
+        Chunk *chunk = frame->closure->function->chunk;
         if (frame->ip > chunk->code) {
             size_t offset = (size_t)(frame->ip - chunk->code - 1);
             if (offset < chunk->count) {
@@ -128,6 +128,9 @@ static bool values_equal(const Value *a, const Value *b) {
     case VAL_FUNCTION:
         /* Identity-based: only equal if pointing to the same ObjFunction. */
         return a->function == b->function;
+    case VAL_CLOSURE:
+        /* Identity-based: only equal if pointing to the same ObjClosure. */
+        return a->closure == b->closure;
     default:
         return false;
     }
@@ -247,6 +250,7 @@ static const char *value_type_name(ValueType type) {
     case VAL_NOTHING:
         return "nothing";
     case VAL_FUNCTION:
+    case VAL_CLOSURE:
         return "function";
     case VAL_ERROR:
         return "error";
@@ -265,22 +269,35 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
     VM vm;
     vm.ctx = ctx;
+    vm.open_upvalues = NULL;
     vm_reset_stack(&vm);
 
     /* Create a "script" ObjFunction that wraps the top-level chunk.
      * This lives on the C stack — it's only used for the duration of
      * this vm_execute() call. The chunk pointer is borrowed (not owned). */
     ObjFunction script_fn = {
+        .refcount = 1,
         .name = NULL,
         .arity = 0,
+        .upvalue_count = 0,
         .params = NULL,
         .chunk = chunk,
         .native = NULL,
     };
 
+    /* Wrap the script function in a stack-allocated ObjClosure with
+     * 0 upvalues. No heap allocation needed — this closure lives on
+     * the C stack alongside script_fn for the duration of vm_execute(). */
+    ObjClosure script_closure = {
+        .refcount = 1,
+        .function = &script_fn,
+        .upvalues = NULL,
+        .upvalue_count = 0,
+    };
+
     /* Push frame 0: the top-level script. */
     CallFrame *frame = &vm.frames[vm.frame_count++];
-    frame->function = &script_fn;
+    frame->closure = &script_closure;
     frame->ip = chunk->code;
     frame->slots = vm.stack;
 
@@ -293,7 +310,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         case OP_CONSTANT: {
             uint8_t idx = read_byte(frame);
             Value v;
-            if (!value_clone(&v, &frame->function->chunk->constants[idx])) {
+            if (!value_clone(&v, &frame->closure->function->chunk->constants[idx])) {
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
             if (!vm_push(&vm, v)) {
@@ -653,7 +670,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_DEFINE_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — the value stays as the expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -668,7 +685,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_GET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             Value val = {0};
             RuntimeVarStatus status = runtime_var_get(name, &val);
             if (status == RUNTIME_VAR_NOT_FOUND) {
@@ -685,7 +702,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_SET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — value stays as expression result). */
             Value tos;
             if (!vm_peek(&vm, 0, &tos)) {
@@ -792,63 +809,92 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 return vm_runtime_error(&vm, "stack underflow");
             }
 
-            /* Callee must be a function. Error paths let vm_runtime_error
-             * call vm_free_stack to clean up the stack (args + callee). */
-            if (callee.type != VAL_FUNCTION) {
-                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
-            }
+            if (callee.type == VAL_FUNCTION) {
+                ObjFunction *fn = callee.function;
 
-            ObjFunction *fn = callee.function;
-
-            /* Check arity. fn->name is still valid because the callee
-             * Value is on the stack; vm_runtime_error formats the message
-             * BEFORE vm_free_stack frees it. */
-            if (argc != fn->arity) {
-                return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
-                                        fn->name ? fn->name : "<fn>", fn->arity,
-                                        fn->arity == 1 ? "" : "s", argc);
-            }
-
-            if (fn->native) {
-                /* Native function: pop args into temp array, call, push result. */
-                Value args[256];
-                for (int i = argc - 1; i >= 0; i--) {
-                    vm_pop(&vm, &args[i]);
+                /* Check arity. fn->name is still valid because the callee
+                 * Value is on the stack; vm_runtime_error formats the message
+                 * BEFORE vm_free_stack frees it. */
+                if (argc != fn->arity) {
+                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                                            fn->name ? fn->name : "<fn>", fn->arity,
+                                            fn->arity == 1 ? "" : "s", argc);
                 }
-                /* Pop the callee itself. */
-                Value callee_val;
-                vm_pop(&vm, &callee_val);
 
-                /* Call the native. fn->native is read before callee_val
-                 * is freed, so the pointer is still valid. */
-                Value result = fn->native(argc, args, vm.ctx);
+                if (fn->native) {
+                    /* Native function: pop args into temp array, call, push result. */
+                    Value args[256];
+                    for (int i = argc - 1; i >= 0; i--) {
+                        vm_pop(&vm, &args[i]);
+                    }
+                    /* Pop the callee itself. */
+                    Value callee_val;
+                    vm_pop(&vm, &callee_val);
 
-                /* Free the argument values and the callee. */
-                for (int i = 0; i < argc; i++) {
-                    value_free(&args[i]);
-                }
-                value_free(&callee_val);
+                    /* Call the native. fn->native is read before callee_val
+                     * is freed, so the pointer is still valid. */
+                    Value result = fn->native(argc, args, vm.ctx);
 
-                if (result.type == VAL_ERROR) {
-                    vm_free_stack(&vm);
-                    return result;
+                    /* Free the argument values and the callee. */
+                    for (int i = 0; i < argc; i++) {
+                        value_free(&args[i]);
+                    }
+                    value_free(&callee_val);
+
+                    if (result.type == VAL_ERROR) {
+                        vm_free_stack(&vm);
+                        return result;
+                    }
+                    if (!vm_push(&vm, result)) {
+                        return vm_runtime_error(&vm, "stack overflow");
+                    }
+                } else {
+                    /* User-defined function via VAL_FUNCTION: wrap in a
+                     * closure before pushing the call frame. This is a
+                     * transitional path — once the compiler emits OP_CLOSURE
+                     * (Step 4/5), user functions will arrive as VAL_CLOSURE
+                     * and this branch won't be reached for them. */
+                    ObjClosure *cl = obj_closure_new(fn, 0);
+                    if (!cl) {
+                        return vm_runtime_error(&vm, "memory allocation failed");
+                    }
+
+                    /* Replace the callee stack slot with the closure.
+                     * value_free on the VAL_FUNCTION decrements fn->refcount,
+                     * but obj_closure_new already incremented it. */
+                    Value *callee_slot = vm.stack_top - argc - 1;
+                    value_free(callee_slot);
+                    *callee_slot = make_closure(cl);
+
+                    if (vm.frame_count >= FRAMES_MAX) {
+                        return vm_runtime_error(&vm, "stack overflow");
+                    }
+                    CallFrame *new_frame = &vm.frames[vm.frame_count++];
+                    new_frame->closure = cl;
+                    new_frame->ip = fn->chunk->code;
+                    new_frame->slots = vm.stack_top - argc - 1;
                 }
-                if (!vm_push(&vm, result)) {
-                    return vm_runtime_error(&vm, "stack overflow");
+            } else if (callee.type == VAL_CLOSURE) {
+                /* User-defined function via closure. The closure is
+                 * already on the stack in the callee slot. */
+                ObjClosure *cl = callee.closure;
+                ObjFunction *fn = cl->function;
+
+                if (argc != fn->arity) {
+                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                                            fn->name ? fn->name : "<fn>", fn->arity,
+                                            fn->arity == 1 ? "" : "s", argc);
                 }
-            } else {
-                /* User-defined function: push a new call frame.
-                 * The callee value sits at stack_top[-argc-1]; arguments
-                 * are above it. The new frame's slots point to the callee
-                 * slot (slot 0 = the function itself, not used yet but
-                 * reserves the position for future local variable support). */
+
                 if (vm.frame_count >= FRAMES_MAX) {
                     return vm_runtime_error(&vm, "stack overflow");
                 }
                 CallFrame *new_frame = &vm.frames[vm.frame_count++];
-                new_frame->function = fn;
+                new_frame->closure = cl;
                 new_frame->ip = fn->chunk->code;
                 new_frame->slots = vm.stack_top - argc - 1;
+            } else {
+                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
             }
             break;
         }

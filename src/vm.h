@@ -25,15 +25,17 @@
 /*
  * CallFrame - tracks one in-flight function invocation.
  *
- * function: the ObjFunction being executed (not owned by the frame).
- * ip:       instruction pointer into function->chunk->code.
- * slots:    pointer into the VM value stack marking the base of
- *           this frame's stack window (callee slot 0).
+ * closure: the ObjClosure being executed (not owned by the frame).
+ *          For the top-level script, this points to a stack-allocated
+ *          ObjClosure with 0 upvalues.
+ * ip:      instruction pointer into closure->function->chunk->code.
+ * slots:   pointer into the VM value stack marking the base of
+ *          this frame's stack window (callee slot 0).
  */
 typedef struct {
-    ObjFunction *function; /* The function being executed. */
-    uint8_t *ip;           /* Instruction pointer into function's chunk. */
-    Value *slots;          /* Pointer into VM stack: base of this frame's window. */
+    ObjClosure *closure; /* The closure being executed. */
+    uint8_t *ip;         /* Instruction pointer into function's chunk. */
+    Value *slots;        /* Pointer into VM stack: base of this frame's window. */
 } CallFrame;
 
 typedef struct {
@@ -42,6 +44,7 @@ typedef struct {
     Value stack[VM_STACK_MAX];    /* Value stack. */
     Value *stack_top;             /* Points one past the top of stack. */
     EvalContext *ctx;             /* Write callback for say() (not owned). */
+    ObjUpvalue *open_upvalues;    /* Linked list of open upvalues (sorted by slot address). */
 } VM;
 
 /*
