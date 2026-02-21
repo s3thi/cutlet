@@ -1834,6 +1834,53 @@ TEST(test_upvalue_shared_between_closures) {
 }
 
 /* ============================================================
+ * Closing upvalues on function return (Step 3)
+ * ============================================================ */
+
+/* Closure that outlives its enclosing function still works
+ * because the upvalue is closed (value moved from stack to heap). */
+TEST(test_close_upvalue_outlive_creator) {
+    assert_vm_number("fn make() is\n"
+                     "  my x = 42\n"
+                     "  fn get() is x end\n"
+                     "end\n"
+                     "my g = make()\n"
+                     "g()",
+                     42.0, "closure outlives creator via closed upvalue");
+}
+
+/* Counter pattern: closed upvalue retains state across calls. */
+TEST(test_close_upvalue_counter) {
+    assert_vm_number("fn make() is\n"
+                     "  my x = 0\n"
+                     "  fn inc() is\n"
+                     "    x = x + 1\n"
+                     "    x\n"
+                     "  end\n"
+                     "end\n"
+                     "my f = make()\n"
+                     "f()\n"
+                     "f()",
+                     2.0, "counter pattern with closed upvalue");
+}
+
+/* Two closures from the same factory share a closed upvalue:
+ * one writes, the other reads, both see the same variable. */
+TEST(test_close_upvalue_shared) {
+    assert_vm_number("my setter = nothing\n"
+                     "fn make() is\n"
+                     "  my x = 0\n"
+                     "  fn set(v) is x = v end\n"
+                     "  setter = set\n"
+                     "  fn() is x end\n"
+                     "end\n"
+                     "my getter = make()\n"
+                     "setter(42)\n"
+                     "getter()",
+                     42.0, "two closures share closed upvalue");
+}
+
+/* ============================================================
  * Decimal number literal tests
  * ============================================================ */
 
@@ -2376,6 +2423,11 @@ int main(void) {
     RUN_TEST(test_upvalue_read_outer);
     RUN_TEST(test_upvalue_mutation_visible);
     RUN_TEST(test_upvalue_shared_between_closures);
+
+    printf("\nClosing upvalues on function return:\n");
+    RUN_TEST(test_close_upvalue_outlive_creator);
+    RUN_TEST(test_close_upvalue_counter);
+    RUN_TEST(test_close_upvalue_shared);
 
     printf("\nDecimal number literals:\n");
     RUN_TEST(test_decimal_literal_half);

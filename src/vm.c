@@ -302,6 +302,33 @@ static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
     return uv;
 }
 
+/* ---- Close upvalues ----
+ *
+ * Close all open upvalues whose stack location is at or above `last`.
+ * "Closing" an upvalue means copying the value from its stack slot into
+ * the upvalue's `closed` field, then redirecting `location` to point to
+ * `&closed` instead of the (soon-to-be-reclaimed) stack slot.
+ *
+ * Called from OP_RETURN (to close all upvalues in the returning frame's
+ * stack window) and OP_CLOSE_UPVALUE (to close a single local before
+ * popping it).
+ *
+ * The open_upvalues list is sorted by slot address descending, so we
+ * walk from the head and stop once we reach a location below `last`.
+ */
+static void close_upvalues(VM *vm, Value *last) {
+    while (vm->open_upvalues != NULL && vm->open_upvalues->location >= last) {
+        ObjUpvalue *uv = vm->open_upvalues;
+        /* Copy the stack value into the upvalue's closed field. */
+        uv->closed = *uv->location;
+        /* Redirect location to the upvalue's own closed field. */
+        uv->location = &uv->closed;
+        /* Remove from the open list. */
+        vm->open_upvalues = uv->next;
+        uv->next = NULL;
+    }
+}
+
 /* ---- Main dispatch loop ---- */
 
 Value vm_execute(Chunk *chunk, EvalContext *ctx) {
@@ -884,6 +911,20 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_CLOSE_UPVALUE: {
+            /* Close the upvalue pointing at TOS, then pop and free the
+             * value (same effect as OP_POP but closes first). Used by
+             * block scoping to close captured locals before they leave
+             * scope. */
+            close_upvalues(&vm, vm.stack_top - 1);
+            Value v;
+            if (!vm_pop(&vm, &v)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            value_free(&v);
+            break;
+        }
+
         case OP_CALL: {
             uint8_t argc = read_byte(frame);
 
@@ -1021,6 +1062,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 vm_free_stack(&vm);
                 return result; // NOLINT(clang-analyzer-core.StackAddressEscape)
             }
+
+            /* Close any open upvalues pointing into this frame's stack
+             * window before we pop those slots. This moves captured
+             * values from the stack into the upvalue's closed field,
+             * so closures that outlive this call frame still work. */
+            close_upvalues(&vm, frame->slots);
 
             /* Returning from a user function: discard the called
              * function's stack window (callee + args + locals), then
