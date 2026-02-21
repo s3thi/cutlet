@@ -260,4 +260,10 @@ At this point, `OP_CLOSURE` works but no functions actually capture anything
 6. Do not remove or modify existing tests without user confirmation.
 
 ---
+
+## Progress
+
+- [x] Step 1: Add ObjUpvalue, ObjClosure types and VAL_CLOSURE — added types, constructors, refcounting, value_format/clone/free/truthy support, and 7 unit tests
+
+---
 End of plan.
