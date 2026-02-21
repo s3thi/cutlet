@@ -830,22 +830,53 @@ static void compile_function(Compiler *c, const AstNode *node) {
         }
     }
 
-    /* Add the function as a constant in the enclosing chunk. */
+    /* Add the function as a constant in the enclosing chunk and emit
+     * OP_CLOSURE to wrap it in a closure at runtime. The constant pool
+     * stores the raw ObjFunction; the VM's OP_CLOSURE handler creates
+     * an ObjClosure from it. */
     Value fn_val = make_function(fn);
-    emit_constant(c, fn_val, line);
+    int fn_idx = chunk_find_or_add_constant(c->chunk, fn_val);
+    if (fn_idx < 0) {
+        compiler_error(c, "too many constants in one chunk");
+        return;
+    }
+    emit_bytes(c, OP_CLOSURE, (uint8_t)fn_idx, line);
+    /* Emit 0 upvalue descriptor pairs (no captures yet). When upvalue
+     * capture is implemented, each captured variable will add a
+     * (is_local, index) pair here. */
 
-    /* For named functions, emit OP_DEFINE_GLOBAL to bind the name globally.
-     * For anonymous functions, just leave the value on the stack. */
+    /* For named functions, bind the name. In function context, register
+     * as a local variable (lexical scoping). In script context, define
+     * as a global. */
     if (node->value) {
-        char *name = compiler_strdup(c, node->value);
-        if (!name)
-            return;
-        int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
-        if (name_idx < 0) {
-            compiler_error(c, "too many constants");
-            return;
+        if (c->context == COMPILE_FUNCTION) {
+            /* Same pattern as compile_decl in COMPILE_FUNCTION:
+             * the OP_CLOSURE already placed the closure value at
+             * the local_count position on the stack. Register the
+             * local, then push a clone as the expression result. */
+            int slot = c->local_count;
+            if (c->local_count >= LOCALS_MAX) {
+                compiler_error(c, "too many local variables");
+                return;
+            }
+            c->locals[c->local_count++] = (Local){
+                .name = node->value,
+                .length = (int)strlen(node->value),
+                .depth = c->scope_depth,
+            };
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+        } else {
+            /* Script context: global variable binding. */
+            char *name = compiler_strdup(c, node->value);
+            if (!name)
+                return;
+            int name_idx = chunk_find_or_add_constant(c->chunk, make_string(name));
+            if (name_idx < 0) {
+                compiler_error(c, "too many constants");
+                return;
+            }
+            emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
         }
-        emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
     }
 }
 

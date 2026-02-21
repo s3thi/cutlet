@@ -400,23 +400,23 @@ TEST(test_compile_dedup_constants) {
  * Function definitions
  * ============================================================ */
 
-/* Compile fn foo() is 42 end → OP_CONSTANT (function) + OP_DEFINE_GLOBAL (name) */
+/* Compile fn foo() is 42 end → OP_CLOSURE (function) + OP_DEFINE_GLOBAL (name) */
 TEST(test_compile_fn_def_bytecode) {
     CompileError err;
     Chunk *chunk = compile_input("fn foo() is 42 end", &err);
     ASSERT(chunk != NULL, "should compile");
     /* The top-level chunk should have:
-     *   OP_CONSTANT <fn_idx>   (push the function value)
+     *   OP_CLOSURE <fn_idx>   (create closure from constant pool function)
      *   OP_DEFINE_GLOBAL <name_idx>  (bind to global "foo")
      *   OP_RETURN
      */
-    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function value");
     uint8_t fn_idx = chunk->code[1];
     ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL for name");
     uint8_t name_idx = chunk->code[3];
     ASSERT(chunk->code[4] == OP_RETURN, "OP_RETURN");
 
-    /* The function constant should be VAL_FUNCTION. */
+    /* The function constant should be VAL_FUNCTION (VM wraps in closure). */
     ASSERT(fn_idx < chunk->const_count, "fn constant index in range");
     ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
     ASSERT(chunk->constants[fn_idx].function != NULL, "function pointer not NULL");
@@ -437,7 +437,7 @@ TEST(test_compile_fn_def_with_params) {
     CompileError err;
     Chunk *chunk = compile_input("fn add(a, b) is a end", &err);
     ASSERT(chunk != NULL, "should compile");
-    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function");
     uint8_t fn_idx = chunk->code[1];
     ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
     ObjFunction *fn = chunk->constants[fn_idx].function;
@@ -580,18 +580,18 @@ TEST(test_compile_fn_assign_param_uses_set_local) {
  * Anonymous function definitions
  * ============================================================ */
 
-/* Compile fn() is 42 end → OP_CONSTANT (function) + OP_RETURN, no OP_DEFINE_GLOBAL */
+/* Compile fn() is 42 end → OP_CLOSURE (function) + OP_RETURN, no OP_DEFINE_GLOBAL */
 TEST(test_compile_anon_fn_no_define_global) {
     CompileError err;
     Chunk *chunk = compile_input("fn() is 42 end", &err);
     ASSERT(chunk != NULL, "should compile");
     /* The top-level chunk should have:
-     *   OP_CONSTANT <fn_idx>   (push the function value)
+     *   OP_CLOSURE <fn_idx>   (create closure from constant pool function)
      *   OP_RETURN
      * No OP_DEFINE_GLOBAL since anonymous. */
-    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function value");
     uint8_t fn_idx = chunk->code[1];
-    ASSERT(chunk->code[2] == OP_RETURN, "OP_RETURN after constant (no DEFINE_GLOBAL)");
+    ASSERT(chunk->code[2] == OP_RETURN, "OP_RETURN after closure (no DEFINE_GLOBAL)");
 
     /* The function constant should be VAL_FUNCTION with NULL name. */
     ASSERT(fn_idx < chunk->const_count, "fn constant index in range");
@@ -609,7 +609,7 @@ TEST(test_compile_anon_fn_with_params) {
     CompileError err;
     Chunk *chunk = compile_input("fn(a, b) is a + b end", &err);
     ASSERT(chunk != NULL, "should compile");
-    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function");
     uint8_t fn_idx = chunk->code[1];
     ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
     ObjFunction *fn = chunk->constants[fn_idx].function;
@@ -635,9 +635,9 @@ TEST(test_compile_anon_fn_in_decl) {
     CompileError err;
     Chunk *chunk = compile_input("my f = fn(x) is x end", &err);
     ASSERT(chunk != NULL, "should compile");
-    /* Should have: OP_CONSTANT (fn), OP_DEFINE_GLOBAL (f), OP_RETURN
+    /* Should have: OP_CLOSURE (fn), OP_DEFINE_GLOBAL (f), OP_RETURN
      * The DEFINE_GLOBAL is for the variable 'f', not for the fn itself. */
-    ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT for function value");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function value");
     uint8_t fn_idx = chunk->code[1];
     ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL for variable f");
     ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
@@ -705,6 +705,70 @@ TEST(test_compile_fn_assign_nonlocal_uses_set_global) {
         }
     }
     ASSERT(found_set_global, "body should use OP_SET_GLOBAL for non-local");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* ============================================================
+ * OP_CLOSURE emission (Step 4: closures-infrastructure)
+ * ============================================================ */
+
+/* Top-level named fn emits OP_CLOSURE (not OP_CONSTANT) + OP_DEFINE_GLOBAL */
+TEST(test_compile_fn_emits_op_closure) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    /* OP_CLOSURE should be emitted instead of OP_CONSTANT for function values. */
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for function value");
+    uint8_t fn_idx = chunk->code[1];
+    ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL for name");
+    ASSERT(chunk->code[4] == OP_RETURN, "OP_RETURN");
+    /* Constant pool still holds VAL_FUNCTION (VM wraps in closure at runtime). */
+    ASSERT(fn_idx < chunk->const_count, "fn constant index in range");
+    ASSERT(chunk->constants[fn_idx].type == VAL_FUNCTION, "constant is VAL_FUNCTION");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Anonymous fn also emits OP_CLOSURE (not OP_CONSTANT) */
+TEST(test_compile_anon_fn_emits_op_closure) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE for anonymous function");
+    ASSERT(chunk->code[2] == OP_RETURN, "OP_RETURN (no DEFINE_GLOBAL)");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Named function inside another function is local, not global */
+TEST(test_compile_nested_fn_is_local) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn outer() is\nfn inner() is 42 end\ninner()\nend", &err);
+    ASSERT(chunk != NULL, "should compile");
+    /* Get the outer function from the constant pool. */
+    uint8_t outer_fn_idx = chunk->code[1];
+    ASSERT(chunk->constants[outer_fn_idx].type == VAL_FUNCTION, "outer is VAL_FUNCTION");
+    ObjFunction *outer_fn = chunk->constants[outer_fn_idx].function;
+    ASSERT(outer_fn->chunk != NULL, "outer has its own chunk");
+    /* The outer body should NOT contain OP_DEFINE_GLOBAL for inner. */
+    bool found_define_global = false;
+    for (size_t i = 0; i < outer_fn->chunk->count; i++) {
+        if (outer_fn->chunk->code[i] == OP_DEFINE_GLOBAL) {
+            found_define_global = true;
+            break;
+        }
+    }
+    ASSERT(!found_define_global, "nested fn should not emit OP_DEFINE_GLOBAL");
+    /* The outer body should contain OP_CLOSURE for the inner function. */
+    bool found_closure = false;
+    for (size_t i = 0; i < outer_fn->chunk->count; i++) {
+        if (outer_fn->chunk->code[i] == OP_CLOSURE) {
+            found_closure = true;
+            break;
+        }
+    }
+    ASSERT(found_closure, "nested fn should emit OP_CLOSURE");
     free_chunk(chunk);
     PASS();
 }
@@ -781,6 +845,11 @@ int main(void) {
     RUN_TEST(test_compile_anon_fn_no_define_global);
     RUN_TEST(test_compile_anon_fn_with_params);
     RUN_TEST(test_compile_anon_fn_in_decl);
+
+    printf("\nOP_CLOSURE emission:\n");
+    RUN_TEST(test_compile_fn_emits_op_closure);
+    RUN_TEST(test_compile_anon_fn_emits_op_closure);
+    RUN_TEST(test_compile_nested_fn_is_local);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

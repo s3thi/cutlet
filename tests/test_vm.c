@@ -1323,17 +1323,18 @@ TEST(test_fn_concat_coercion) {
 /* fn foo() is 42 end → foo is a VAL_FUNCTION in globals */
 TEST(test_fn_def_creates_global) {
     Value v = run_input("fn fndef1() is 42 end\nfndef1", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "fn def creates a function value");
-    ASSERT(v.function != NULL, "function pointer is non-NULL");
-    ASSERT(strcmp(v.function->name, "fndef1") == 0, "function name is fndef1");
+    ASSERT(v.type == VAL_CLOSURE, "fn def creates a closure value");
+    ASSERT(v.closure != NULL, "closure pointer is non-NULL");
+    ASSERT(v.closure->function != NULL, "function pointer is non-NULL");
+    ASSERT(strcmp(v.closure->function->name, "fndef1") == 0, "function name is fndef1");
     value_free(&v);
     PASS();
 }
 
-/* fn foo() is 42 end evaluates to the function value itself */
+/* fn foo() is 42 end evaluates to the closure value itself */
 TEST(test_fn_def_evaluates_to_function) {
     Value v = run_input("fn fndef2() is 42 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "fn def expression returns function");
+    ASSERT(v.type == VAL_CLOSURE, "fn def expression returns closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn fndef2>") == 0, "formats as <fn fndef2>");
     free(s);
@@ -1345,7 +1346,7 @@ TEST(test_fn_def_evaluates_to_function) {
 TEST(test_fn_def_format_via_global) {
     /* Define then read back. */
     Value v = run_input("fn fndef3(x, y) is x end\nfndef3", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "is function");
+    ASSERT(v.type == VAL_CLOSURE, "is closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn fndef3>") == 0, "formats as <fn fndef3>");
     free(s);
@@ -1611,7 +1612,7 @@ TEST(test_anon_fn_two_params) {
 /* Anonymous fn value formats as "<fn>" (no name) */
 TEST(test_anon_fn_formats_as_fn) {
     Value v = run_input("fn() is 42 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "anon fn evaluates to function");
+    ASSERT(v.type == VAL_CLOSURE, "anon fn evaluates to closure");
     char *s = value_format(&v);
     ASSERT(strcmp(s, "<fn>") == 0, "anonymous fn formats as <fn>");
     free(s);
@@ -1646,10 +1647,11 @@ TEST(test_anon_fn_arity_error) {
 /* Anonymous fn is an expression (can be used inline) */
 TEST(test_anon_fn_as_expression) {
     Value v = run_input("fn(x) is x * 2 end", &test_ctx);
-    ASSERT(v.type == VAL_FUNCTION, "anon fn as expression returns function");
-    ASSERT(v.function != NULL, "function pointer is non-NULL");
-    ASSERT(v.function->name == NULL, "anonymous function has no name");
-    ASSERT(v.function->arity == 1, "arity is 1");
+    ASSERT(v.type == VAL_CLOSURE, "anon fn as expression returns closure");
+    ASSERT(v.closure != NULL, "closure pointer is non-NULL");
+    ASSERT(v.closure->function != NULL, "function pointer is non-NULL");
+    ASSERT(v.closure->function->name == NULL, "anonymous function has no name");
+    ASSERT(v.closure->function->arity == 1, "arity is 1");
     value_free(&v);
     PASS();
 }
@@ -1698,6 +1700,37 @@ TEST(test_local_var_as_callee) {
                      "end\n"
                      "foo()",
                      15.0, "my-declared local function as callee");
+}
+
+/* ============================================================
+ * Nested named functions (lexical scoping, Step 4)
+ * ============================================================ */
+
+/* Named function inside another function works (callable from within) */
+TEST(test_nested_fn_call_works) {
+    assert_vm_number("fn outer() is\n"
+                     "  fn inner() is 42 end\n"
+                     "  inner()\n"
+                     "end\n"
+                     "outer()",
+                     42.0, "nested named fn callable from outer");
+}
+
+/* Named function inside another function is NOT visible as a global */
+TEST(test_nested_fn_not_visible_globally) {
+    Value v = run_input("fn outer2() is\n"
+                        "  fn inner2() is 42 end\n"
+                        "  inner2()\n"
+                        "end\n"
+                        "outer2()\n"
+                        "inner2()",
+                        &test_ctx);
+    ASSERT(v.type == VAL_ERROR, "inner2 should not be visible globally");
+    char *msg = value_format(&v);
+    ASSERT(strstr(msg, "inner2") != NULL, "error mentions inner2");
+    free(msg);
+    value_free(&v);
+    PASS();
 }
 
 /* ============================================================
@@ -2227,6 +2260,10 @@ int main(void) {
     RUN_TEST(test_higher_order_builtin);
     RUN_TEST(test_higher_order_nested);
     RUN_TEST(test_local_var_as_callee);
+
+    printf("\nNested named functions (lexical scoping):\n");
+    RUN_TEST(test_nested_fn_call_works);
+    RUN_TEST(test_nested_fn_not_visible_globally);
 
     printf("\nDecimal number literals:\n");
     RUN_TEST(test_decimal_literal_half);

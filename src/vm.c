@@ -810,69 +810,41 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             }
 
             if (callee.type == VAL_FUNCTION) {
+                /* VAL_FUNCTION is only used for native functions (say, str, etc.).
+                 * User-defined functions are always VAL_CLOSURE (created by OP_CLOSURE). */
                 ObjFunction *fn = callee.function;
 
-                /* Check arity. fn->name is still valid because the callee
-                 * Value is on the stack; vm_runtime_error formats the message
-                 * BEFORE vm_free_stack frees it. */
                 if (argc != fn->arity) {
                     return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
                                             fn->name ? fn->name : "<fn>", fn->arity,
                                             fn->arity == 1 ? "" : "s", argc);
                 }
 
-                if (fn->native) {
-                    /* Native function: pop args into temp array, call, push result. */
-                    Value args[256];
-                    for (int i = argc - 1; i >= 0; i--) {
-                        vm_pop(&vm, &args[i]);
-                    }
-                    /* Pop the callee itself. */
-                    Value callee_val;
-                    vm_pop(&vm, &callee_val);
+                /* Native function: pop args into temp array, call, push result. */
+                Value args[256];
+                for (int i = argc - 1; i >= 0; i--) {
+                    vm_pop(&vm, &args[i]);
+                }
+                /* Pop the callee itself. */
+                Value callee_val;
+                vm_pop(&vm, &callee_val);
 
-                    /* Call the native. fn->native is read before callee_val
-                     * is freed, so the pointer is still valid. */
-                    Value result = fn->native(argc, args, vm.ctx);
+                /* Call the native. fn->native is read before callee_val
+                 * is freed, so the pointer is still valid. */
+                Value result = fn->native(argc, args, vm.ctx);
 
-                    /* Free the argument values and the callee. */
-                    for (int i = 0; i < argc; i++) {
-                        value_free(&args[i]);
-                    }
-                    value_free(&callee_val);
+                /* Free the argument values and the callee. */
+                for (int i = 0; i < argc; i++) {
+                    value_free(&args[i]);
+                }
+                value_free(&callee_val);
 
-                    if (result.type == VAL_ERROR) {
-                        vm_free_stack(&vm);
-                        return result;
-                    }
-                    if (!vm_push(&vm, result)) {
-                        return vm_runtime_error(&vm, "stack overflow");
-                    }
-                } else {
-                    /* User-defined function via VAL_FUNCTION: wrap in a
-                     * closure before pushing the call frame. This is a
-                     * transitional path — once the compiler emits OP_CLOSURE
-                     * (Step 4/5), user functions will arrive as VAL_CLOSURE
-                     * and this branch won't be reached for them. */
-                    ObjClosure *cl = obj_closure_new(fn, 0);
-                    if (!cl) {
-                        return vm_runtime_error(&vm, "memory allocation failed");
-                    }
-
-                    /* Replace the callee stack slot with the closure.
-                     * value_free on the VAL_FUNCTION decrements fn->refcount,
-                     * but obj_closure_new already incremented it. */
-                    Value *callee_slot = vm.stack_top - argc - 1;
-                    value_free(callee_slot);
-                    *callee_slot = make_closure(cl);
-
-                    if (vm.frame_count >= FRAMES_MAX) {
-                        return vm_runtime_error(&vm, "stack overflow");
-                    }
-                    CallFrame *new_frame = &vm.frames[vm.frame_count++];
-                    new_frame->closure = cl;
-                    new_frame->ip = fn->chunk->code;
-                    new_frame->slots = vm.stack_top - argc - 1;
+                if (result.type == VAL_ERROR) {
+                    vm_free_stack(&vm);
+                    return result;
+                }
+                if (!vm_push(&vm, result)) {
+                    return vm_runtime_error(&vm, "stack overflow");
                 }
             } else if (callee.type == VAL_CLOSURE) {
                 /* User-defined function via closure. The closure is
@@ -895,6 +867,33 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 new_frame->slots = vm.stack_top - argc - 1;
             } else {
                 return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
+            }
+            break;
+        }
+
+        case OP_CLOSURE: {
+            /* Create an ObjClosure from a constant pool ObjFunction.
+             * The constant index points to a VAL_FUNCTION in the pool.
+             * After the constant index, there are fn->upvalue_count pairs
+             * of (is_local, index) bytes describing captured variables.
+             * For now, upvalue_count is always 0 (no captures yet). */
+            uint8_t idx = read_byte(frame);
+            ObjFunction *fn = frame->closure->function->chunk->constants[idx].function;
+            ObjClosure *cl = obj_closure_new(fn, fn->upvalue_count);
+            if (!cl) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            /* Read upvalue descriptors (0 for now). When upvalue capture
+             * is implemented, this loop will populate cl->upvalues[]. */
+            for (int i = 0; i < fn->upvalue_count; i++) {
+                uint8_t is_local = read_byte(frame);
+                uint8_t index = read_byte(frame);
+                (void)is_local;
+                (void)index;
+                /* TODO: capture_upvalue implementation in closures-capture step */
+            }
+            if (!vm_push(&vm, make_closure(cl))) {
+                return vm_runtime_error(&vm, "stack overflow");
             }
             break;
         }
