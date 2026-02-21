@@ -404,6 +404,165 @@ TEST(test_disassemble_recursive_anonymous_function) {
 }
 
 /* ============================================================
+ * ObjUpvalue and ObjClosure tests
+ * ============================================================ */
+
+TEST(test_obj_upvalue_new) {
+    /* Create an ObjUpvalue pointing to a stack value and verify location. */
+    Value slot = make_number(99.0);
+    ObjUpvalue *uv = obj_upvalue_new(&slot);
+    ASSERT(uv != NULL, "upvalue should be allocated");
+    ASSERT(uv->refcount == 1, "initial refcount should be 1");
+    ASSERT(uv->location == &slot, "location should point to the slot");
+    ASSERT(uv->location->number == 99.0, "should read value through location");
+    ASSERT(uv->next == NULL, "next should be NULL");
+    obj_upvalue_free(uv);
+    value_free(&slot);
+    PASS();
+}
+
+TEST(test_obj_closure_new) {
+    /* Create an ObjClosure wrapping a simple ObjFunction. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("test_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    ASSERT(cl != NULL, "closure should be allocated");
+    ASSERT(cl->refcount == 1, "closure initial refcount should be 1");
+    ASSERT(cl->function == fn, "closure should reference the function");
+    ASSERT(cl->upvalue_count == 0, "upvalue_count should be 0");
+    /* obj_closure_new increments fn->refcount */
+    ASSERT(fn->refcount == 2, "function refcount should be 2 after closure creation");
+
+    obj_closure_free(cl);
+    /* After closure free, fn refcount should be decremented back to 1 */
+    ASSERT(fn->refcount == 1, "function refcount should be 1 after closure free");
+    obj_function_free(fn);
+    PASS();
+}
+
+TEST(test_closure_value_format_named) {
+    /* value_format for VAL_CLOSURE with a named function shows "<fn name>". */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("greet");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    char *fmt = value_format(&v);
+    ASSERT(fmt != NULL, "format should return non-NULL");
+    ASSERT(strcmp(fmt, "<fn greet>") == 0, "should format as <fn greet>");
+    free(fmt);
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_value_format_anonymous) {
+    /* value_format for VAL_CLOSURE with anonymous function shows "<fn>". */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = NULL;
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    char *fmt = value_format(&v);
+    ASSERT(fmt != NULL, "format should return non-NULL");
+    ASSERT(strcmp(fmt, "<fn>") == 0, "should format as <fn>");
+    free(fmt);
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_clone_refcount) {
+    /* Clone a VAL_CLOSURE, verify refcount is 2. Free clone, verify refcount is 1. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("cloned_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    ASSERT(cl->refcount == 1, "initial closure refcount should be 1");
+
+    Value cloned;
+    bool ok = value_clone(&cloned, &v);
+    ASSERT(ok, "clone should succeed");
+    ASSERT(cloned.type == VAL_CLOSURE, "cloned type should be VAL_CLOSURE");
+    ASSERT(cloned.closure == cl, "cloned should share same ObjClosure");
+    ASSERT(cl->refcount == 2, "refcount should be 2 after clone");
+
+    value_free(&cloned);
+    ASSERT(cl->refcount == 1, "refcount should be 1 after freeing clone");
+
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_closure_is_truthy) {
+    /* Closures are always truthy. */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = NULL;
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = obj_closure_new(fn, 0);
+    Value v = make_closure(cl);
+    ASSERT(is_truthy(&v) == true, "closure should be truthy");
+    value_free(&v);
+    PASS();
+}
+
+TEST(test_function_refcount_clone) {
+    /* VAL_FUNCTION clone should increment refcount (not deep-copy). */
+    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    fn->name = strdup("native_fn");
+    fn->arity = 0;
+    fn->params = NULL;
+    fn->chunk = NULL;
+    fn->native = NULL;
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    Value v = make_function(fn);
+    ASSERT(fn->refcount == 1, "initial refcount should be 1");
+
+    Value cloned;
+    bool ok = value_clone(&cloned, &v);
+    ASSERT(ok, "clone should succeed");
+    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
+
+    value_free(&cloned);
+    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
+
+    value_free(&v);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -445,6 +604,15 @@ int main(void) {
     printf("\nRecursive function disassembly:\n");
     RUN_TEST(test_disassemble_recursive_function);
     RUN_TEST(test_disassemble_recursive_anonymous_function);
+
+    printf("\nObjUpvalue and ObjClosure:\n");
+    RUN_TEST(test_obj_upvalue_new);
+    RUN_TEST(test_obj_closure_new);
+    RUN_TEST(test_closure_value_format_named);
+    RUN_TEST(test_closure_value_format_anonymous);
+    RUN_TEST(test_closure_clone_refcount);
+    RUN_TEST(test_closure_is_truthy);
+    RUN_TEST(test_function_refcount_clone);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

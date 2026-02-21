@@ -1237,20 +1237,24 @@ TEST(test_fn_format_anonymous) {
 
 /* Clone a function: deep copy with independent ownership */
 TEST(test_fn_clone_independence) {
+    /* VAL_FUNCTION clone uses shared ownership via refcount (not deep copy). */
     const char *params[] = {"x", "y"};
     ObjFunction *fn = test_make_obj_function("add", 2, params);
     Value orig = make_function(fn);
+    ASSERT(fn->refcount == 1, "initial refcount should be 1");
     Value cloned;
     bool ok = value_clone(&cloned, &orig);
     ASSERT(ok, "clone succeeds");
     ASSERT(cloned.type == VAL_FUNCTION, "clone is function");
-    ASSERT(cloned.function != orig.function, "clone has different pointer");
+    ASSERT(cloned.function == orig.function, "clone shares same ObjFunction pointer");
+    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
     ASSERT(strcmp(cloned.function->name, "add") == 0, "clone name correct");
     ASSERT(cloned.function->arity == 2, "clone arity correct");
     ASSERT(strcmp(cloned.function->params[0], "x") == 0, "clone param 0");
     ASSERT(strcmp(cloned.function->params[1], "y") == 0, "clone param 1");
-    value_free(&orig);
     value_free(&cloned);
+    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
+    value_free(&orig);
     PASS();
 }
 
