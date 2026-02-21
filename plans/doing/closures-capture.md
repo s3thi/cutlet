@@ -243,6 +243,7 @@ Run `make test && make check` for final verification.
 
 - [x] Step 1: Add upvalue resolution to compiler — added `enclosing` pointer, `CompilerUpvalue` array, `resolve_upvalue`/`add_upvalue`, updated `compile_ident`/`compile_assign`/`compile_call` for upvalue resolution, emit upvalue descriptors after `OP_CLOSURE`, 5 new compiler tests
 - [x] Step 2: Implement OP_GET_UPVALUE and OP_SET_UPVALUE in VM — added dispatch handlers for reading/writing captured variables through upvalue indirection, 3 new VM tests (read, mutate, shared upvalue)
+- [x] Step 3: Close upvalues on function return — added close_upvalues() to VM, called from OP_RETURN and OP_CLOSE_UPVALUE handler, 3 new tests (outlive creator, counter pattern, shared closed upvalue)
 
 ---
 End of plan.
