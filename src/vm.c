@@ -794,6 +794,50 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_GET_UPVALUE: {
+            /* Read a captured variable through upvalue indirection.
+             * The 1-byte operand indexes into the current closure's
+             * upvalue array. The upvalue's location pointer points to
+             * either a live stack slot (open) or the upvalue's own
+             * closed field (closed). Clone the value and push it. */
+            uint8_t slot = read_byte(frame);
+            if (!frame->closure->upvalues) {
+                return vm_runtime_error(&vm, "no upvalues in current closure");
+            }
+            ObjUpvalue *uv = frame->closure->upvalues[slot];
+            Value v;
+            if (!value_clone(&v, uv->location)) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            if (!vm_push(&vm, v)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_SET_UPVALUE: {
+            /* Write TOS into a captured variable through upvalue indirection.
+             * Like OP_SET_LOCAL, TOS stays on the stack as the expression result.
+             * The old value at the upvalue's location is freed, then TOS is
+             * cloned into it. */
+            uint8_t slot = read_byte(frame);
+            if (!frame->closure->upvalues) {
+                return vm_runtime_error(&vm, "no upvalues in current closure");
+            }
+            ObjUpvalue *uv = frame->closure->upvalues[slot];
+            Value tos;
+            if (!vm_peek(&vm, 0, &tos)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            Value cloned;
+            if (!value_clone(&cloned, &tos)) {
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            value_free(uv->location);
+            *uv->location = cloned;
+            break;
+        }
+
         case OP_JUMP: {
             uint16_t offset = read_short(frame);
             frame->ip += offset;

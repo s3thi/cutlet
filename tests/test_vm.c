@@ -1794,6 +1794,46 @@ TEST(test_closure_equality_same_instance) {
 }
 
 /* ============================================================
+ * Upvalue capture: OP_GET_UPVALUE / OP_SET_UPVALUE (Step 2)
+ * ============================================================ */
+
+/* Inner function reads a variable from the outer function via upvalue. */
+TEST(test_upvalue_read_outer) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn inner() is x end\n"
+                     "  inner()\n"
+                     "end\n"
+                     "outer()",
+                     10.0, "inner fn reads outer variable via upvalue");
+}
+
+/* Mutation through a closure is visible to the enclosing scope. */
+TEST(test_upvalue_mutation_visible) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn inner() is x = 20 end\n"
+                     "  inner()\n"
+                     "  x\n"
+                     "end\n"
+                     "outer()",
+                     20.0, "mutation through closure visible to encloser");
+}
+
+/* Two closures sharing the same captured variable share the same ObjUpvalue. */
+TEST(test_upvalue_shared_between_closures) {
+    assert_vm_number("fn outer() is\n"
+                     "  my x = 10\n"
+                     "  fn a() is x end\n"
+                     "  fn b() is x = 20 end\n"
+                     "  b()\n"
+                     "  a()\n"
+                     "end\n"
+                     "outer()",
+                     20.0, "two closures share same upvalue");
+}
+
+/* ============================================================
  * Decimal number literal tests
  * ============================================================ */
 
@@ -2331,6 +2371,11 @@ int main(void) {
     RUN_TEST(test_closure_as_return_value);
     RUN_TEST(test_closure_equality_different_instances);
     RUN_TEST(test_closure_equality_same_instance);
+
+    printf("\nUpvalue capture (OP_GET_UPVALUE / OP_SET_UPVALUE):\n");
+    RUN_TEST(test_upvalue_read_outer);
+    RUN_TEST(test_upvalue_mutation_visible);
+    RUN_TEST(test_upvalue_shared_between_closures);
 
     printf("\nDecimal number literals:\n");
     RUN_TEST(test_decimal_literal_half);
