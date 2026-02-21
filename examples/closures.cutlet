@@ -1,0 +1,14 @@
+# Closures: functions that capture variables from enclosing scopes
+
+fn make_counter() is
+  my count = 0
+  fn() is
+    count = count + 1
+    say(count)
+  end
+end
+
+my counter = make_counter()
+counter()
+counter()
+counter()
