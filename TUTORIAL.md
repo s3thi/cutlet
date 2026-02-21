@@ -513,7 +513,80 @@ times(3, fn(i) is say("iteration " ++ str(i)))
 # prints: iteration 0, iteration 1, iteration 2
 
 # ============================================================
-# 11. say() for output
+# 11. Closures
+# ============================================================
+
+# A closure is a function that captures variables from its enclosing
+# scope. When an inner function references a variable from an outer
+# function, it "closes over" that variable.
+
+# Basic capture — inner function reads from outer scope:
+fn make_greeter(name) is
+  fn() is "hello " ++ name end
+end
+my greet = make_greeter("world")
+say(greet())            # prints: hello world
+
+# Closures capture by reference — mutations are shared:
+fn make_counter() is
+  my count = 0
+  fn() is
+    count = count + 1
+    count
+  end
+end
+my counter = make_counter()
+say(counter())          # prints: 1
+say(counter())          # prints: 2
+say(counter())          # prints: 3
+
+# Closures outlive their enclosing function. When make_counter()
+# returns, `count` is moved from the stack to the heap so the
+# closure can keep using it.
+
+# Factory pattern — each call creates independent state:
+my c1 = make_counter()
+my c2 = make_counter()
+c1()
+c1()
+say(c1())               # prints: 3
+say(c2())               # prints: 1 (c2 has its own count)
+
+# Adder factory — capture a parameter:
+fn make_adder(x) is
+  fn(y) is x + y end
+end
+my add5 = make_adder(5)
+my add10 = make_adder(10)
+say(add5(3))            # prints: 8
+say(add10(3))           # prints: 13
+
+# Two closures sharing the same captured variable:
+fn make_cell() is
+  my value = 0
+  fn get() is value end
+  fn set(v) is value = v end
+end
+
+# Deep nesting — a closure can capture from any enclosing scope,
+# not just the immediately enclosing one:
+fn outer() is
+  my x = 100
+  fn middle() is
+    fn inner() is x end
+    inner()
+  end
+  middle()
+end
+say(outer())            # prints: 100
+
+# Closures work with all the features you'd expect:
+# - Capture parameters (not just `my` locals)
+# - Use inside while loops
+# - Pass as arguments to higher-order functions
+
+# ============================================================
+# 12. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -528,7 +601,7 @@ say(nothing)    # prints: nothing
 say("result: " ++ str(42))   # prints: result: 42
 
 # ============================================================
-# 12. Running Cutlet programs
+# 13. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -549,7 +622,7 @@ say("result: " ++ str(42))   # prints: result: 42
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 13. The REPL
+# 14. The REPL
 # ============================================================
 
 # Start an interactive REPL:

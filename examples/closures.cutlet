@@ -1,14 +1,68 @@
 # Closures: functions that capture variables from enclosing scopes
 
+# Counter pattern: closure retains mutable state
 fn make_counter() is
   my count = 0
   fn() is
     count = count + 1
-    say(count)
+    count
   end
 end
 
 my counter = make_counter()
-counter()
-counter()
-counter()
+say(counter())    # 1
+say(counter())    # 2
+say(counter())    # 3
+
+# Each call to the factory creates independent state
+my c2 = make_counter()
+say(c2())         # 1 (separate counter)
+
+# Adder factory: capture a parameter
+fn make_adder(x) is
+  fn(y) is x + y end
+end
+
+my add5 = make_adder(5)
+my add10 = make_adder(10)
+say(add5(3))      # 8
+say(add10(3))     # 13
+
+# Shared capture: two closures over the same variable
+my setter = nothing
+fn make_cell() is
+  my value = 0
+  fn set(v) is value = v end
+  setter = set
+  fn() is value end
+end
+
+my getter = make_cell()
+say(getter())     # 0
+setter(42)
+say(getter())     # 42
+
+# Deep nesting: innermost captures from outermost
+fn level1() is
+  my x = 100
+  fn level2() is
+    fn level3() is x end
+    level3()
+  end
+  level2()
+end
+say(level1())     # 100
+
+# Closure with a while loop: accumulate then return accessor
+fn make_sum(n) is
+  my total = 0
+  my i = 1
+  while i <= n do
+    total = total + i
+    i = i + 1
+  end
+  fn() is total end
+end
+
+my sum10 = make_sum(10)
+say(sum10())      # 55
