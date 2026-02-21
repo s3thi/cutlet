@@ -1,0 +1,82 @@
+#!/bin/sh
+# plan-done — Move a plan from doing/ to done/ with a fresh timestamp.
+#
+# Usage: plan-done <name>
+#   <name> can be a slug (arrays), slug.md (arrays.md), or full filename
+#   (20260221090632-arrays.md).
+#
+# Finds the matching file in plans/doing/, moves it to plans/done/ with a
+# fresh Zettelkasten timestamp reflecting completion time.
+# Prints the new path to stdout.
+
+set -eu
+
+usage() {
+    echo "Usage: plan-done <name>" >&2
+    echo "  <name> can be a slug, slug.md, or full timestamped filename" >&2
+    exit 1
+}
+
+if [ $# -ne 1 ]; then
+    usage
+fi
+
+input="$1"
+
+# Find repo root.
+root="$(git rev-parse --show-toplevel)"
+doing_dir="$root/plans/doing"
+done_dir="$root/plans/done"
+
+# Strip .md suffix if present for matching purposes.
+bare="${input%.md}"
+
+# Try to find the file in doing/.
+match=""
+
+# 1. Exact filename match.
+if [ -e "$doing_dir/$input" ]; then
+    match="$doing_dir/$input"
+# 2. Exact filename with .md appended.
+elif [ -e "$doing_dir/${input}.md" ]; then
+    match="$doing_dir/${input}.md"
+else
+    # 3. Slug match: find any file ending in -<slug>.md.
+    for f in "$doing_dir"/*-"${bare}.md"; do
+        if [ -e "$f" ]; then
+            match="$f"
+            break
+        fi
+    done
+    # 4. Legacy unprefixed file: <slug>.md.
+    if [ -z "$match" ] && [ -e "$doing_dir/${bare}.md" ]; then
+        match="$doing_dir/${bare}.md"
+    fi
+fi
+
+if [ -z "$match" ]; then
+    echo "Error: no plan matching '$input' found in $doing_dir" >&2
+    exit 1
+fi
+
+# Extract the slug from the matched filename.
+basename_f="$(basename "$match")"
+# Strip .md suffix.
+stem="${basename_f%.md}"
+# Strip timestamp prefix if present (YYYYMMDDHHmmss-).
+if echo "$stem" | grep -qE '^[0-9]{14}-'; then
+    slug="${stem#[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-}"
+else
+    slug="$stem"
+fi
+
+# Generate fresh timestamp and move.
+timestamp="$(date +%Y%m%d%H%M%S)"
+new_filename="${timestamp}-${slug}.md"
+new_path="$done_dir/$new_filename"
+
+mkdir -p "$done_dir"
+mv "$match" "$new_path"
+
+# Print the new path.
+echo "$new_path"

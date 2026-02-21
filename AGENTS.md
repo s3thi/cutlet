@@ -19,7 +19,7 @@ The author of this project is an experienced developer of 20 years. But they don
 
 ## Plans and tasks
 
-See `plans/README.md` for project status, key files, and what exists today. Tasks to work on are in `plans/doing/`. Completed work is archived in `plans/done/`. When you finish a task, move its file from `doing/` to `done/`.
+See `plans/README.md` for project status, key files, and what exists today. Tasks to work on are in `plans/doing/`. Completed work is archived in `plans/done/`. Use `scripts/plan-create <name>` to create a new plan and `scripts/plan-done <name>` to move a completed plan to `done/` with a fresh timestamp.
 
 ## Concurrent agent safety
 

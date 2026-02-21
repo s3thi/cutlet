@@ -27,8 +27,8 @@ Plans may contain multiple **implementation steps** (e.g. "Step 1: …", "Step 2
    ```
 2. Commit your work.
 3. If **all steps are now complete**, also:
-   - Move the task file from `plans/doing/` to `plans/done/` with the next consecutive 4-digit number prefix.
    - Add a short summary (what changed, files touched) to the file.
+   - Run `scripts/plan-done <name>` to move the plan to `plans/done/` with a fresh timestamp.
 4. If steps remain, **stop**. Do NOT continue to the next step. Tell me what was completed and what the next step will be.
 
 ## Execution process (each step)

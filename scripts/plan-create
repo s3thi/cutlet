@@ -1,0 +1,55 @@
+#!/bin/sh
+# plan-create — Create a new plan file with a Zettelkasten timestamp prefix.
+#
+# Usage: plan-create <name>
+#   <name> must be kebab-case (lowercase letters, digits, hyphens).
+#
+# Creates plans/doing/YYYYMMDDHHmmss-<name>.md with a title-cased header.
+# Prints the absolute path to stdout.
+
+set -eu
+
+usage() {
+    echo "Usage: plan-create <name>" >&2
+    echo "  <name> must be kebab-case (e.g., my-feature)" >&2
+    exit 1
+}
+
+if [ $# -ne 1 ]; then
+    usage
+fi
+
+name="$1"
+
+# Validate kebab-case: lowercase letters, digits, hyphens; no leading/trailing hyphen.
+if ! echo "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$'; then
+    echo "Error: name must be kebab-case (e.g., my-feature)" >&2
+    exit 1
+fi
+
+# Find repo root.
+root="$(git rev-parse --show-toplevel)"
+doing_dir="$root/plans/doing"
+
+# Check for duplicate slugs already in doing/.
+for f in "$doing_dir"/*-"${name}.md" "$doing_dir/${name}.md"; do
+    if [ -e "$f" ]; then
+        echo "Error: a plan with slug '$name' already exists: $f" >&2
+        exit 1
+    fi
+done
+
+# Generate timestamp and filename.
+timestamp="$(date +%Y%m%d%H%M%S)"
+filename="${timestamp}-${name}.md"
+filepath="$doing_dir/$filename"
+
+# Title-case the name: replace hyphens with spaces, capitalize each word.
+title="$(echo "$name" | tr '-' ' ' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')"
+
+# Create the file with a header.
+mkdir -p "$doing_dir"
+printf '# %s\n' "$title" > "$filepath"
+
+# Print the absolute path.
+echo "$filepath"

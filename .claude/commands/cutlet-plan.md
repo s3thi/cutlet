@@ -2,7 +2,7 @@ $ARGUMENTS
 
 Read `AGENTS.md` for project conventions. Ask me clarifying questions before writing anything.
 
-Then create a new task file in `plans/doing/` with:
+Then run `scripts/plan-create <name>` to create the plan file, then write content into it with:
 
 - A clear objective (what "done" looks like)
 - Acceptance criteria as a checklist (must include `make test && make check` passing)
