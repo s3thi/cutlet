@@ -1,0 +1,106 @@
+# Add `return` keyword for early function exit
+
+## Objective
+
+Add a `return [expr]` keyword that exits the enclosing function immediately with a value. When done:
+
+- `return expr` inside a function exits immediately, returning `expr`.
+- Bare `return` (no expression) returns `nothing`.
+- `return` works inside loops within functions (exits the function, not just the loop).
+- `return` at the top level (script context) is a compile error.
+- Last-expression-is-return-value remains the default; `return` is only needed for *early* exits.
+- `make test && make check` pass.
+
+## Acceptance criteria
+
+- [ ] Parser produces `AST_RETURN` nodes for `return expr` and bare `return`.
+- [ ] `return` is a reserved keyword (cannot be used as a variable/function/parameter name).
+- [ ] `compile_return` emits the value expression followed by `OP_RETURN`.
+- [ ] `return` outside a function body produces a compile error.
+- [ ] `return` inside a loop inside a function exits the function (not just the loop).
+- [ ] Block-scoped locals are cleaned up correctly (the VM's `OP_RETURN` handler already pops the full frame).
+- [ ] Parser tests, compiler error tests, and VM integration tests all pass.
+- [ ] `make test && make check` pass.
+
+## Dependencies
+
+None. This feature uses the existing `OP_RETURN` opcode — no VM changes needed. Compatible with the in-progress closures work (closures add `close_upvalues` to the `OP_RETURN` handler, which will automatically cover early returns too).
+
+## Constraints and non-goals
+
+- **No new opcodes.** `OP_RETURN` already does everything we need.
+- **No VM changes.** The VM's `OP_RETURN` handler already pops the entire call frame and pushes the return value. Early returns just hit this handler sooner.
+- **No `return` from top-level scripts.** Only valid inside `fn ... end`.
+- **Not adding `cond`, `match`, or `catch`/`throw`.** Those are separate features.
+
+## Implementation steps
+
+### Step 1: Write tests
+
+Add tests before any implementation. All tests should fail initially.
+
+**Parser tests** (in `tests/test_parser.c`):
+
+Add a section "return expression" with tests:
+- `return 42` parses to `AST [RETURN [NUMBER 42]]`
+- `return "hello"` parses to `AST [RETURN [STRING hello]]`
+- Bare `return` parses to `AST [RETURN]`
+- `return` is a reserved keyword: `my return = 5` is a parse error
+
+**VM integration tests** (in `tests/test_vm.c`):
+
+Add a section "return keyword" with tests:
+- Basic return: `fn f() is return 42 end\nf()` → 42
+- Bare return: `fn f() is return end\nf()` → nothing
+- Return nothing explicitly: `fn f() is return nothing end\nf()` → nothing
+- Early return (guard clause): `fn f(x) is\nif x < 0 then return -1 end\nx * 2\nend\nf(-5)` → -1 AND `f(3)` → 6
+- Return from inside while loop: `fn f() is\nmy i = 0\nwhile true do\ni = i + 1\nif i == 5 then return i end\ni\nend\nend\nf()` → 5
+- Return from nested loops: `fn f() is\nwhile true do\nwhile true do\nreturn 99\nend\nend\nend\nf()` → 99
+- Return with block-scoped locals: `fn f() is\nmy x = 10\nif true then\nmy y = 20\nreturn y\nend\nx\nend\nf()` → 20
+- Return at top level is a compile error: `return 42` → error containing "return"
+- Return with single-line function: `fn f(x) is return x * 2\nf(5)` → 10
+- Return preserves last-expression default: `fn f() is 42 end\nf()` → 42 (still works without explicit return)
+
+Run `make test && make check` to confirm the new tests fail (existing tests still pass).
+
+### Step 2: Add `AST_RETURN` to the parser
+
+In `src/parser.h`:
+- Add `AST_RETURN` to the `AstNodeType` enum (after `AST_CONTINUE`). Comment: `/* return [expr]: exit enclosing function, optional value */`
+
+In `src/parser.c`:
+- Add `"return"` to the `is_reserved_keyword` function.
+- In `parse_primary`, add a block for `return` (modeled on the existing `break` block, placed right after the `continue` block). The logic:
+  1. Check `token_is_keyword(&t, "return")`, advance.
+  2. Use the same value-detection logic as `break`: check if the next token can start an expression (NUMBER, STRING, IDENT that isn't a keyword terminator, or `(` or `-` operator). Add `"return"` to the keyword exclusion list alongside `"break"` and `"continue"`.
+  3. If there's a value, parse it with `parse_assignment(p)` and store in `node->left`.
+  4. Create an `AST_RETURN` node with `left` = value (or NULL for bare return).
+- Also add `"return"` to the `break` block's keyword exclusion list (where it checks `!token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue")`), so that `break return` is treated as a bare break rather than trying to parse `return` as a value expression.
+- Add `AST_RETURN` to `ast_node_type_str` — return `"RETURN"`.
+- Add `AST_RETURN` to `ast_format_node` — use the same pattern as `AST_BREAK` (either `[RETURN expr]` or `[RETURN]` for bare return).
+- Add `AST_RETURN` to `ast_free` if there's a switch on node types (check — it may use `left`/`right` generically).
+- In `parser_is_complete`, check whether `return` needs handling for REPL multiline detection. It shouldn't need special cases since `return` doesn't introduce a block (no matching `end`).
+
+Run `make test && make check`. Parser tests should now pass; VM tests should still fail.
+
+### Step 3: Add `compile_return` to the compiler
+
+In `src/compiler.c`:
+- Add a `compile_return` function (modeled loosely on `compile_break` but simpler):
+  1. Check `c->context == COMPILE_FUNCTION`. If not, call `compiler_error(c, "'return' outside of function")` and return.
+  2. If `node->left` is non-NULL, compile the return value expression with `compile_node(c, node->left)`.
+  3. If `node->left` is NULL, emit `OP_NOTHING` (bare return = return nothing).
+  4. Emit `OP_RETURN`.
+  - **Note:** Unlike `break`, we do NOT need to pop block-scoped locals before `OP_RETURN`. The VM's `OP_RETURN` handler already pops the entire call frame (`while (vm.stack_top > frame->slots)`), which covers all locals regardless of scope depth.
+- Add `case AST_RETURN: compile_return(c, node); break;` to the switch in `compile_node`.
+
+Run `make test && make check`. All tests should now pass.
+
+### Step 4: Add example program
+
+Add `examples/return.cutlet` demonstrating:
+- A function with early return as a guard clause
+- A function that returns from inside a loop
+- A function using last-expression-is-return-value (no explicit return) for contrast
+
+Generate `examples/return.expected` by running the program.
