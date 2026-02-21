@@ -774,6 +774,227 @@ TEST(test_compile_nested_fn_is_local) {
 }
 
 /* ============================================================
+ * Upvalue resolution (closures-capture Step 1)
+ * ============================================================ */
+
+/* Inner function captures outer local → OP_CLOSURE has 1 upvalue descriptor,
+ * inner body uses OP_GET_UPVALUE instead of OP_GET_GLOBAL.
+ * fn() is my x = 1\nfn() is x end end */
+TEST(test_compile_upvalue_capture_local) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is\nmy x = 1\nfn() is x end\nend", &err);
+    ASSERT(chunk != NULL, "should compile");
+
+    /* Top-level has OP_CLOSURE for the outer fn. */
+    ASSERT(chunk->code[0] == OP_CLOSURE, "outer OP_CLOSURE");
+    uint8_t outer_fn_idx = chunk->code[1];
+    ObjFunction *outer_fn = chunk->constants[outer_fn_idx].function;
+    ASSERT(outer_fn != NULL, "outer function exists");
+    ASSERT(outer_fn->upvalue_count == 0, "outer fn captures nothing");
+
+    /* Find OP_CLOSURE in the outer body (for the inner fn). */
+    Chunk *outer_body = outer_fn->chunk;
+    ASSERT(outer_body != NULL, "outer body chunk exists");
+
+    int closure_offset = -1;
+    for (size_t i = 0; i < outer_body->count; i++) {
+        if (outer_body->code[i] == OP_CLOSURE) {
+            closure_offset = (int)i;
+            break;
+        }
+    }
+    ASSERT(closure_offset >= 0, "inner OP_CLOSURE found in outer body");
+
+    /* Get the inner function from the outer body's constant pool. */
+    uint8_t inner_fn_idx = outer_body->code[closure_offset + 1];
+    ASSERT(inner_fn_idx < outer_body->const_count, "inner fn constant index in range");
+    ObjFunction *inner_fn = outer_body->constants[inner_fn_idx].function;
+    ASSERT(inner_fn != NULL, "inner function exists");
+    ASSERT(inner_fn->upvalue_count == 1, "inner fn captures 1 upvalue");
+
+    /* Upvalue descriptor after OP_CLOSURE: (is_local=1, index=1).
+     * x is at slot 1 in the outer function (slot 0 = callee). */
+    uint8_t is_local = outer_body->code[closure_offset + 2];
+    uint8_t uv_index = outer_body->code[closure_offset + 3];
+    ASSERT(is_local == 1, "upvalue is_local = 1 (direct capture)");
+    ASSERT(uv_index == 1, "upvalue index = 1 (slot of x in outer fn)");
+
+    /* Inner body should use OP_GET_UPVALUE 0 for x. */
+    Chunk *inner_body = inner_fn->chunk;
+    ASSERT(inner_body != NULL, "inner body chunk exists");
+    ASSERT(inner_body->code[0] == OP_GET_UPVALUE, "inner body uses OP_GET_UPVALUE");
+    ASSERT(inner_body->code[1] == 0, "upvalue index 0");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Function with no capture has upvalue_count == 0 and no upvalue descriptors. */
+TEST(test_compile_no_capture_zero_upvalues) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn foo() is 42 end", &err);
+    ASSERT(chunk != NULL, "should compile");
+    ASSERT(chunk->code[0] == OP_CLOSURE, "OP_CLOSURE");
+    uint8_t fn_idx = chunk->code[1];
+    ObjFunction *fn = chunk->constants[fn_idx].function;
+    ASSERT(fn->upvalue_count == 0, "no upvalues when nothing is captured");
+    /* Next byte after OP_CLOSURE+idx should be the next instruction
+     * (no upvalue descriptors to skip). */
+    ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "immediately followed by OP_DEFINE_GLOBAL");
+    free_chunk(chunk);
+    PASS();
+}
+
+/* 3-level nesting: innermost captures outermost's local via chained upvalue.
+ * fn() is my x = 1\nfn() is fn() is x end end end
+ * - Middle captures x from outermost: (is_local=true, index=1)
+ * - Innermost captures x from middle's upvalue: (is_local=false, index=0) */
+TEST(test_compile_upvalue_chained_capture) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is\nmy x = 1\nfn() is\nfn() is x end\nend\nend", &err);
+    ASSERT(chunk != NULL, "should compile");
+
+    /* Navigate to outermost function. */
+    uint8_t outer_fn_idx = chunk->code[1];
+    ObjFunction *outer_fn = chunk->constants[outer_fn_idx].function;
+    Chunk *outer_body = outer_fn->chunk;
+
+    /* Find OP_CLOSURE for middle function in outer body. */
+    int mid_closure_offset = -1;
+    for (size_t i = 0; i < outer_body->count; i++) {
+        if (outer_body->code[i] == OP_CLOSURE) {
+            mid_closure_offset = (int)i;
+            break;
+        }
+    }
+    ASSERT(mid_closure_offset >= 0, "middle OP_CLOSURE found");
+
+    uint8_t mid_fn_idx = outer_body->code[mid_closure_offset + 1];
+    ObjFunction *mid_fn = outer_body->constants[mid_fn_idx].function;
+    ASSERT(mid_fn->upvalue_count == 1, "middle fn captures 1 upvalue");
+
+    /* Middle's upvalue descriptor: (is_local=true, index=1) — captures x directly. */
+    uint8_t mid_is_local = outer_body->code[mid_closure_offset + 2];
+    uint8_t mid_uv_index = outer_body->code[mid_closure_offset + 3];
+    ASSERT(mid_is_local == 1, "middle captures local (is_local=1)");
+    ASSERT(mid_uv_index == 1, "middle captures slot 1 (x)");
+
+    /* Find OP_CLOSURE for innermost function in middle body. */
+    Chunk *mid_body = mid_fn->chunk;
+    ASSERT(mid_body != NULL, "middle body chunk exists");
+
+    int inner_closure_offset = -1;
+    for (size_t i = 0; i < mid_body->count; i++) {
+        if (mid_body->code[i] == OP_CLOSURE) {
+            inner_closure_offset = (int)i;
+            break;
+        }
+    }
+    ASSERT(inner_closure_offset >= 0, "inner OP_CLOSURE found in middle body");
+
+    uint8_t inner_fn_idx = mid_body->code[inner_closure_offset + 1];
+    ObjFunction *inner_fn = mid_body->constants[inner_fn_idx].function;
+    ASSERT(inner_fn->upvalue_count == 1, "innermost fn captures 1 upvalue");
+
+    /* Innermost's upvalue descriptor: (is_local=false, index=0) — from middle's upvalue[0]. */
+    uint8_t inner_is_local = mid_body->code[inner_closure_offset + 2];
+    uint8_t inner_uv_index = mid_body->code[inner_closure_offset + 3];
+    ASSERT(inner_is_local == 0, "innermost captures upvalue (is_local=0)");
+    ASSERT(inner_uv_index == 0, "innermost captures middle's upvalue[0]");
+
+    /* Innermost body should use OP_GET_UPVALUE 0. */
+    Chunk *inner_body = inner_fn->chunk;
+    ASSERT(inner_body != NULL, "inner body chunk exists");
+    ASSERT(inner_body->code[0] == OP_GET_UPVALUE, "innermost uses OP_GET_UPVALUE");
+    ASSERT(inner_body->code[1] == 0, "innermost upvalue index 0");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Assignment through upvalue emits OP_SET_UPVALUE.
+ * fn() is my x = 1\nfn() is x = 2 end end */
+TEST(test_compile_upvalue_set) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is\nmy x = 1\nfn() is x = 2 end\nend", &err);
+    ASSERT(chunk != NULL, "should compile");
+
+    /* Navigate to inner function's body. */
+    uint8_t outer_fn_idx = chunk->code[1];
+    ObjFunction *outer_fn = chunk->constants[outer_fn_idx].function;
+    Chunk *outer_body = outer_fn->chunk;
+
+    int closure_offset = -1;
+    for (size_t i = 0; i < outer_body->count; i++) {
+        if (outer_body->code[i] == OP_CLOSURE) {
+            closure_offset = (int)i;
+            break;
+        }
+    }
+    ASSERT(closure_offset >= 0, "inner OP_CLOSURE found");
+
+    uint8_t inner_fn_idx = outer_body->code[closure_offset + 1];
+    ObjFunction *inner_fn = outer_body->constants[inner_fn_idx].function;
+    Chunk *inner_body = inner_fn->chunk;
+    ASSERT(inner_body != NULL, "inner body exists");
+
+    /* Inner body: OP_CONSTANT <2>, OP_SET_UPVALUE 0, OP_RETURN */
+    ASSERT(inner_body->code[0] == OP_CONSTANT, "push RHS value");
+    ASSERT(inner_body->code[2] == OP_SET_UPVALUE, "OP_SET_UPVALUE for assignment");
+    ASSERT(inner_body->code[3] == 0, "upvalue index 0");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* Upvalue in call position: callee resolved via OP_GET_UPVALUE.
+ * fn() is my f = fn() is 42 end\nfn() is f() end end */
+TEST(test_compile_upvalue_call) {
+    CompileError err;
+    Chunk *chunk = compile_input("fn() is\nmy f = fn() is 42 end\nfn() is f() end\nend", &err);
+    ASSERT(chunk != NULL, "should compile");
+
+    /* Navigate to the outer function. */
+    uint8_t outer_fn_idx = chunk->code[1];
+    ObjFunction *outer_fn = chunk->constants[outer_fn_idx].function;
+    Chunk *outer_body = outer_fn->chunk;
+
+    /* Find the SECOND OP_CLOSURE in outer body (first is f's closure,
+     * second is the inner fn that captures f). */
+    int closure_count = 0;
+    int inner_closure_offset = -1;
+    for (size_t i = 0; i < outer_body->count; i++) {
+        if (outer_body->code[i] == OP_CLOSURE) {
+            closure_count++;
+            if (closure_count == 2) {
+                inner_closure_offset = (int)i;
+                break;
+            }
+            /* Skip upvalue descriptors for first closure. */
+            uint8_t fn_idx = outer_body->code[i + 1];
+            ObjFunction *fn = outer_body->constants[fn_idx].function;
+            i += 1 + (size_t)(fn->upvalue_count * 2);
+        }
+    }
+    ASSERT(inner_closure_offset >= 0, "second OP_CLOSURE found (inner fn)");
+
+    uint8_t inner_fn_idx = outer_body->code[inner_closure_offset + 1];
+    ObjFunction *inner_fn = outer_body->constants[inner_fn_idx].function;
+    Chunk *inner_body = inner_fn->chunk;
+    ASSERT(inner_body != NULL, "inner body exists");
+
+    /* Inner body should use OP_GET_UPVALUE for the callee f,
+     * then OP_CALL. */
+    ASSERT(inner_body->code[0] == OP_GET_UPVALUE, "callee loaded via OP_GET_UPVALUE");
+    ASSERT(inner_body->code[1] == 0, "upvalue index 0 (f)");
+    ASSERT(inner_body->code[2] == OP_CALL, "OP_CALL");
+    ASSERT(inner_body->code[3] == 0, "argc = 0");
+
+    free_chunk(chunk);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -850,6 +1071,13 @@ int main(void) {
     RUN_TEST(test_compile_fn_emits_op_closure);
     RUN_TEST(test_compile_anon_fn_emits_op_closure);
     RUN_TEST(test_compile_nested_fn_is_local);
+
+    printf("\nUpvalue resolution:\n");
+    RUN_TEST(test_compile_upvalue_capture_local);
+    RUN_TEST(test_compile_no_capture_zero_upvalues);
+    RUN_TEST(test_compile_upvalue_chained_capture);
+    RUN_TEST(test_compile_upvalue_set);
+    RUN_TEST(test_compile_upvalue_call);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
