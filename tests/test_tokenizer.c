@@ -2350,6 +2350,57 @@ TEST(test_tok_decimal_multiple_dots) {
 }
 
 /* ============================================================
+ * Array bracket tokenization tests
+ * ============================================================ */
+
+/* [1, 2] → OPERATOR "[", NUMBER "1", OPERATOR ",", NUMBER "2", OPERATOR "]" */
+TEST(test_tok_array_literal) {
+    Tokenizer *tok = tokenizer_create("[1, 2]");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected OPERATOR '['");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "expected NUMBER '1'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ",", 1), "expected OPERATOR ','");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "2", 1), "expected NUMBER '2'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "]", 1), "expected OPERATOR ']'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* [] → OPERATOR "[", OPERATOR "]" */
+TEST(test_tok_empty_array) {
+    Tokenizer *tok = tokenizer_create("[]");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected OPERATOR '['");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "]", 1), "expected OPERATOR ']'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -2527,6 +2578,10 @@ int main(void) {
     RUN_TEST(test_tok_decimal_trailing_dot);
     RUN_TEST(test_tok_decimal_dot_ident);
     RUN_TEST(test_tok_decimal_multiple_dots);
+
+    printf("\nArray bracket tokenization:\n");
+    RUN_TEST(test_tok_array_literal);
+    RUN_TEST(test_tok_empty_array);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);
