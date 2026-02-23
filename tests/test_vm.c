@@ -2330,6 +2330,52 @@ TEST(test_closure_counter_with_say) {
 }
 
 /* ============================================================
+ * Kebab-case identifiers (end-to-end integration tests)
+ *
+ * These tests verify that dashed identifiers work through the
+ * full parse → compile → execute pipeline.
+ * ============================================================ */
+
+/* my compute-sum = 42; compute-sum → 42 */
+TEST(test_kebab_var_decl_and_read) {
+    assert_vm_number("my compute-sum = 42\ncompute-sum", 42.0, "kebab var decl and read");
+}
+
+/* my x-val = 1; x-val = 2; x-val → 2 */
+TEST(test_kebab_var_assignment) {
+    assert_vm_number("my x-val = 1\nx-val = 2\nx-val", 2.0, "kebab var assignment");
+}
+
+/* my x-y = 10; my x_y = 20; x-y → 10 (dashed and underscored are distinct) */
+TEST(test_kebab_distinct_from_underscore) {
+    assert_vm_number("my x-y = 10\nmy x_y = 20\nx-y", 10.0, "kebab distinct from underscore");
+}
+
+/* fn add-one(n) is n + 1 end; add-one(5) → 6 */
+TEST(test_kebab_fn_def_and_call) {
+    assert_vm_number("fn add-one(n) is n + 1 end\nadd-one(5)", 6.0, "kebab function def and call");
+}
+
+/* fn f(my-param) is my-param * 2 end; f(3) → 6 */
+TEST(test_kebab_param_names) {
+    assert_vm_number("fn f(my-param) is my-param * 2 end\nf(3)", 6.0, "kebab parameter names");
+}
+
+/* my outer-val = 99; my f = fn() is outer-val end; f() → 99 */
+TEST(test_kebab_closure_capture) {
+    assert_vm_number("my outer-val = 99\n"
+                     "my f = fn() is outer-val end\n"
+                     "f()",
+                     99.0, "kebab closure capture");
+}
+
+/* my foo-bar = 10; foo-bar - 3 → 7
+ * Tests that `foo-bar` is one ident and `- 3` is subtraction due to space. */
+TEST(test_kebab_ident_in_subtraction_expr) {
+    assert_vm_number("my foo-bar = 10\nfoo-bar - 3", 7.0, "kebab ident in subtraction expression");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2738,6 +2784,15 @@ int main(void) {
     RUN_TEST(test_closure_error_arity_named);
     RUN_TEST(test_closure_error_arity_anonymous);
     RUN_TEST(test_closure_counter_with_say);
+
+    printf("\nKebab-case identifiers (integration):\n");
+    RUN_TEST(test_kebab_var_decl_and_read);
+    RUN_TEST(test_kebab_var_assignment);
+    RUN_TEST(test_kebab_distinct_from_underscore);
+    RUN_TEST(test_kebab_fn_def_and_call);
+    RUN_TEST(test_kebab_param_names);
+    RUN_TEST(test_kebab_closure_capture);
+    RUN_TEST(test_kebab_ident_in_subtraction_expr);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
