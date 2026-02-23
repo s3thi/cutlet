@@ -171,3 +171,7 @@ Per the language-feature checklist in AGENTS.md, remind the user to:
 - Update `TUTORIAL.md` to cover kebab-case identifiers.
 - Add an example program in `examples/` (e.g., `examples/kebab_idents.cutlet`
   with a corresponding `.expected` file).
+
+## Progress
+
+- [x] Step 1: Tokenizer unit tests — added 11 tests covering all kebab-case dash rules; 4 fail as expected (feature not yet implemented), 7 pass (already correct behavior for non-kebab cases)
