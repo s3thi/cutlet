@@ -472,6 +472,46 @@ say(nested_scopes())  # prints: 30
 # a global variable. Block scoping only applies inside functions.
 
 # ============================================================
+# 9d. Early return
+# ============================================================
+
+# By default, a function returns the value of its last expression.
+# Use `return` when you need to exit a function early.
+
+# Guard clause — return early for special cases:
+fn abs(x) is
+  if x < 0 then return -x end
+  x
+end
+say(abs(-7))            # prints: 7
+say(abs(3))             # prints: 3
+
+# Bare `return` (no expression) returns nothing:
+fn maybe_greet(name) is
+  if name == "" then return end
+  say("hello " ++ name)
+end
+maybe_greet("")         # does nothing, returns nothing
+maybe_greet("world")    # prints: hello world
+
+# Return from inside a loop — exits the function, not just the loop:
+fn find_first_multiple(factor, limit) is
+  my i = 1
+  while i <= limit do
+    if i % factor == 0 then return i end
+    i = i + 1
+  end
+  nothing
+end
+say(find_first_multiple(3, 10))  # prints: 3
+
+# `return` outside a function is a compile error.
+# return 42             # => ERR 'return' outside of function
+
+# `return` is a reserved keyword — you can't use it as a variable name.
+# my return = 5         # => ERR parse error
+
+# ============================================================
 # 10. Higher-order functions
 # ============================================================
 

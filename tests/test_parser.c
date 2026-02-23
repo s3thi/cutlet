@@ -1713,6 +1713,38 @@ TEST(test_is_complete_break_with_value) {
 }
 
 /* ============================================================
+ * Return expression
+ * ============================================================ */
+
+/* return with number value */
+TEST(test_return_with_number) {
+    ASSERT(ast_matches("return 42", "AST [RETURN [NUMBER 42]]"), "return with number value");
+    PASS();
+}
+
+/* return with string value */
+TEST(test_return_with_string) {
+    ASSERT(ast_matches("return \"hello\"", "AST [RETURN [STRING hello]]"),
+           "return with string value");
+    PASS();
+}
+
+/* bare return (no expression) */
+TEST(test_return_bare) {
+    ASSERT(ast_matches("fn f() is return end", "AST [FN f() [RETURN]]"), "bare return in function");
+    PASS();
+}
+
+/* 'return' as variable name rejected */
+TEST(test_return_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my return = 5", &node, &err), "return as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * String concatenation operator (++)
  * ============================================================ */
 
@@ -2499,6 +2531,14 @@ int main(void) {
     RUN_TEST(test_is_complete_break_in_while);
     RUN_TEST(test_is_complete_continue_in_while);
     RUN_TEST(test_is_complete_break_with_value);
+
+    printf("\nReturn expression parsing:\n");
+    RUN_TEST(test_return_with_number);
+    RUN_TEST(test_return_with_string);
+    RUN_TEST(test_return_bare);
+
+    printf("\nReturn reserved keyword:\n");
+    RUN_TEST(test_return_keyword_reserved);
 
     printf("\nString concatenation operator (++):\n");
     RUN_TEST(test_expr_concat_basic);

@@ -2330,6 +2330,69 @@ TEST(test_closure_counter_with_say) {
 }
 
 /* ============================================================
+ * Return keyword
+ * ============================================================ */
+
+/* Basic return: function returns the given value */
+TEST(test_return_basic) {
+    assert_vm_number("fn f() is return 42 end\nf()", 42.0, "basic return value");
+}
+
+/* Bare return: returns nothing */
+TEST(test_return_bare) {
+    assert_vm_nothing("fn f() is return end\nf()", "bare return returns nothing");
+}
+
+/* Return nothing explicitly */
+TEST(test_return_nothing_explicit) {
+    assert_vm_nothing("fn f() is return nothing end\nf()", "return nothing explicitly");
+}
+
+/* Early return (guard clause): return from if, otherwise continue */
+TEST(test_return_early_guard) {
+    assert_vm_number("fn f(x) is\nif x < 0 then return -1 end\nx * 2\nend\nf(-5)", -1.0,
+                     "early return guard clause negative");
+}
+
+TEST(test_return_early_guard_fallthrough) {
+    assert_vm_number("fn f(x) is\nif x < 0 then return -1 end\nx * 2\nend\nf(3)", 6.0,
+                     "early return guard clause positive falls through");
+}
+
+/* Return from inside a while loop exits the function */
+TEST(test_return_from_while_loop) {
+    assert_vm_number("fn f() is\nmy i = 0\nwhile true do\ni = i + 1\nif i == 5 then return i "
+                     "end\ni\nend\nend\nf()",
+                     5.0, "return from while loop");
+}
+
+/* Return from nested loops exits the function entirely */
+TEST(test_return_from_nested_loops) {
+    assert_vm_number("fn f() is\nwhile true do\nwhile true do\nreturn 99\nend\nend\nend\nf()", 99.0,
+                     "return from nested loops");
+}
+
+/* Return with block-scoped locals cleans up correctly */
+TEST(test_return_with_block_scoped_locals) {
+    assert_vm_number("fn f() is\nmy x = 10\nif true then\nmy y = 20\nreturn y\nend\nx\nend\nf()",
+                     20.0, "return with block-scoped locals");
+}
+
+/* Return at top level is a compile error */
+TEST(test_return_top_level_error) { assert_vm_error("return 42", "return at top level"); }
+
+/* Return with single-line function */
+TEST(test_return_single_line_fn) {
+    assert_vm_number("fn f(x) is return x * 2\nf(5)", 10.0, "return in single-line fn");
+}
+
+/* Last-expression-is-return-value still works without explicit return */
+TEST(test_return_last_expr_default) {
+    assert_vm_number("fn f() is 42 end\nf()", 42.0,
+                     "last expression still returns without explicit return");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2738,6 +2801,19 @@ int main(void) {
     RUN_TEST(test_closure_error_arity_named);
     RUN_TEST(test_closure_error_arity_anonymous);
     RUN_TEST(test_closure_counter_with_say);
+
+    printf("\nReturn keyword:\n");
+    RUN_TEST(test_return_basic);
+    RUN_TEST(test_return_bare);
+    RUN_TEST(test_return_nothing_explicit);
+    RUN_TEST(test_return_early_guard);
+    RUN_TEST(test_return_early_guard_fallthrough);
+    RUN_TEST(test_return_from_while_loop);
+    RUN_TEST(test_return_from_nested_loops);
+    RUN_TEST(test_return_with_block_scoped_locals);
+    RUN_TEST(test_return_top_level_error);
+    RUN_TEST(test_return_single_line_fn);
+    RUN_TEST(test_return_last_expr_default);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
