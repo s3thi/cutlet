@@ -803,6 +803,33 @@ static void compile_continue(Compiler *c, const AstNode *node) {
 }
 
 /*
+ * Compile a return expression.
+ *
+ * return [expr]: exit the enclosing function immediately with a value.
+ * Only valid inside a function body (COMPILE_FUNCTION context).
+ * If no expression is given, returns nothing.
+ * No local cleanup is needed — the VM's OP_RETURN handler already
+ * pops the entire call frame (including all locals and temporaries).
+ */
+static void compile_return(Compiler *c, const AstNode *node) {
+    if (c->context != COMPILE_FUNCTION) {
+        compiler_error(c, "'return' outside of function");
+        return;
+    }
+
+    int line = (int)node->line;
+
+    /* Compile the return value, or push nothing for bare return. */
+    if (node->left) {
+        compile_node(c, node->left);
+    } else {
+        emit_byte(c, OP_NOTHING, line);
+    }
+
+    emit_byte(c, OP_RETURN, line);
+}
+
+/*
  * Compile a function definition: fn name(params) is body end
  *
  * Creates a new Compiler with a fresh Chunk for the function body,
@@ -1031,6 +1058,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_CONTINUE:
         compile_continue(c, node);
+        break;
+    case AST_RETURN:
+        compile_return(c, node);
         break;
     case AST_FUNCTION:
         compile_function(c, node);
