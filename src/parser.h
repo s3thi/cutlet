@@ -29,6 +29,7 @@ typedef enum {
     AST_WHILE,    /* while loop: while cond do body end */
     AST_BREAK,    /* break [expr]: exit innermost loop, optional value */
     AST_CONTINUE, /* continue: skip to next iteration of innermost loop */
+    AST_RETURN,   /* return [expr]: exit enclosing function, optional value */
     AST_FUNCTION, /* function def: fn name(params) is body end */
 } AstNodeType;
 

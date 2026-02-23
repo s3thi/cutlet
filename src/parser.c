@@ -350,8 +350,8 @@ static bool is_reserved_keyword(const Token *t) {
            token_is_keyword(t, "then") || token_is_keyword(t, "else") ||
            token_is_keyword(t, "end") || token_is_keyword(t, "while") ||
            token_is_keyword(t, "do") || token_is_keyword(t, "break") ||
-           token_is_keyword(t, "continue") || token_is_keyword(t, "fn") ||
-           token_is_keyword(t, "is");
+           token_is_keyword(t, "continue") || token_is_keyword(t, "return") ||
+           token_is_keyword(t, "fn") || token_is_keyword(t, "is");
 }
 
 /* ============================================================
@@ -477,7 +477,8 @@ static AstNode *parse_atom(Parser *p) {
             has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
                         !token_is_keyword(&next, "then") && !token_is_keyword(&next, "do") &&
                         !token_is_keyword(&next, "and") && !token_is_keyword(&next, "or") &&
-                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue");
+                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue") &&
+                        !token_is_keyword(&next, "return");
         }
 
         if (has_value) {
@@ -517,6 +518,56 @@ static AstNode *parse_atom(Parser *p) {
         node->type = AST_CONTINUE;
         node->value = NULL;
         node->left = NULL;
+        node->right = NULL;
+        node->grouped = false;
+        node->line = t.line;
+        node->children = NULL;
+        node->child_count = 0;
+        node->params = NULL;
+        node->param_count = 0;
+        return node;
+    }
+
+    /* Return expression: return [value]
+     * Parsed syntactically anywhere; the compiler enforces function context.
+     * Uses the same value-detection logic as break to decide whether
+     * return has an accompanying expression. */
+    if (token_is_keyword(&t, "return")) {
+        advance(p);
+        AstNode *value_node = NULL;
+
+        /* Check if the next token can start an expression.
+         * Same logic as break: if it's end/else/then/do/EOF/NEWLINE or
+         * another non-expression token, treat this as a bare return. */
+        Token next = p->current;
+        bool has_value = false;
+        if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
+            (next.type == TOK_OPERATOR && next.value_len == 1 &&
+             (next.value[0] == '(' || next.value[0] == '-'))) {
+            has_value = true;
+        } else if (next.type == TOK_IDENT) {
+            has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
+                        !token_is_keyword(&next, "then") && !token_is_keyword(&next, "do") &&
+                        !token_is_keyword(&next, "and") && !token_is_keyword(&next, "or") &&
+                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue") &&
+                        !token_is_keyword(&next, "return");
+        }
+
+        if (has_value) {
+            value_node = parse_assignment(p);
+            if (!value_node)
+                return NULL;
+        }
+
+        AstNode *node = malloc(sizeof(AstNode));
+        if (!node) {
+            ast_free(value_node);
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        node->type = AST_RETURN;
+        node->value = NULL;
+        node->left = value_node;
         node->right = NULL;
         node->grouped = false;
         node->line = t.line;
@@ -1934,6 +1985,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "BREAK";
     case AST_CONTINUE:
         return "CONTINUE";
+    case AST_RETURN:
+        return "RETURN";
     case AST_FUNCTION:
         return "FN";
     default:
@@ -2216,6 +2269,31 @@ static char *ast_format_node(const AstNode *node) {
 
     if (node->type == AST_CONTINUE) {
         /* Continue: [CONTINUE] */
+        size_t len = 1 + strlen(type_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf)
+            return NULL;
+        snprintf(buf, len, "[%s]", type_str);
+        return buf;
+    }
+
+    if (node->type == AST_RETURN) {
+        /* Return: [RETURN] or [RETURN expr] */
+        if (node->left) {
+            char *val_str = ast_format_node(node->left);
+            if (!val_str)
+                return NULL;
+            size_t len = 1 + strlen(type_str) + 1 + strlen(val_str) + 1 + 1;
+            char *buf = malloc(len);
+            if (!buf) {
+                free(val_str);
+                return NULL;
+            }
+            snprintf(buf, len, "[%s %s]", type_str, val_str);
+            free(val_str);
+            return buf;
+        }
+        /* Bare return: [RETURN] */
         size_t len = 1 + strlen(type_str) + 1 + 1;
         char *buf = malloc(len);
         if (!buf)

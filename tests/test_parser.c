@@ -1731,8 +1731,7 @@ TEST(test_return_with_string) {
 
 /* bare return (no expression) */
 TEST(test_return_bare) {
-    ASSERT(ast_matches("fn f() is return end", "AST [FN f [] [RETURN]]"),
-           "bare return in function");
+    ASSERT(ast_matches("fn f() is return end", "AST [FN f() [RETURN]]"), "bare return in function");
     PASS();
 }
 
