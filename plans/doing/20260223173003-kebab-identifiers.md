@@ -176,3 +176,6 @@ Per the language-feature checklist in AGENTS.md, remind the user to:
 
 - [x] Step 1: Tokenizer unit tests — added 11 tests covering all kebab-case dash rules; 4 fail as expected (feature not yet implemented), 7 pass (already correct behavior for non-kebab cases)
 - [x] Step 2: Integration tests — added 7 end-to-end VM tests in test_vm.c covering variable decl/read, assignment, distinct from underscore, function def/call, dashed params, closure capture, and subtraction disambiguation; all 7 fail as expected
+- [x] Step 3: Confirmed all new tests fail as expected (4 tokenizer, 7 VM)
+- [x] Step 4: Implement read_ident() kebab-case support — added Raku-style dash lookahead in tokenizer.c, updated 2 old sandwich tests to match new behavior; all tests pass
+- [x] Step 5: `make test && make check` pass — 128 tokenizer tests, 317 VM tests, 20 example tests all green

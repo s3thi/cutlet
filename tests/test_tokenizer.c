@@ -750,44 +750,32 @@ TEST(test_no_sandwich_plus) {
 }
 
 TEST(test_no_sandwich_hyphen) {
-    /* kebab-case => IDENT("kebab"), OPERATOR("-"), IDENT("case") */
+    /* kebab-case => single IDENT("kebab-case") with Raku-style dash rule */
     Tokenizer *tok = tokenizer_create("kebab-case");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab", 5), "expected IDENT 'kebab'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab-case", 10), "expected IDENT 'kebab-case'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "case", 4), "expected IDENT 'case'");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_no_sandwich_multiple_hyphens) {
-    /* a-b-c => IDENT, OP, IDENT, OP, IDENT */
+    /* a-b-c => single IDENT("a-b-c") with Raku-style dash rule */
     Tokenizer *tok = tokenizer_create("a-b-c");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a-b-c", 5), "expected IDENT 'a-b-c'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "c", 1), "expected IDENT 'c'");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
