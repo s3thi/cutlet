@@ -179,3 +179,13 @@ Per the language-feature checklist in AGENTS.md, remind the user to:
 - [x] Step 3: Confirmed all new tests fail as expected (4 tokenizer, 7 VM)
 - [x] Step 4: Implement read_ident() kebab-case support — added Raku-style dash lookahead in tokenizer.c, updated 2 old sandwich tests to match new behavior; all tests pass
 - [x] Step 5: `make test && make check` pass — 128 tokenizer tests, 317 VM tests, 20 example tests all green
+- [x] Step 6: Remind user about docs and example (see below)
+
+## Summary
+
+Implemented Raku-style kebab-case identifiers. A `-` inside an identifier is consumed only when immediately followed by an ASCII letter, so `foo-bar` is one ident but `foo-3`, `foo--bar`, and `foo - bar` are not.
+
+Files changed:
+- `src/tokenizer.c` — modified `read_ident()` with kebab-case dash lookahead loop; updated file-level IDENT pattern comment
+- `tests/test_tokenizer.c` — added 11 new kebab-case unit tests; updated 2 existing sandwich tests for new behavior
+- `tests/test_vm.c` — added 7 integration tests (variable decl/assign, distinct from underscore, function def/call, dashed params, closure capture, subtraction disambiguation)
