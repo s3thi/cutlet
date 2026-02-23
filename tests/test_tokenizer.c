@@ -500,6 +500,230 @@ TEST(test_ident_ab_12) {
 }
 
 /* ============================================================
+ * Kebab-case identifier tests (Raku-style dash rules)
+ *
+ * A dash is part of an identifier only when:
+ * 1. It appears immediately after ident-continue chars (no space before)
+ * 2. The character immediately after the dash is an ASCII letter
+ *    (not a digit, not '_', not another '-', not whitespace/EOF)
+ * ============================================================ */
+
+TEST(test_ident_with_dash) {
+    /* foo-bar => single IDENT("foo-bar") */
+    Tokenizer *tok = tokenizer_create("foo-bar");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo-bar", 7), "expected IDENT 'foo-bar'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_with_multiple_dashes) {
+    /* foo-bar-baz => single IDENT("foo-bar-baz") */
+    Tokenizer *tok = tokenizer_create("foo-bar-baz");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo-bar-baz", 11), "expected IDENT 'foo-bar-baz'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_dash_not_before_digit) {
+    /* foo-3 => IDENT("foo"), OP("-"), NUMBER("3") */
+    Tokenizer *tok = tokenizer_create("foo-3");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "3", 1), "expected NUMBER '3'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_dash_not_before_underscore) {
+    /* foo-_bar => IDENT("foo"), OP("-"), IDENT("_bar") */
+    Tokenizer *tok = tokenizer_create("foo-_bar");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "_bar", 4), "expected IDENT '_bar'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_double_dash) {
+    /* foo--bar => IDENT("foo"), OP("-"), OP("-"), IDENT("bar") */
+    Tokenizer *tok = tokenizer_create("foo--bar");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "bar", 3), "expected IDENT 'bar'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_dash_with_spaces) {
+    /* "foo - bar" => IDENT("foo"), OP("-"), IDENT("bar") — spaces prevent dash absorption */
+    Tokenizer *tok = tokenizer_create("foo - bar");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "bar", 3), "expected IDENT 'bar'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_leading_dash) {
+    /* "-foo" => OP("-"), IDENT("foo") — dash at start is operator */
+    Tokenizer *tok = tokenizer_create("-foo");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_trailing_dash) {
+    /* "foo-" => IDENT("foo"), OP("-") — dash at end (before EOF) is operator */
+    Tokenizer *tok = tokenizer_create("foo-");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_keyword_prefix_dash) {
+    /* "not-empty" => single IDENT("not-empty"), NOT keyword + minus */
+    Tokenizer *tok = tokenizer_create("not-empty");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "not-empty", 9), "expected IDENT 'not-empty'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_keyword_if_dash) {
+    /* "if-thing" => single IDENT("if-thing"), NOT keyword + minus */
+    Tokenizer *tok = tokenizer_create("if-thing");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "if-thing", 8), "expected IDENT 'if-thing'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+TEST(test_ident_left_space_dash) {
+    /* "foo -bar" => IDENT("foo"), OP("-"), IDENT("bar") — space before dash */
+    Tokenizer *tok = tokenizer_create("foo -bar");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "foo", 3), "expected IDENT 'foo'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "bar", 3), "expected IDENT 'bar'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Former symbol sandwich tests - now produce multiple tokens
  * ============================================================ */
 
@@ -526,44 +750,32 @@ TEST(test_no_sandwich_plus) {
 }
 
 TEST(test_no_sandwich_hyphen) {
-    /* kebab-case => IDENT("kebab"), OPERATOR("-"), IDENT("case") */
+    /* kebab-case => single IDENT("kebab-case") with Raku-style dash rule */
     Tokenizer *tok = tokenizer_create("kebab-case");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab", 5), "expected IDENT 'kebab'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "kebab-case", 10), "expected IDENT 'kebab-case'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "case", 4), "expected IDENT 'case'");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
 }
 
 TEST(test_no_sandwich_multiple_hyphens) {
-    /* a-b-c => IDENT, OP, IDENT, OP, IDENT */
+    /* a-b-c => single IDENT("a-b-c") with Raku-style dash rule */
     Tokenizer *tok = tokenizer_create("a-b-c");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a-b-c", 5), "expected IDENT 'a-b-c'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "-", 1), "expected OPERATOR '-'");
-
-    ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "c", 1), "expected IDENT 'c'");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
 
     tokenizer_destroy(tok);
     PASS();
@@ -2177,6 +2389,19 @@ int main(void) {
     RUN_TEST(test_ident_dunder_init);
     RUN_TEST(test_ident_a_b2);
     RUN_TEST(test_ident_ab_12);
+
+    printf("\nKebab-case identifiers (Raku-style dash rules):\n");
+    RUN_TEST(test_ident_with_dash);
+    RUN_TEST(test_ident_with_multiple_dashes);
+    RUN_TEST(test_ident_dash_not_before_digit);
+    RUN_TEST(test_ident_dash_not_before_underscore);
+    RUN_TEST(test_ident_double_dash);
+    RUN_TEST(test_ident_dash_with_spaces);
+    RUN_TEST(test_ident_leading_dash);
+    RUN_TEST(test_ident_trailing_dash);
+    RUN_TEST(test_ident_keyword_prefix_dash);
+    RUN_TEST(test_ident_keyword_if_dash);
+    RUN_TEST(test_ident_left_space_dash);
 
     printf("\nFormer symbol sandwich (now multi-token):\n");
     RUN_TEST(test_no_sandwich_plus);

@@ -172,6 +172,38 @@ my a = my b = 5
 a               # => 5
 b               # => 5
 
+# Kebab-case identifiers — dashes are allowed inside names.
+# A dash is part of the name when it's immediately followed by a letter.
+my my-var = 42
+my-var          # => 42
+
+my compute-sum = 100
+compute-sum     # => 100
+
+# Kebab and underscore names are distinct variables.
+my x-y = 10
+my x_y = 20
+x-y             # => 10
+x_y             # => 20
+
+# Subtraction still works — just add spaces around the minus sign.
+my foo-bar = 10
+foo-bar - 3     # => 7 (foo-bar is one variable, `- 3` is subtraction)
+
+# These are NOT kebab identifiers (dash not followed by a letter):
+# foo-3     => variable `foo`, minus, number 3
+# foo--bar  => variable `foo`, minus, minus, variable `bar`
+# foo - bar => variable `foo`, minus, variable `bar`
+
+# Kebab-case works for function names and parameters too.
+fn add-one(n) is n + 1
+say(add-one(5))         # prints: 6
+
+fn greet-user(user-name) is
+  "hello " ++ user-name
+end
+say(greet-user("alice")) # prints: hello alice
+
 # Using an undeclared variable is a runtime error.
 # y              # => ERR undefined variable 'y'
 

@@ -1,0 +1,31 @@
+# Kebab-case identifiers: dashes allowed in names (Raku-style rules)
+
+# Variables with dashes
+my first-name = "Alice"
+my last-name = "Smith"
+say(first-name ++ " " ++ last-name)   # Alice Smith
+
+# Kebab and underscore names are distinct
+my my-val = 10
+my my_val = 20
+say(my-val)     # 10
+say(my_val)     # 20
+
+# Functions with dashed names
+fn add-one(n) is n + 1
+say(add-one(5))            # 6
+
+# Dashed parameter names
+fn full-name(first-part, last-part) is
+  first-part ++ " " ++ last-part
+end
+say(full-name("Bob", "Jones"))   # Bob Jones
+
+# Subtraction still works with spaces
+my total-count = 100
+say(total-count - 40)      # 60
+
+# Closures capture dashed-name variables
+my greeting-word = "hi"
+my make-greeting = fn(who) is greeting-word ++ " " ++ who end
+say(make-greeting("world"))   # hi world

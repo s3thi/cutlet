@@ -4,7 +4,7 @@
  * Implements the simplified tokenizer with Python/Ruby-style rules:
  * - NUMBER: integer and decimal literals (e.g. 42, 3.14; no negatives)
  * - STRING: double-quoted strings (no escapes, no adjacency error)
- * - IDENT: [A-Za-z_][A-Za-z0-9_]* (ASCII only, no symbol sandwiches)
+ * - IDENT: [A-Za-z_][A-Za-z0-9_]*(-[A-Za-z][A-Za-z0-9_]*)* (kebab-case)
  * - OPERATOR: one or more symbol chars (no whitespace delimiter required)
  *
  * Key rules:
@@ -388,10 +388,24 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
     tok->pos++;
     tok->col++;
 
-    /* Consume ident-continue characters */
-    while (tok->pos < tok->input_len && is_ident_continue(tok->input[tok->pos])) {
-        tok->pos++;
-        tok->col++;
+    /* Consume ident-continue characters, with Raku-style kebab-case dashes.
+     * A '-' is part of the identifier only when it is immediately followed
+     * by an ASCII letter (not digit, underscore, another dash, or EOF).
+     * This means `foo-bar` is one ident, but `foo-3`, `foo--bar`, and
+     * `foo-_bar` are not. */
+    for (;;) {
+        while (tok->pos < tok->input_len && is_ident_continue(tok->input[tok->pos])) {
+            tok->pos++;
+            tok->col++;
+        }
+        /* Check for kebab-case dash: '-' followed by ASCII letter */
+        if (tok->pos < tok->input_len && tok->input[tok->pos] == '-' &&
+            tok->pos + 1 < tok->input_len && is_ascii_letter(tok->input[tok->pos + 1])) {
+            tok->pos++; /* consume the '-' */
+            tok->col++;
+            continue; /* next iteration consumes the letter and more */
+        }
+        break;
     }
 
     size_t value_len = tok->pos - value_start;
