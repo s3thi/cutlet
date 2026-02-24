@@ -2711,6 +2711,56 @@ TEST(test_reduce_equal_fold) {
 TEST(test_reduce_non_array_error) { assert_vm_error("@+ 42", "@+ non-array error"); }
 
 /* ============================================================
+ * Vectorize (@op infix) tests
+ * ============================================================ */
+
+/* [1, 2, 3] @+ [4, 5, 6] → [5, 7, 9] */
+TEST(test_vectorize_add) {
+    assert_vm_formatted("[1, 2, 3] @+ [4, 5, 6]", "[5, 7, 9]", "@+ vectorize");
+}
+
+/* [1, 2, 3] @* 10 → [10, 20, 30] (scalar broadcast right) */
+TEST(test_vectorize_scalar_right) {
+    assert_vm_formatted("[1, 2, 3] @* 10", "[10, 20, 30]", "@* scalar right");
+}
+
+/* 10 @- [1, 2, 3] → [9, 8, 7] (scalar broadcast left) */
+TEST(test_vectorize_scalar_left) {
+    assert_vm_formatted("10 @- [1, 2, 3]", "[9, 8, 7]", "@- scalar left");
+}
+
+/* [1, 2, 3] @** 2 → [1, 4, 9] */
+TEST(test_vectorize_power) { assert_vm_formatted("[1, 2, 3] @** 2", "[1, 4, 9]", "@** vectorize"); }
+
+/* [1, 2, 3] @> 2 → [false, false, true] */
+TEST(test_vectorize_greater) {
+    assert_vm_formatted("[1, 2, 3] @> 2", "[false, false, true]", "@> vectorize");
+}
+
+/* [1, 2] @+ [1, 2, 3] → error "array length mismatch" */
+TEST(test_vectorize_length_mismatch) {
+    assert_vm_error("[1, 2] @+ [1, 2, 3]", "@+ length mismatch");
+}
+
+/* 1 @+ 2 → error "@ requires at least one array operand" */
+TEST(test_vectorize_both_scalars_error) { assert_vm_error("1 @+ 2", "@+ both scalars error"); }
+
+/* ["a", "b"] @++ ["1", "2"] → ["a1", "b2"] */
+TEST(test_vectorize_concat) {
+    assert_vm_formatted("[\"a\", \"b\"] @++ [\"1\", \"2\"]", "[a1, b2]", "@++ vectorize");
+}
+
+/* [true, false] @and [true, true] → [true, false] */
+TEST(test_vectorize_and) {
+    assert_vm_formatted("[true, false] @and [true, true]", "[true, false]", "@and vectorize");
+}
+
+/* Precedence: [1, 2] @+ [3, 4] @* [5, 6] → [1, 2] @+ [15, 24] → [16, 26] */
+TEST(test_vectorize_precedence) {
+    assert_vm_formatted("[1, 2] @+ [3, 4] @* [5, 6]", "[16, 26]", "@op precedence");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3216,6 +3266,19 @@ int main(void) {
     RUN_TEST(test_reduce_or_all_falsy);
     RUN_TEST(test_reduce_equal_fold);
     RUN_TEST(test_reduce_non_array_error);
+
+    /* ---- @op infix — vectorize ---- */
+    printf("\nVectorize (@op infix):\n");
+    RUN_TEST(test_vectorize_add);
+    RUN_TEST(test_vectorize_scalar_right);
+    RUN_TEST(test_vectorize_scalar_left);
+    RUN_TEST(test_vectorize_power);
+    RUN_TEST(test_vectorize_greater);
+    RUN_TEST(test_vectorize_length_mismatch);
+    RUN_TEST(test_vectorize_both_scalars_error);
+    RUN_TEST(test_vectorize_concat);
+    RUN_TEST(test_vectorize_and);
+    RUN_TEST(test_vectorize_precedence);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

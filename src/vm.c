@@ -1607,9 +1607,132 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_VECTORIZE: {
+            /* Element-wise operation on arrays with scalar broadcasting.
+             * Operand: 1-byte inner op (same encoding as OP_REDUCE).
+             * Pop right, pop left, push result array. */
+            uint8_t inner_op = read_byte(frame);
+            Value right_val, left_val;
+            if (!vm_pop(&vm, &right_val)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &left_val)) {
+                value_free(&right_val);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+
+            bool left_is_array = (left_val.type == VAL_ARRAY);
+            bool right_is_array = (right_val.type == VAL_ARRAY);
+
+            /* Both scalars — not allowed. */
+            if (!left_is_array && !right_is_array) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(&vm, "@ requires at least one array operand");
+            }
+
+            /* Determine iteration count and validate length match. */
+            size_t count;
+            if (left_is_array && right_is_array) {
+                if (left_val.array->count != right_val.array->count) {
+                    size_t lc = left_val.array->count;
+                    size_t rc = right_val.array->count;
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    return vm_runtime_error(
+                        &vm, "array length mismatch in @op (left=%zu, right=%zu)", lc, rc);
+                }
+                count = left_val.array->count;
+            } else if (left_is_array) {
+                count = left_val.array->count;
+            } else {
+                count = right_val.array->count;
+            }
+
+            /* Build the result array by applying the inner op element-wise. */
+            ObjArray *result_arr = obj_array_new();
+            if (!result_arr) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+
+            for (size_t i = 0; i < count; i++) {
+                /* Get left and right elements, broadcasting scalars. */
+                const Value *a = left_is_array ? &left_val.array->data[i] : &left_val;
+                const Value *b = right_is_array ? &right_val.array->data[i] : &right_val;
+
+                /* Handle @and / @or element-wise (non-short-circuit). */
+                Value elem_result;
+                if ((OpCode)inner_op == OP_AND) {
+                    /* @and element-wise: if a is falsy, result is a; else b. */
+                    if (!is_truthy(a)) {
+                        if (!value_clone(&elem_result, a)) {
+                            Value tmp = make_array(result_arr);
+                            value_free(&tmp);
+                            value_free(&left_val);
+                            value_free(&right_val);
+                            return vm_runtime_error(&vm, "memory allocation failed");
+                        }
+                    } else {
+                        if (!value_clone(&elem_result, b)) {
+                            Value tmp = make_array(result_arr);
+                            value_free(&tmp);
+                            value_free(&left_val);
+                            value_free(&right_val);
+                            return vm_runtime_error(&vm, "memory allocation failed");
+                        }
+                    }
+                } else if ((OpCode)inner_op == OP_OR) {
+                    /* @or element-wise: if a is truthy, result is a; else b. */
+                    if (is_truthy(a)) {
+                        if (!value_clone(&elem_result, a)) {
+                            Value tmp = make_array(result_arr);
+                            value_free(&tmp);
+                            value_free(&left_val);
+                            value_free(&right_val);
+                            return vm_runtime_error(&vm, "memory allocation failed");
+                        }
+                    } else {
+                        if (!value_clone(&elem_result, b)) {
+                            Value tmp = make_array(result_arr);
+                            value_free(&tmp);
+                            value_free(&left_val);
+                            value_free(&right_val);
+                            return vm_runtime_error(&vm, "memory allocation failed");
+                        }
+                    }
+                } else {
+                    /* General case: apply the binary operation. */
+                    elem_result = reduce_apply_op((OpCode)inner_op, a, b);
+                    if (elem_result.type == VAL_ERROR) {
+                        Value tmp = make_array(result_arr);
+                        value_free(&tmp);
+                        value_free(&left_val);
+                        value_free(&right_val);
+                        Value err = vm_runtime_error(&vm, "vectorize element %zu: %s", i,
+                                                     elem_result.string);
+                        value_free(&elem_result);
+                        return err;
+                    }
+                }
+
+                obj_array_push(result_arr, elem_result);
+            }
+
+            value_free(&left_val);
+            value_free(&right_val);
+
+            Value result = make_array(result_arr);
+            if (!vm_push(&vm, result)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
         /* OP_AND / OP_OR are not standalone VM opcodes — they are used
-         * only as op-byte arguments to OP_REDUCE. If they somehow appear
-         * in the instruction stream, treat as an error. */
+         * only as op-byte arguments to OP_REDUCE/OP_VECTORIZE. If they
+         * somehow appear in the instruction stream, treat as an error. */
         case OP_AND:
         case OP_OR:
             return vm_runtime_error(&vm, "OP_AND/OP_OR are not standalone opcodes");

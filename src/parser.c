@@ -1048,10 +1048,11 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
         return NULL;
 
     /* Loop: consume infix operators with sufficient precedence.
-     * Handles both symbol operators (TOK_OPERATOR) and keyword operators
-     * like "and"/"or" (TOK_IDENT that act as infix operators).
-     * Also handles postfix '[' for array indexing (precedence 10). */
-    while (!p->has_error && (p->current.type == TOK_OPERATOR || is_keyword_infix(&p->current))) {
+     * Handles symbol operators (TOK_OPERATOR), keyword operators
+     * like "and"/"or" (TOK_IDENT), meta-operators @op (TOK_META),
+     * and postfix '[' for array indexing (precedence 10). */
+    while (!p->has_error && (p->current.type == TOK_OPERATOR || is_keyword_infix(&p->current) ||
+                             p->current.type == TOK_META)) {
 
         /* Postfix '[' — array indexing: expr[expr].
          * Precedence 10 (highest, above **). Left-associative so
@@ -1097,6 +1098,70 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
             node->right = index_expr;
             node->grouped = false;
             node->line = bracket_line;
+            node->children = NULL;
+            node->child_count = 0;
+            node->params = NULL;
+            node->param_count = 0;
+            left = node;
+            continue;
+        }
+
+        /* Infix meta-operator: expr @op expr → AST_VECTORIZE.
+         * The precedence of @op mirrors the inner operator's precedence.
+         * For custom function identifiers, use precedence 6 (same as +/-). */
+        if (p->current.type == TOK_META) {
+            const char *inner_op = p->current.value;
+            size_t inner_len = p->current.value_len;
+            size_t meta_line = p->current.line;
+            size_t meta_col = p->current.col;
+
+            /* Determine precedence from the inner operator name.
+             * Custom function identifiers (not matching a known operator)
+             * get precedence 6 (additive level). */
+            int prec = infix_precedence(inner_op, inner_len);
+            if (prec == 0)
+                prec = 6; /* Default precedence for custom functions. */
+
+            if (prec < min_prec)
+                break;
+
+            /* Save operator name before advance invalidates the token. */
+            char *op_name = malloc(inner_len + 1);
+            if (!op_name) {
+                ast_free(left);
+                parser_error(p, meta_line, meta_col, "memory allocation failed");
+                return NULL;
+            }
+            memcpy(op_name, inner_op, inner_len);
+            op_name[inner_len] = '\0';
+
+            /* Determine next_min_prec: use the inner operator's associativity.
+             * Left-associative → prec + 1; right-associative → prec. */
+            int next_min_prec = is_right_assoc(inner_op, inner_len) ? prec : prec + 1;
+
+            advance(p); /* consume the TOK_META token */
+
+            AstNode *right = parse_expr(p, next_min_prec);
+            if (!right) {
+                free(op_name);
+                ast_free(left);
+                return NULL;
+            }
+
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                free(op_name);
+                ast_free(left);
+                ast_free(right);
+                parser_error(p, meta_line, meta_col, "memory allocation failed");
+                return NULL;
+            }
+            node->type = AST_VECTORIZE;
+            node->value = op_name; /* takes ownership */
+            node->left = left;
+            node->right = right;
+            node->grouped = false;
+            node->line = meta_line;
             node->children = NULL;
             node->child_count = 0;
             node->params = NULL;
@@ -2242,6 +2307,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "INDEX_ASSIGN";
     case AST_REDUCE:
         return "REDUCE";
+    case AST_VECTORIZE:
+        return "VECTORIZE";
     default:
         return "UNKNOWN";
     }
@@ -2714,6 +2781,29 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf, len, "[%s %s %s]", type_str, node->value, operand_str);
         free(operand_str);
+        return buf;
+    }
+
+    /* AST_VECTORIZE: [VECTORIZE op [left] [right]] — same shape as BINOP */
+    if (node->type == AST_VECTORIZE) {
+        char *left_str = ast_format_node(node->left);
+        char *right_str = ast_format_node(node->right);
+        if (!left_str || !right_str) {
+            free(left_str);
+            free(right_str);
+            return NULL;
+        }
+        size_t len = 1 + strlen(type_str) + 1 + strlen(node->value) + 1 + strlen(left_str) + 1 +
+                     strlen(right_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(left_str);
+            free(right_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s %s]", type_str, node->value, left_str, right_str);
+        free(left_str);
+        free(right_str);
         return buf;
     }
 

@@ -2512,6 +2512,106 @@ TEST(test_reduce_precedence) {
 }
 
 /* ============================================================
+ * Vectorize infix (expr @op expr) tests
+ * ============================================================ */
+
+/* [1, 2, 3] @+ [4, 5, 6] → AST_VECTORIZE with op "+" */
+TEST(test_vectorize_add) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2, 3] @+ [4, 5, 6]", &node, &err), "should parse @+ vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "+", "op should be +");
+    ASSERT(node->left != NULL, "should have left operand");
+    ASSERT(node->left->type == AST_ARRAY, "left should be ARRAY");
+    ASSERT(node->right != NULL, "should have right operand");
+    ASSERT(node->right->type == AST_ARRAY, "right should be ARRAY");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s,
+                  "AST [VECTORIZE + [ARRAY [NUMBER 1] [NUMBER 2] [NUMBER 3]] "
+                  "[ARRAY [NUMBER 4] [NUMBER 5] [NUMBER 6]]]",
+                  "@+ vectorize AST format");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* [1, 2, 3] @* [4, 5, 6] → VECTORIZE with op "*" */
+TEST(test_vectorize_multiply) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2] @* [3, 4]", &node, &err), "should parse @* vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "*", "op should be *");
+    ast_free(node);
+    PASS();
+}
+
+/* ["a", "b"] @++ ["1", "2"] → VECTORIZE with op "++" */
+TEST(test_vectorize_concat) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[\"a\", \"b\"] @++ [\"1\", \"2\"]", &node, &err),
+           "should parse @++ vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "++", "op should be ++");
+    ast_free(node);
+    PASS();
+}
+
+/* [1, 2, 3] @> 2 → VECTORIZE with op ">" */
+TEST(test_vectorize_comparison) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2, 3] @> 2", &node, &err), "should parse @> vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, ">", "op should be >");
+    ASSERT(node->left->type == AST_ARRAY, "left should be ARRAY");
+    ASSERT(node->right->type == AST_NUMBER, "right should be NUMBER");
+    ast_free(node);
+    PASS();
+}
+
+/* [1, 2, 3] @* 10 → VECTORIZE with scalar on right */
+TEST(test_vectorize_scalar_broadcast) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2, 3] @* 10", &node, &err), "should parse @* scalar vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "*", "op should be *");
+    ASSERT(node->left->type == AST_ARRAY, "left should be ARRAY");
+    ASSERT(node->right->type == AST_NUMBER, "right should be NUMBER");
+    ast_free(node);
+    PASS();
+}
+
+/* [1, 2] @my_func [3, 4] → VECTORIZE with custom function name */
+TEST(test_vectorize_custom_func) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2] @my_func [3, 4]", &node, &err), "should parse @my_func vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "my_func", "op should be my_func");
+    ast_free(node);
+    PASS();
+}
+
+/* Precedence: [1, 2] @+ [3, 4] @* [5, 6] → [1, 2] @+ ([3, 4] @* [5, 6])
+ * because @* has higher precedence than @+. */
+TEST(test_vectorize_precedence) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2] @+ [3, 4] @* [5, 6]", &node, &err),
+           "should parse vectorize with precedence");
+    ASSERT(node->type == AST_VECTORIZE, "top should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, "+", "top op should be + (lower precedence)");
+    ASSERT(node->right->type == AST_VECTORIZE, "right should be VECTORIZE");
+    ASSERT_STR_EQ(node->right->value, "*", "right op should be * (higher precedence)");
+    ast_free(node);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2914,6 +3014,15 @@ int main(void) {
     RUN_TEST(test_reduce_equal);
     RUN_TEST(test_reduce_custom_func);
     RUN_TEST(test_reduce_precedence);
+
+    printf("\nVectorize infix (expr @op expr) parsing:\n");
+    RUN_TEST(test_vectorize_add);
+    RUN_TEST(test_vectorize_multiply);
+    RUN_TEST(test_vectorize_concat);
+    RUN_TEST(test_vectorize_comparison);
+    RUN_TEST(test_vectorize_scalar_broadcast);
+    RUN_TEST(test_vectorize_custom_func);
+    RUN_TEST(test_vectorize_precedence);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

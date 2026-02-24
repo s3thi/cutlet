@@ -1160,6 +1160,31 @@ static void compile_reduce(Compiler *c, const AstNode *node) {
     emit_bytes(c, OP_REDUCE, (uint8_t)inner_op, line);
 }
 
+/*
+ * Compile a vectorize expression: expr @op expr → OP_VECTORIZE [inner_op].
+ * Both operands are compiled (pushing left then right), then OP_VECTORIZE
+ * applies the inner operation element-wise.
+ * Custom function vectorization (@ident) is deferred to Step 4.
+ */
+static void compile_vectorize(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+    const char *op = node->value;
+
+    int inner_op = meta_op_to_opcode(op);
+    if (inner_op < 0) {
+        /* Custom function vectorization — not yet implemented (Step 4). */
+        compiler_error(c, "custom function vectorization '@%s' not yet supported", op);
+        return;
+    }
+
+    /* Compile left operand, then right operand. */
+    compile_node(c, node->left);
+    compile_node(c, node->right);
+
+    /* Emit OP_VECTORIZE with the inner operation as a 1-byte operand. */
+    emit_bytes(c, OP_VECTORIZE, (uint8_t)inner_op, line);
+}
+
 /* Compile any AST node by dispatching on its type. */
 static void compile_node(Compiler *c, const AstNode *node) {
     if (c->had_error)
@@ -1232,6 +1257,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_REDUCE:
         compile_reduce(c, node);
+        break;
+    case AST_VECTORIZE:
+        compile_vectorize(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

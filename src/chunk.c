@@ -175,6 +175,8 @@ const char *opcode_name(OpCode op) {
         return "OP_INDEX_SET";
     case OP_REDUCE:
         return "OP_REDUCE";
+    case OP_VECTORIZE:
+        return "OP_VECTORIZE";
     case OP_AND:
         return "OP_AND";
     case OP_OR:
@@ -351,8 +353,9 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         return offset + 2;
     }
 
-    /* OP_REDUCE: 1-byte inner-op operand */
-    case OP_REDUCE: {
+    /* OP_REDUCE / OP_VECTORIZE: 1-byte inner-op operand */
+    case OP_REDUCE:
+    case OP_VECTORIZE: {
         uint8_t inner_op = chunk->code[offset + 1];
         dynbuf_printf(b, "%-20s %s\n", opcode_name((OpCode)instruction),
                       opcode_name((OpCode)inner_op));
