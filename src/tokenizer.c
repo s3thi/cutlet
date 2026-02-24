@@ -502,6 +502,89 @@ static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t s
     return true;
 }
 
+/*
+ * Read a meta-operator token (@op or @identifier).
+ * Called when current char is '@'.
+ *
+ * The @ prefix lifts an operator or function to work across arrays.
+ * After consuming '@', the next character determines the meta-operator:
+ * - Letter or '_': scan an identifier (e.g., @my_func, @and, @or)
+ * - Solo symbol (+, -, /, %): consume one char, but check for ++ special case
+ * - Other symbol char: scan a run of symbol chars (e.g., @**, @==, @>=)
+ * - Anything else (whitespace, EOF, etc.): error
+ *
+ * The token value contains only the operator/identifier part (without the @).
+ */
+static bool read_meta(Tokenizer *tok, Token *out, size_t start_pos, size_t start_line,
+                      size_t start_col) {
+    /* Skip the '@' character */
+    tok->pos++;
+    tok->col++;
+
+    /* Check what follows the '@' */
+    if (tok->pos >= tok->input_len) {
+        snprintf(tok->error_msg, MAX_ERROR_MSG, "expected operator or identifier after @");
+        set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
+        return true;
+    }
+
+    char c = tok->input[tok->pos];
+    size_t value_start = tok->pos;
+
+    if (is_ident_start(c)) {
+        /* Scan identifier: [A-Za-z_][A-Za-z0-9_]* */
+        tok->pos++;
+        tok->col++;
+        while (tok->pos < tok->input_len && is_ident_continue(tok->input[tok->pos])) {
+            tok->pos++;
+            tok->col++;
+        }
+    } else if (is_symbol_char(c)) {
+        /* Special case: ++ (concatenation) after @ */
+        if (c == '+' && tok->pos + 1 < tok->input_len && tok->input[tok->pos + 1] == '+') {
+            tok->pos += 2;
+            tok->col += 2;
+        } else if (is_solo_symbol(c)) {
+            /* Solo symbols (+, -, /, %, etc.) consume exactly one char */
+            tok->pos++;
+            tok->col++;
+        } else {
+            /* Multi-char operator: consume run of non-solo symbol chars */
+            while (tok->pos < tok->input_len && is_symbol_char(tok->input[tok->pos]) &&
+                   !is_solo_symbol(tok->input[tok->pos])) {
+                tok->pos++;
+                tok->col++;
+            }
+        }
+    } else {
+        /* Not a valid character after @ (whitespace, newline, digit, etc.) */
+        snprintf(tok->error_msg, MAX_ERROR_MSG, "expected operator or identifier after @");
+        set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
+        return true;
+    }
+
+    size_t value_len = tok->pos - value_start;
+
+    /* Copy the operator/identifier value (without the @) to the buffer */
+    if (!ensure_value_buf(tok, value_len + 1)) {
+        snprintf(tok->error_msg, MAX_ERROR_MSG, "memory allocation failed");
+        set_error(tok, out, tok->error_msg, start_pos, start_line, start_col);
+        return true;
+    }
+
+    memcpy(tok->value_buf, tok->input + value_start, value_len);
+    tok->value_buf[value_len] = '\0';
+
+    out->type = TOK_META;
+    out->value = tok->value_buf;
+    out->value_len = value_len;
+    out->pos = start_pos;
+    out->line = start_line;
+    out->col = start_col;
+
+    return true;
+}
+
 bool tokenizer_next(Tokenizer *tok, Token *out) {
     /* Handle NULL inputs */
     if (!tok || !out) {
@@ -572,6 +655,11 @@ bool tokenizer_next(Tokenizer *tok, Token *out) {
         return read_ident(tok, out, token_start_pos, token_start_line, token_start_col);
     }
 
+    /* Meta-operator: @ starts a meta-operator token */
+    if (c == '@') {
+        return read_meta(tok, out, token_start_pos, token_start_line, token_start_col);
+    }
+
     /* Symbol char => operator (no whitespace requirement) */
     if (is_symbol_char(c)) {
         return read_operator(tok, out, token_start_pos, token_start_line, token_start_col);
@@ -608,6 +696,8 @@ const char *token_type_str(TokenType type) {
         return "IDENT";
     case TOK_OPERATOR:
         return "OPERATOR";
+    case TOK_META:
+        return "META";
     case TOK_NEWLINE:
         return "NEWLINE";
     case TOK_EOF:

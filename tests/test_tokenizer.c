@@ -954,7 +954,7 @@ TEST(test_operator_minus_alone) {
 }
 
 TEST(test_operator_various_symbols) {
-    Tokenizer *tok = tokenizer_create("a @ b");
+    Tokenizer *tok = tokenizer_create("a ~ b");
     ASSERT_NOT_NULL(tok, "tokenizer_create failed");
 
     Token t;
@@ -962,7 +962,7 @@ TEST(test_operator_various_symbols) {
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
-    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "@", 1), "expected OPERATOR '@'");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "~", 1), "expected OPERATOR '~'");
 
     ASSERT_TRUE(tokenizer_next(tok, &t), "tokenizer_next failed");
     ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
@@ -2401,6 +2401,201 @@ TEST(test_tok_empty_array) {
 }
 
 /* ============================================================
+ * Meta-operator (@) tokenization tests
+ * ============================================================ */
+
+/* @+ → TOK_META "+" */
+TEST(test_tok_meta_plus) {
+    Tokenizer *tok = tokenizer_create("@+");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_META, "expected META token");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "+", 1), "@+ value should be '+'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @* → TOK_META "*" */
+TEST(test_tok_meta_star) {
+    Tokenizer *tok = tokenizer_create("@*");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "*", 1), "@* value should be '*'");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @** → TOK_META "**" */
+TEST(test_tok_meta_power) {
+    Tokenizer *tok = tokenizer_create("@**");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "**", 2), "@** value should be '**'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @++ → TOK_META "++" */
+TEST(test_tok_meta_concat) {
+    Tokenizer *tok = tokenizer_create("@++");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "++", 2), "@++ value should be '++'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @== → TOK_META "==" */
+TEST(test_tok_meta_equal) {
+    Tokenizer *tok = tokenizer_create("@==");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "==", 2), "@== value should be '=='");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @my_func → TOK_META "my_func" */
+TEST(test_tok_meta_ident) {
+    Tokenizer *tok = tokenizer_create("@my_func");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "my_func", 7), "@my_func value should be 'my_func'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @and → TOK_META "and" */
+TEST(test_tok_meta_and) {
+    Tokenizer *tok = tokenizer_create("@and");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "and", 3), "@and value should be 'and'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @or → TOK_META "or" */
+TEST(test_tok_meta_or) {
+    Tokenizer *tok = tokenizer_create("@or");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "or", 2), "@or value should be 'or'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @- → TOK_META "-" */
+TEST(test_tok_meta_minus) {
+    Tokenizer *tok = tokenizer_create("@-");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "-", 1), "@- value should be '-'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* "@ " (space after @) → TOK_ERROR */
+TEST(test_tok_meta_space_after_at) {
+    Tokenizer *tok = tokenizer_create("@ ");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_ERROR, "@ followed by space should be an error");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* "@" at end of input → TOK_ERROR */
+TEST(test_tok_meta_at_eof) {
+    Tokenizer *tok = tokenizer_create("@");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_ERROR, "@ at end of input should be an error");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @> → TOK_META ">" (comparison operators work with @) */
+TEST(test_tok_meta_greater) {
+    Tokenizer *tok = tokenizer_create("@>");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, ">", 1), "@> value should be '>'");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* @>= → TOK_META ">=" */
+TEST(test_tok_meta_greater_eq) {
+    Tokenizer *tok = tokenizer_create("@>=");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, ">=", 2), "@>= value should be '>='");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Meta-operator in an expression context: [1, 2] @+ [3, 4] */
+TEST(test_tok_meta_in_expr) {
+    Tokenizer *tok = tokenizer_create("[1, 2] @+ [3, 4]");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected '['");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "expected '1'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ",", 1), "expected ','");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "2", 1), "expected '2'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "]", 1), "expected ']'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "+", 1), "expected META '+'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected '['");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "3", 1), "expected '3'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ",", 1), "expected ','");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "4", 1), "expected '4'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "]", 1), "expected ']'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "then EOF");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* Prefix meta-operator: @+ [1, 2, 3] */
+TEST(test_tok_meta_prefix) {
+    Tokenizer *tok = tokenizer_create("@+ [1, 2, 3]");
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_META, "+", 1), "expected META '+'");
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected '['");
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -2582,6 +2777,23 @@ int main(void) {
     printf("\nArray bracket tokenization:\n");
     RUN_TEST(test_tok_array_literal);
     RUN_TEST(test_tok_empty_array);
+
+    printf("\nMeta-operator (@) tokenization:\n");
+    RUN_TEST(test_tok_meta_plus);
+    RUN_TEST(test_tok_meta_star);
+    RUN_TEST(test_tok_meta_power);
+    RUN_TEST(test_tok_meta_concat);
+    RUN_TEST(test_tok_meta_equal);
+    RUN_TEST(test_tok_meta_ident);
+    RUN_TEST(test_tok_meta_and);
+    RUN_TEST(test_tok_meta_or);
+    RUN_TEST(test_tok_meta_minus);
+    RUN_TEST(test_tok_meta_space_after_at);
+    RUN_TEST(test_tok_meta_at_eof);
+    RUN_TEST(test_tok_meta_greater);
+    RUN_TEST(test_tok_meta_greater_eq);
+    RUN_TEST(test_tok_meta_in_expr);
+    RUN_TEST(test_tok_meta_prefix);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);
