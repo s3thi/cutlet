@@ -1044,6 +1044,40 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             break;
         }
 
+        case OP_ARRAY: {
+            /* Build an array from the top N values on the stack.
+             * The first element was pushed first (deepest on stack),
+             * so we pop in reverse and insert back-to-front. */
+            uint8_t count = read_byte(frame);
+            ObjArray *arr = obj_array_new();
+            if (!arr) {
+                return vm_runtime_error(&vm, "out of memory");
+            }
+
+            /* Pre-grow the array to the correct size. Pop values into
+             * a temporary buffer, then push them in element order. */
+            Value temp[256];
+            for (int i = count - 1; i >= 0; i--) {
+                if (!vm_pop(&vm, &temp[i])) {
+                    /* Free already-popped values */
+                    for (int j = i + 1; j < count; j++)
+                        value_free(&temp[j]);
+                    free(arr->data);
+                    free(arr);
+                    return vm_runtime_error(&vm, "stack underflow");
+                }
+            }
+            /* Append elements in order (first element = index 0). */
+            for (int i = 0; i < count; i++) {
+                obj_array_push(arr, temp[i]); /* takes ownership */
+            }
+
+            if (!vm_push(&vm, make_array(arr))) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_RETURN: {
             /* Pop the return value from the stack. */
             Value result;

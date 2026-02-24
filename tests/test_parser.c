@@ -2255,6 +2255,84 @@ TEST(test_sl_is_complete_anon_fn) {
 }
 
 /* ============================================================
+ * Array literal parsing
+ * ============================================================ */
+
+/* Parse empty array [] => [ARRAY] */
+TEST(test_array_empty) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[]", &node, &err), "should parse empty array");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY]", "empty array AST format");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse [1, 2, 3] => [ARRAY [NUMBER 1] [NUMBER 2] [NUMBER 3]] */
+TEST(test_array_numbers) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2, 3]", &node, &err), "should parse number array");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY [NUMBER 1] [NUMBER 2] [NUMBER 3]]", "number array AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse [1 + 2, 3 * 4] => correct nested s-expr */
+TEST(test_array_expressions) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1 + 2, 3 * 4]", &node, &err), "should parse expression array");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY [BINOP + [NUMBER 1] [NUMBER 2]] [BINOP * [NUMBER 3] [NUMBER 4]]]",
+                  "expression array AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse [1, 2,] => same as [1, 2] (trailing comma) */
+TEST(test_array_trailing_comma) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1, 2,]", &node, &err), "should parse array with trailing comma");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY [NUMBER 1] [NUMBER 2]]", "trailing comma array AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse [[1, 2], [3]] => nested arrays */
+TEST(test_array_nested) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[[1, 2], [3]]", &node, &err), "should parse nested array");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY [ARRAY [NUMBER 1] [NUMBER 2]] [ARRAY [NUMBER 3]]]",
+                  "nested array AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* parser_is_complete: unclosed array bracket is incomplete */
+TEST(test_is_incomplete_array_unclosed) {
+    ASSERT(!parser_is_complete("[1, 2"), "unclosed array should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: closed array is complete */
+TEST(test_is_complete_array) {
+    ASSERT(parser_is_complete("[1, 2, 3]"), "closed array should be complete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2628,6 +2706,17 @@ int main(void) {
     RUN_TEST(test_sl_is_complete_while);
     RUN_TEST(test_sl_is_complete_fn);
     RUN_TEST(test_sl_is_complete_anon_fn);
+
+    printf("\nArray literal parsing:\n");
+    RUN_TEST(test_array_empty);
+    RUN_TEST(test_array_numbers);
+    RUN_TEST(test_array_expressions);
+    RUN_TEST(test_array_trailing_comma);
+    RUN_TEST(test_array_nested);
+
+    printf("\nparser_is_complete() - array literals:\n");
+    RUN_TEST(test_is_incomplete_array_unclosed);
+    RUN_TEST(test_is_complete_array);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

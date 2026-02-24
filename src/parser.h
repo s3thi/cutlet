@@ -31,6 +31,7 @@ typedef enum {
     AST_CONTINUE, /* continue: skip to next iteration of innermost loop */
     AST_RETURN,   /* return [expr]: exit enclosing function, optional value */
     AST_FUNCTION, /* function def: fn name(params) is body end */
+    AST_ARRAY,    /* array literal: [expr, expr, ...] */
 } AstNodeType;
 
 typedef struct AstNode {

@@ -248,6 +248,33 @@ static void assert_vm_string(const char *input, const char *expected, const char
     (void)label;
 }
 
+/*
+ * Helper: run input, format the result with value_format(), and compare
+ * against expected string. Works for any value type (arrays, nested, etc.).
+ */
+static void assert_vm_formatted(const char *input, const char *expected, const char *label) {
+    Value v = run_input(input, &test_ctx);
+    char *s = value_format(&v);
+    if (!s) {
+        printf("FAIL\n    value_format returned NULL for '%s'\n", input);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+    if (strcmp(s, expected) != 0) {
+        printf("FAIL\n    '%s': expected \"%s\", got \"%s\"\n", input, expected, s);
+        free(s);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+    free(s);
+    value_free(&v);
+    printf("PASS\n");
+    tests_passed++;
+    (void)label;
+}
+
 /* ============================================================
  * Basic arithmetic
  * ============================================================ */
@@ -2439,6 +2466,26 @@ TEST(test_kebab_ident_in_subtraction_expr) {
 }
 
 /* ============================================================
+ * Array literals
+ * ============================================================ */
+
+/* Eval [] => [] */
+TEST(test_array_empty_eval) { assert_vm_formatted("[]", "[]", "empty array"); }
+
+/* Eval [1, 2, 3] => [1, 2, 3] */
+TEST(test_array_numbers_eval) { assert_vm_formatted("[1, 2, 3]", "[1, 2, 3]", "number array"); }
+
+/* Eval [1 + 1, 2 + 2] => [2, 4] */
+TEST(test_array_expressions_eval) {
+    assert_vm_formatted("[1 + 1, 2 + 2]", "[2, 4]", "expression array");
+}
+
+/* Eval [[1], [2, 3]] => [[1], [2, 3]] */
+TEST(test_array_nested_eval) {
+    assert_vm_formatted("[[1], [2, 3]]", "[[1], [2, 3]]", "nested array");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2869,6 +2916,12 @@ int main(void) {
     RUN_TEST(test_kebab_param_names);
     RUN_TEST(test_kebab_closure_capture);
     RUN_TEST(test_kebab_ident_in_subtraction_expr);
+
+    printf("\nArray literals:\n");
+    RUN_TEST(test_array_empty_eval);
+    RUN_TEST(test_array_numbers_eval);
+    RUN_TEST(test_array_expressions_eval);
+    RUN_TEST(test_array_nested_eval);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

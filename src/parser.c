@@ -469,7 +469,7 @@ static AstNode *parse_atom(Parser *p) {
         bool has_value = false;
         if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
             (next.type == TOK_OPERATOR && next.value_len == 1 &&
-             (next.value[0] == '(' || next.value[0] == '-'))) {
+             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '['))) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
             /* Identifiers that start expressions: non-keyword idents,
@@ -543,7 +543,7 @@ static AstNode *parse_atom(Parser *p) {
         bool has_value = false;
         if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
             (next.type == TOK_OPERATOR && next.value_len == 1 &&
-             (next.value[0] == '(' || next.value[0] == '-'))) {
+             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '['))) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
             has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
@@ -747,6 +747,98 @@ static AstNode *parse_atom(Parser *p) {
             advance(p);
             expr->grouped = true;
             return expr;
+        }
+
+        /* Open bracket — array literal: [expr, expr, ...] */
+        if (t.value_len == 1 && t.value[0] == '[') {
+            advance(p);
+
+            /* Collect element expressions into a PtrArray. */
+            PtrArray elems;
+            if (!ptr_array_init(&elems, 4)) {
+                parser_error(p, t.line, t.col, "memory allocation failed");
+                return NULL;
+            }
+
+            /* Check for empty array: immediate ']' */
+            if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                  p->current.value[0] == ']')) {
+                /* Parse first element */
+                AstNode *elem = parse_assignment(p);
+                if (!elem) {
+                    ptr_array_destroy(&elems);
+                    return NULL;
+                }
+                if (!ptr_array_push(&elems, elem)) {
+                    ast_free(elem);
+                    ptr_array_destroy(&elems);
+                    parser_error(p, t.line, t.col, "memory allocation failed");
+                    return NULL;
+                }
+
+                /* Parse additional comma-separated elements */
+                while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                       p->current.value[0] == ',') {
+                    advance(p); /* consume ',' */
+
+                    /* Allow trailing comma: if next token is ']', stop */
+                    if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                        p->current.value[0] == ']') {
+                        break;
+                    }
+
+                    elem = parse_assignment(p);
+                    if (!elem) {
+                        free_expr_array(&elems);
+                        return NULL;
+                    }
+                    if (!ptr_array_push(&elems, elem)) {
+                        ast_free(elem);
+                        free_expr_array(&elems);
+                        parser_error(p, t.line, t.col, "memory allocation failed");
+                        return NULL;
+                    }
+                }
+            }
+
+            /* Expect closing ']' */
+            if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                p->current.value[0] != ']') {
+                parser_error(p, p->current.line, p->current.col, "expected ']'");
+                free_expr_array(&elems);
+                return NULL;
+            }
+            advance(p); /* consume ']' */
+
+            /* Build AST_ARRAY node using children/child_count. */
+            size_t elem_count = elems.count;
+            AstNode **children = NULL;
+            if (elem_count > 0) {
+                children = (AstNode **)ptr_array_release(&elems);
+            } else {
+                ptr_array_destroy(&elems);
+            }
+
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                for (size_t i = 0; i < elem_count; i++)
+                    ast_free(children[i]);
+                if (children)
+                    ptr_array_free_raw((void *)children);
+                parser_error(p, t.line, t.col, "memory allocation failed");
+                return NULL;
+            }
+            node->type = AST_ARRAY;
+            node->value = NULL;
+            node->left = NULL;
+            node->right = NULL;
+            node->grouped = false;
+            node->line = t.line;
+            node->children = children;
+            node->child_count = elem_count;
+            node->params = NULL;
+            node->param_count = 0;
+            return node;
         }
 
         /* Unknown prefix operator */
@@ -1989,6 +2081,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "RETURN";
     case AST_FUNCTION:
         return "FN";
+    case AST_ARRAY:
+        return "ARRAY";
     default:
         return "UNKNOWN";
     }
@@ -2347,6 +2441,56 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    if (node->type == AST_ARRAY) {
+        /* Array: [ARRAY elem1 elem2 ...] or [ARRAY] for empty.
+         * children[0..n] = element expressions. */
+        if (node->child_count == 0) {
+            size_t len = 1 + strlen(type_str) + 1 + 1;
+            char *buf = malloc(len);
+            if (!buf)
+                return NULL;
+            snprintf(buf, len, "[%s]", type_str);
+            return buf;
+        }
+
+        /* Format all children and calculate total length. */
+        PtrArray child_strs;
+        if (!ptr_array_init(&child_strs, node->child_count))
+            return NULL;
+
+        size_t total_len = 1 + strlen(type_str); /* "[ARRAY" */
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < child_strs.count; j++)
+                    free(child_strs.items[j]);
+                ptr_array_destroy(&child_strs);
+                return NULL;
+            }
+            ptr_array_push(&child_strs, str);
+            total_len += 1 + strlen(str); /* " elem" */
+        }
+        total_len += 1 + 1; /* "]" + NUL */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < child_strs.count; i++)
+                free(child_strs.items[i]);
+            ptr_array_destroy(&child_strs);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s", type_str);
+        for (size_t i = 0; i < child_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)child_strs.items[i]);
+            free(child_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&child_strs);
+        return buf;
+    }
+
     return NULL;
 }
 
@@ -2466,6 +2610,11 @@ bool parser_is_complete(const char *input) {
      * We distinguish by checking if the message suggests EOF was reached. */
     if (strstr(msg, "expected ')'") != NULL) {
         /* Unclosed parenthesis - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected ']'") != NULL) {
+        /* Unclosed array bracket - incomplete */
         return false;
     }
 

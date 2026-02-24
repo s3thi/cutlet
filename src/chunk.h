@@ -83,6 +83,9 @@ typedef enum {
     OP_SET_UPVALUE,   /* Write captured variable. Operand: 1-byte upvalue index. Peek TOS. */
     OP_CLOSE_UPVALUE, /* Close the topmost open upvalue at TOS slot. Pop 1. */
 
+    /* Array operations */
+    OP_ARRAY, /* Build array from top N stack values. Operand: 1-byte count */
+
     /* End of program */
     OP_RETURN, /* End execution. TOS is the result. */
 } OpCode;

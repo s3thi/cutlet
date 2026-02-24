@@ -167,6 +167,8 @@ const char *opcode_name(OpCode op) {
         return "OP_SET_UPVALUE";
     case OP_CLOSE_UPVALUE:
         return "OP_CLOSE_UPVALUE";
+    case OP_ARRAY:
+        return "OP_ARRAY";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -327,6 +329,13 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_CALL: {
         uint8_t argc = chunk->code[offset + 1];
         dynbuf_printf(b, "%-20s argc=%d\n", opcode_name((OpCode)instruction), argc);
+        return offset + 2;
+    }
+
+    /* OP_ARRAY: 1-byte element count */
+    case OP_ARRAY: {
+        uint8_t count = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s count=%d\n", opcode_name((OpCode)instruction), count);
         return offset + 2;
     }
 

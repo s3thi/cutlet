@@ -840,6 +840,27 @@ static void compile_return(Compiler *c, const AstNode *node) {
  * The function value becomes the expression result (stays on stack
  * after OP_DEFINE_GLOBAL, which peeks rather than pops).
  */
+/*
+ * Compile an array literal: compile each element expression (pushes N values),
+ * then emit OP_ARRAY [N] to build the array.
+ */
+static void compile_array(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    if (node->child_count > 255) {
+        compiler_error(c, "array literal cannot have more than 255 elements");
+        return;
+    }
+
+    /* Compile each element expression — pushes N values onto the stack. */
+    for (size_t i = 0; i < node->child_count; i++) {
+        compile_node(c, node->children[i]);
+    }
+
+    /* Emit OP_ARRAY with element count. */
+    emit_bytes(c, OP_ARRAY, (uint8_t)node->child_count, line);
+}
+
 static void compile_function(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
@@ -1064,6 +1085,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_FUNCTION:
         compile_function(c, node);
+        break;
+    case AST_ARRAY:
+        compile_array(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);
