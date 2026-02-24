@@ -361,4 +361,11 @@ Should work automatically if the parser handles `fn` as the identifier in `@fn(.
 6. Do not remove or modify existing tests without user confirmation.
 
 ---
+
+## Progress
+
+- [x] Step 1: Tokenizer — `TOK_META` for `@` — added TOK_META enum, read_meta() function, 15 tests covering operators/identifiers/errors, updated one existing test (`@` → `~`)
+- [x] Step 2: `@` prefix — reduction with built-in operators — added AST_REDUCE, OP_REDUCE, OP_AND/OP_OR op-bytes, reduce_apply_op helper, short-circuit @and/@or, 8 parser tests + 12 VM tests
+
+---
 End of plan.

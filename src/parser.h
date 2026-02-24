@@ -35,6 +35,7 @@ typedef enum {
     AST_INDEX,        /* index read: expr[expr] — left=array, right=index */
     AST_INDEX_ASSIGN, /* index write: expr[expr] = expr — left=array, right=index, children[0]=value
                        */
+    AST_REDUCE,       /* reduction: @op expr — value=op/name, left=operand */
 } AstNodeType;
 
 typedef struct AstNode {

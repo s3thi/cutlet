@@ -88,6 +88,16 @@ typedef enum {
     OP_INDEX_GET, /* Read array[index]. Pop 2 (array, index), push 1. */
     OP_INDEX_SET, /* Write array[index] = value. Pop 3 (array, index, value), push 1 (value). */
 
+    /* Meta-operator: array reduction/fold */
+    OP_REDUCE, /* Fold array with built-in operator. Operand: 1-byte op (OpCode value).
+                * Pop 1 (array), push 1 (result). */
+
+    /* Logical op-byte constants used as OP_REDUCE operands only.
+     * These are not standalone VM opcodes — they encode @and / @or
+     * reduction semantics with short-circuit behavior. */
+    OP_AND, /* @and: left fold, short-circuit on falsy */
+    OP_OR,  /* @or: left fold, short-circuit on truthy */
+
     /* End of program */
     OP_RETURN, /* End execution. TOS is the result. */
 } OpCode;

@@ -436,6 +436,115 @@ static void close_upvalues(VM *vm, Value *last) {
     }
 }
 
+/*
+ * Apply a binary operation to two values for OP_REDUCE.
+ * Returns a new Value (caller owns it). On error, returns VAL_ERROR.
+ * Does NOT free a or b — the caller is responsible for cleanup.
+ */
+static Value reduce_apply_op(OpCode op, const Value *a, const Value *b) {
+    switch (op) {
+    case OP_ADD:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        return make_number(a->number + b->number);
+    case OP_SUBTRACT:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        return make_number(a->number - b->number);
+    case OP_MULTIPLY:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        return make_number(a->number * b->number);
+    case OP_DIVIDE:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        if (b->number == 0)
+            return make_error("division by zero");
+        return make_number(a->number / b->number);
+    case OP_MODULO:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        if (b->number == 0)
+            return make_error("division by zero");
+        return make_number(fmod(a->number, b->number));
+    case OP_POWER:
+        if (a->type != VAL_NUMBER || b->type != VAL_NUMBER)
+            return make_error("arithmetic requires numbers");
+        return make_number(pow(a->number, b->number));
+    case OP_CONCAT:
+        if (a->type == VAL_STRING && b->type == VAL_STRING) {
+            size_t a_len = strlen(a->string);
+            size_t b_len = strlen(b->string);
+            char *s = malloc(a_len + b_len + 1);
+            if (!s)
+                return make_error("memory allocation failed");
+            memcpy(s, a->string, a_len);
+            memcpy(s + a_len, b->string, b_len);
+            s[a_len + b_len] = '\0';
+            return make_string(s);
+        }
+        if (a->type == VAL_ARRAY && b->type == VAL_ARRAY) {
+            ObjArray *result = obj_array_new();
+            if (!result)
+                return make_error("memory allocation failed");
+            for (size_t i = 0; i < a->array->count; i++) {
+                Value elem;
+                if (!value_clone(&elem, &a->array->data[i])) {
+                    Value tmp = make_array(result);
+                    value_free(&tmp);
+                    return make_error("memory allocation failed");
+                }
+                obj_array_push(result, elem);
+            }
+            for (size_t i = 0; i < b->array->count; i++) {
+                Value elem;
+                if (!value_clone(&elem, &b->array->data[i])) {
+                    Value tmp = make_array(result);
+                    value_free(&tmp);
+                    return make_error("memory allocation failed");
+                }
+                obj_array_push(result, elem);
+            }
+            return make_array(result);
+        }
+        return make_error("++ requires strings or arrays");
+    case OP_EQUAL:
+        return make_bool(values_equal(a, b));
+    case OP_NOT_EQUAL:
+        return make_bool(!values_equal(a, b));
+    case OP_LESS: {
+        int cmp;
+        const char *err_msg;
+        if (!values_compare(a, b, &cmp, &err_msg))
+            return make_error("%s", err_msg);
+        return make_bool(cmp < 0);
+    }
+    case OP_GREATER: {
+        int cmp;
+        const char *err_msg;
+        if (!values_compare(a, b, &cmp, &err_msg))
+            return make_error("%s", err_msg);
+        return make_bool(cmp > 0);
+    }
+    case OP_LESS_EQUAL: {
+        int cmp;
+        const char *err_msg;
+        if (!values_compare(a, b, &cmp, &err_msg))
+            return make_error("%s", err_msg);
+        return make_bool(cmp <= 0);
+    }
+    case OP_GREATER_EQUAL: {
+        int cmp;
+        const char *err_msg;
+        if (!values_compare(a, b, &cmp, &err_msg))
+            return make_error("%s", err_msg);
+        return make_bool(cmp >= 0);
+    }
+    default:
+        return make_error("unsupported operator in reduce");
+    }
+}
+
 /* ---- Main dispatch loop ---- */
 
 Value vm_execute(Chunk *chunk, EvalContext *ctx) {
@@ -1366,6 +1475,144 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             }
             break;
         }
+
+        case OP_REDUCE: {
+            /* Fold an array with a built-in operator.
+             * Operand: 1-byte inner op (OP_ADD, OP_AND, OP_OR, etc.).
+             * Pop 1 array, push 1 result. */
+            uint8_t inner_op = read_byte(frame);
+            Value arr_val;
+            if (!vm_pop(&vm, &arr_val)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (arr_val.type != VAL_ARRAY) {
+                value_free(&arr_val);
+                return vm_runtime_error(&vm, "@ requires an array operand");
+            }
+            ObjArray *arr = arr_val.array;
+            if (arr->count == 0) {
+                value_free(&arr_val);
+                return vm_runtime_error(&vm, "cannot reduce empty array");
+            }
+            /* Single element: clone and return. */
+            if (arr->count == 1) {
+                Value result;
+                if (!value_clone(&result, &arr->data[0])) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
+                value_free(&arr_val);
+                if (!vm_push(&vm, result)) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* @and / @or: short-circuit fold. */
+            if ((OpCode)inner_op == OP_AND) {
+                /* Return first falsy element, or last element if all truthy. */
+                Value result;
+                if (!value_clone(&result, &arr->data[0])) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
+                for (size_t i = 0; i < arr->count; i++) {
+                    value_free(&result);
+                    if (!value_clone(&result, &arr->data[i])) {
+                        value_free(&arr_val);
+                        return vm_runtime_error(&vm, "memory allocation failed");
+                    }
+                    if (!is_truthy(&arr->data[i])) {
+                        break; /* Short-circuit: found falsy element. */
+                    }
+                }
+                value_free(&arr_val);
+                if (!vm_push(&vm, result)) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                break;
+            }
+            if ((OpCode)inner_op == OP_OR) {
+                /* Return first truthy element, or last element if all falsy. */
+                Value result;
+                if (!value_clone(&result, &arr->data[0])) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
+                for (size_t i = 0; i < arr->count; i++) {
+                    value_free(&result);
+                    if (!value_clone(&result, &arr->data[i])) {
+                        value_free(&arr_val);
+                        return vm_runtime_error(&vm, "memory allocation failed");
+                    }
+                    if (is_truthy(&arr->data[i])) {
+                        break; /* Short-circuit: found truthy element. */
+                    }
+                }
+                value_free(&arr_val);
+                if (!vm_push(&vm, result)) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* General fold: apply the inner binary operation left-to-right.
+             * Use the VM's own stack to apply each operation via OP dispatch:
+             * push acc, push element, then interpret the inner opcode. */
+            Value acc;
+            if (!value_clone(&acc, &arr->data[0])) {
+                value_free(&arr_val);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            for (size_t i = 1; i < arr->count; i++) {
+                /* Push accumulator and current element, then apply op. */
+                if (!vm_push(&vm, acc)) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                Value elem;
+                if (!value_clone(&elem, &arr->data[i])) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                if (!vm_push(&vm, elem)) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                /* Apply the binary operation using a mini-dispatch.
+                 * We pop two values and produce one result, just like the
+                 * normal opcode handlers do. We temporarily inject the
+                 * inner opcode into the bytecode stream conceptually. */
+                Value b, a;
+                if (!vm_pop(&vm, &b) || !vm_pop(&vm, &a)) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(&vm, "stack underflow in reduce");
+                }
+                Value result = reduce_apply_op((OpCode)inner_op, &a, &b);
+                value_free(&a);
+                value_free(&b);
+                if (result.type == VAL_ERROR) {
+                    value_free(&arr_val);
+                    /* Include element index in error for debugging. */
+                    Value err = vm_runtime_error(&vm, "reduce element %zu: %s", i, result.string);
+                    value_free(&result);
+                    return err;
+                }
+                acc = result;
+            }
+            value_free(&arr_val);
+            if (!vm_push(&vm, acc)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
+        /* OP_AND / OP_OR are not standalone VM opcodes — they are used
+         * only as op-byte arguments to OP_REDUCE. If they somehow appear
+         * in the instruction stream, treat as an error. */
+        case OP_AND:
+        case OP_OR:
+            return vm_runtime_error(&vm, "OP_AND/OP_OR are not standalone opcodes");
 
         case OP_RETURN: {
             /* Pop the return value from the stack. */

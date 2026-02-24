@@ -2664,6 +2664,53 @@ TEST(test_array_eq_nested_diff) {
 }
 
 /* ============================================================
+ * Reduce (@op prefix) tests
+ * ============================================================ */
+
+/* @+ [1, 2, 3, 4, 5] → 15 */
+TEST(test_reduce_add) { assert_vm_number("@+ [1, 2, 3, 4, 5]", 15.0, "@+ reduce"); }
+
+/* @* [1, 2, 3, 4, 5] → 120 */
+TEST(test_reduce_multiply) { assert_vm_number("@* [1, 2, 3, 4, 5]", 120.0, "@* reduce"); }
+
+/* @- [10, 3, 2] → 5 (left fold: (10-3)-2) */
+TEST(test_reduce_subtract) { assert_vm_number("@- [10, 3, 2]", 5.0, "@- reduce"); }
+
+/* @++ ["a", "b", "c"] → "abc" */
+TEST(test_reduce_concat) { assert_vm_string("@++ [\"a\", \"b\", \"c\"]", "abc", "@++ reduce"); }
+
+/* @+ [42] → 42 (single element returned as-is) */
+TEST(test_reduce_single_element) { assert_vm_number("@+ [42]", 42.0, "@+ single element"); }
+
+/* @+ [] → error "cannot reduce empty array" */
+TEST(test_reduce_empty_error) { assert_vm_error("@+ []", "@+ empty array error"); }
+
+/* @and [true, true, false] → false (short-circuit) */
+TEST(test_reduce_and_short_circuit) {
+    assert_vm_bool("@and [true, true, false]", false, "@and short-circuit");
+}
+
+/* @and [1, 2, 3] → 3 (all truthy, return last) */
+TEST(test_reduce_and_all_truthy) { assert_vm_number("@and [1, 2, 3]", 3.0, "@and all truthy"); }
+
+/* @or [false, 0, \"hi\"] → "hi" (first truthy) */
+TEST(test_reduce_or_first_truthy) {
+    assert_vm_string("@or [false, 0, \"hi\"]", "hi", "@or first truthy");
+}
+
+/* @or [false, 0, ""] → "" (all falsy, return last) */
+TEST(test_reduce_or_all_falsy) { assert_vm_string("@or [false, 0, \"\"]", "", "@or all falsy"); }
+
+/* @== [1, 1, 1] → true==1 → false (left-fold behavior) */
+TEST(test_reduce_equal_fold) {
+    /* (1==1) = true, then true==1 = false because bool!=number */
+    assert_vm_bool("@== [1, 1, 1]", false, "@== fold");
+}
+
+/* @+ 42 → error (non-array operand) */
+TEST(test_reduce_non_array_error) { assert_vm_error("@+ 42", "@+ non-array error"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3154,6 +3201,21 @@ int main(void) {
     RUN_TEST(test_array_neq_diff);
     RUN_TEST(test_array_eq_nested);
     RUN_TEST(test_array_eq_nested_diff);
+
+    /* ---- @op prefix — reduction ---- */
+    printf("\nReduce (@op prefix):\n");
+    RUN_TEST(test_reduce_add);
+    RUN_TEST(test_reduce_multiply);
+    RUN_TEST(test_reduce_subtract);
+    RUN_TEST(test_reduce_concat);
+    RUN_TEST(test_reduce_single_element);
+    RUN_TEST(test_reduce_empty_error);
+    RUN_TEST(test_reduce_and_short_circuit);
+    RUN_TEST(test_reduce_and_all_truthy);
+    RUN_TEST(test_reduce_or_first_truthy);
+    RUN_TEST(test_reduce_or_all_falsy);
+    RUN_TEST(test_reduce_equal_fold);
+    RUN_TEST(test_reduce_non_array_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

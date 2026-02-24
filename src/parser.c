@@ -395,6 +395,49 @@ static AstNode *parse_atom(Parser *p) {
         return NULL;
     }
 
+    /* Meta-operator prefix: @op expr → AST_REDUCE (reduction/fold).
+     * Parse the operand at precedence 8 (same as unary minus) so that
+     * @+ [1, 2, 3] binds tightly: 1 + @* [2, 3] → 1 + (@* [2, 3]). */
+    if (t.type == TOK_META) {
+        /* Save the inner operator/identifier name before advance. */
+        char *op_name = malloc(t.value_len + 1);
+        if (!op_name) {
+            parser_error(p, t.line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        memcpy(op_name, t.value, t.value_len);
+        op_name[t.value_len] = '\0';
+        size_t meta_line = t.line;
+
+        advance(p); /* consume the TOK_META token */
+
+        /* Parse operand at precedence 8 (unary level). */
+        AstNode *operand = parse_expr(p, 8);
+        if (!operand) {
+            free(op_name);
+            return NULL;
+        }
+
+        AstNode *node = malloc(sizeof(AstNode));
+        if (!node) {
+            free(op_name);
+            ast_free(operand);
+            parser_error(p, meta_line, t.col, "memory allocation failed");
+            return NULL;
+        }
+        node->type = AST_REDUCE;
+        node->value = op_name; /* takes ownership */
+        node->left = operand;
+        node->right = NULL;
+        node->grouped = false;
+        node->line = meta_line;
+        node->children = NULL;
+        node->child_count = 0;
+        node->params = NULL;
+        node->param_count = 0;
+        return node;
+    }
+
     /* Number literal */
     if (t.type == TOK_NUMBER) {
         AstNode *node = make_leaf(AST_NUMBER, t.value, t.value_len, t.line);
@@ -2197,6 +2240,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "INDEX";
     case AST_INDEX_ASSIGN:
         return "INDEX_ASSIGN";
+    case AST_REDUCE:
+        return "REDUCE";
     default:
         return "UNKNOWN";
     }
@@ -2652,6 +2697,23 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf + pos, total_len - pos, "]");
         ptr_array_destroy(&child_strs);
+        return buf;
+    }
+
+    /* AST_REDUCE: [REDUCE op [operand]] — same shape as UNARY */
+    if (node->type == AST_REDUCE) {
+        char *operand_str = ast_format_node(node->left);
+        if (!operand_str)
+            return NULL;
+        size_t len =
+            1 + strlen(type_str) + 1 + strlen(node->value) + 1 + strlen(operand_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(operand_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s]", type_str, node->value, operand_str);
+        free(operand_str);
         return buf;
     }
 

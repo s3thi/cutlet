@@ -173,6 +173,12 @@ const char *opcode_name(OpCode op) {
         return "OP_INDEX_GET";
     case OP_INDEX_SET:
         return "OP_INDEX_SET";
+    case OP_REDUCE:
+        return "OP_REDUCE";
+    case OP_AND:
+        return "OP_AND";
+    case OP_OR:
+        return "OP_OR";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -344,6 +350,22 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         dynbuf_printf(b, "%-20s count=%d\n", opcode_name((OpCode)instruction), count);
         return offset + 2;
     }
+
+    /* OP_REDUCE: 1-byte inner-op operand */
+    case OP_REDUCE: {
+        uint8_t inner_op = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s %s\n", opcode_name((OpCode)instruction),
+                      opcode_name((OpCode)inner_op));
+        return offset + 2;
+    }
+
+    /* OP_AND / OP_OR are op-byte constants only, not standalone opcodes.
+     * If they appear in the instruction stream, show them as unknown. */
+    case OP_AND:
+    case OP_OR:
+        dynbuf_printf(b, "%s (op-byte only, unexpected as instruction)\n",
+                      opcode_name((OpCode)instruction));
+        return offset + 1;
 
     /* OP_GET_UPVALUE / OP_SET_UPVALUE: 1-byte upvalue index */
     case OP_GET_UPVALUE:

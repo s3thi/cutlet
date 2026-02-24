@@ -1098,6 +1098,68 @@ static void compile_function(Compiler *c, const AstNode *node) {
     }
 }
 
+/*
+ * Map a meta-operator name to its inner opcode byte for OP_REDUCE.
+ * Returns the OpCode value on success, or -1 if the name is not
+ * a known built-in operator (meaning it's a custom function name).
+ */
+static int meta_op_to_opcode(const char *op) {
+    if (strcmp(op, "+") == 0)
+        return OP_ADD;
+    if (strcmp(op, "-") == 0)
+        return OP_SUBTRACT;
+    if (strcmp(op, "*") == 0)
+        return OP_MULTIPLY;
+    if (strcmp(op, "/") == 0)
+        return OP_DIVIDE;
+    if (strcmp(op, "%") == 0)
+        return OP_MODULO;
+    if (strcmp(op, "**") == 0)
+        return OP_POWER;
+    if (strcmp(op, "++") == 0)
+        return OP_CONCAT;
+    if (strcmp(op, "==") == 0)
+        return OP_EQUAL;
+    if (strcmp(op, "!=") == 0)
+        return OP_NOT_EQUAL;
+    if (strcmp(op, "<") == 0)
+        return OP_LESS;
+    if (strcmp(op, ">") == 0)
+        return OP_GREATER;
+    if (strcmp(op, "<=") == 0)
+        return OP_LESS_EQUAL;
+    if (strcmp(op, ">=") == 0)
+        return OP_GREATER_EQUAL;
+    if (strcmp(op, "and") == 0)
+        return OP_AND;
+    if (strcmp(op, "or") == 0)
+        return OP_OR;
+    return -1; /* Custom function — not a built-in operator. */
+}
+
+/*
+ * Compile a reduction expression: @op expr → OP_REDUCE [inner_op].
+ * The operand is compiled (pushing an array), then OP_REDUCE folds it.
+ * Custom function reduction (@ident) is deferred to Step 4.
+ */
+static void compile_reduce(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+    const char *op = node->value;
+
+    int inner_op = meta_op_to_opcode(op);
+    if (inner_op < 0) {
+        /* Custom function reduction — not yet implemented (Step 4). */
+        compiler_error(c, "custom function reduction '@%s' not yet supported", op);
+        return;
+    }
+
+    /* Compile the operand (should produce an array on the stack). */
+    compile_node(c, node->left);
+
+    /* Emit OP_REDUCE with the inner operation as a 1-byte operand. */
+    emit_bytes(c, OP_REDUCE, (uint8_t)inner_op, line);
+}
+
 /* Compile any AST node by dispatching on its type. */
 static void compile_node(Compiler *c, const AstNode *node) {
     if (c->had_error)
@@ -1167,6 +1229,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_INDEX_ASSIGN:
         compile_index_assign(c, node);
+        break;
+    case AST_REDUCE:
+        compile_reduce(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

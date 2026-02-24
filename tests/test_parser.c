@@ -2411,6 +2411,107 @@ TEST(test_is_complete_array) {
 }
 
 /* ============================================================
+ * Reduce prefix (@op expr) parsing
+ * ============================================================ */
+
+/* @+ [1, 2, 3] → AST_REDUCE with op "+" and operand [ARRAY ...] */
+TEST(test_reduce_plus) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@+ [1, 2, 3]", &node, &err), "should parse @+ reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "+", "op should be +");
+    ASSERT(node->left != NULL, "should have operand");
+    ASSERT(node->left->type == AST_ARRAY, "operand should be ARRAY");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [REDUCE + [ARRAY [NUMBER 1] [NUMBER 2] [NUMBER 3]]]",
+                  "@+ reduce AST format");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* @* [1, 2, 3] → REDUCE with op "*" */
+TEST(test_reduce_multiply) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@* [1, 2]", &node, &err), "should parse @* reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "*", "op should be *");
+    ast_free(node);
+    PASS();
+}
+
+/* @++ ["a", "b"] → REDUCE with op "++" */
+TEST(test_reduce_concat) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@++ [\"a\", \"b\"]", &node, &err), "should parse @++ reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "++", "op should be ++");
+    ast_free(node);
+    PASS();
+}
+
+/* @and [true, false] → REDUCE with op "and" */
+TEST(test_reduce_and) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@and [true, false]", &node, &err), "should parse @and reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "and", "op should be and");
+    ast_free(node);
+    PASS();
+}
+
+/* @or [false, true] → REDUCE with op "or" */
+TEST(test_reduce_or) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@or [false, true]", &node, &err), "should parse @or reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "or", "op should be or");
+    ast_free(node);
+    PASS();
+}
+
+/* @== [1, 1, 1] → REDUCE with op "==" */
+TEST(test_reduce_equal) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@== [1, 1, 1]", &node, &err), "should parse @== reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "==", "op should be ==");
+    ast_free(node);
+    PASS();
+}
+
+/* @my_func [1, 2, 3] → REDUCE with op "my_func" (custom function) */
+TEST(test_reduce_custom_func) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("@my_func [1, 2, 3]", &node, &err), "should parse @my_func reduce");
+    ASSERT(node->type == AST_REDUCE, "type should be REDUCE");
+    ASSERT_STR_EQ(node->value, "my_func", "op should be my_func");
+    ast_free(node);
+    PASS();
+}
+
+/* @+ binds at high precedence (same as unary, prec 8) */
+TEST(test_reduce_precedence) {
+    AstNode *node = NULL;
+    ParseError err;
+    /* 1 + @* [2, 3] should parse as 1 + (@* [2, 3]) */
+    ASSERT(parser_parse("1 + @* [2, 3]", &node, &err), "should parse reduce in expr");
+    ASSERT(node->type == AST_BINOP, "top should be BINOP");
+    ASSERT_STR_EQ(node->value, "+", "top op should be +");
+    ASSERT(node->right->type == AST_REDUCE, "right should be REDUCE");
+    ASSERT_STR_EQ(node->right->value, "*", "reduce op should be *");
+    ast_free(node);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2803,6 +2904,16 @@ int main(void) {
     printf("\nparser_is_complete() - array literals:\n");
     RUN_TEST(test_is_incomplete_array_unclosed);
     RUN_TEST(test_is_complete_array);
+
+    printf("\nReduce prefix (@op expr) parsing:\n");
+    RUN_TEST(test_reduce_plus);
+    RUN_TEST(test_reduce_multiply);
+    RUN_TEST(test_reduce_concat);
+    RUN_TEST(test_reduce_and);
+    RUN_TEST(test_reduce_or);
+    RUN_TEST(test_reduce_equal);
+    RUN_TEST(test_reduce_custom_func);
+    RUN_TEST(test_reduce_precedence);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
