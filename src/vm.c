@@ -117,42 +117,9 @@ static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
 
 /* ---- Equality check ---- */
 
-static bool values_equal(const Value *a, const Value *b) {
-    if (a->type != b->type)
-        return false;
-    switch (a->type) {
-    case VAL_NUMBER:
-        return a->number == b->number;
-    case VAL_STRING:
-        return strcmp(a->string, b->string) == 0;
-    case VAL_BOOL:
-        return a->boolean == b->boolean;
-    case VAL_NOTHING:
-        return true;
-    case VAL_FUNCTION:
-        /* Identity-based: only equal if pointing to the same ObjFunction. */
-        return a->function == b->function;
-    case VAL_CLOSURE:
-        /* Identity-based: only equal if pointing to the same ObjClosure. */
-        return a->closure == b->closure;
-    case VAL_ARRAY: {
-        /* Structural equality: same length and all elements pairwise equal. */
-        const ObjArray *aa = a->array;
-        const ObjArray *ba = b->array;
-        if (aa == ba)
-            return true; /* Same backing store — trivially equal. */
-        if (aa->count != ba->count)
-            return false;
-        for (size_t i = 0; i < aa->count; i++) {
-            if (!values_equal(&aa->data[i], &ba->data[i]))
-                return false;
-        }
-        return true;
-    }
-    default:
-        return false;
-    }
-}
+/* Delegate to value_equal() in value.c — single source of truth for
+ * equality semantics across the VM and map key lookups. */
+static bool values_equal(const Value *a, const Value *b) { return value_equal(a, b); }
 
 /* ---- Ordered comparison ---- */
 
@@ -363,6 +330,8 @@ static const char *value_type_name(ValueType type) {
         return "function";
     case VAL_ARRAY:
         return "array";
+    case VAL_MAP:
+        return "map";
     case VAL_ERROR:
         return "error";
     default:

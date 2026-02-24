@@ -29,6 +29,7 @@ typedef enum {
     VAL_FUNCTION, /* Native functions (say, etc.) */
     VAL_CLOSURE,  /* User-defined functions wrapped in a closure */
     VAL_ARRAY,    /* Heap-allocated array with reference-counted backing store */
+    VAL_MAP,      /* Heap-allocated map with reference-counted backing store */
 } ValueType;
 
 /* Forward declaration for the Value type (needed by NativeFn). */
@@ -98,9 +99,12 @@ typedef struct {
     size_t capacity;
 } ObjArray;
 
-/* Forward declarations for closure types (defined after Value). */
+/* Forward declarations for types defined after Value.
+ * These need the full Value definition (they contain Value fields),
+ * but Value needs pointers to them, so we forward-declare here. */
 typedef struct ObjUpvalue ObjUpvalue;
 typedef struct ObjClosure ObjClosure;
+typedef struct ObjMap ObjMap;
 
 /* A tagged union representing a Cutlet value.
  * - VAL_NUMBER: number field holds the value.
@@ -120,6 +124,7 @@ struct Value {
     ObjFunction *function; /* refcounted; non-NULL only for VAL_FUNCTION */
     ObjClosure *closure;   /* refcounted; non-NULL only for VAL_CLOSURE */
     ObjArray *array;       /* refcounted; non-NULL only for VAL_ARRAY */
+    ObjMap *map;           /* refcounted; non-NULL only for VAL_MAP */
 };
 
 /*
@@ -157,6 +162,23 @@ struct ObjClosure {
     ObjFunction *function;
     ObjUpvalue **upvalues;
     int upvalue_count;
+};
+
+/* A single key-value entry in a map. */
+typedef struct {
+    Value key;   /* Owned key. */
+    Value value; /* Owned value. */
+} MapEntry;
+
+/* Heap-allocated backing store for maps. Reference-counted.
+ * Entries are stored in a dense array in insertion order.
+ * Lookup is O(n) linear scan — sufficient for typical shell-script
+ * map sizes. Can be upgraded to a hash index later without API changes. */
+struct ObjMap {
+    size_t refcount;   /* Reference count (1 on creation). */
+    MapEntry *entries; /* Owned array of key-value pairs. */
+    size_t count;      /* Number of live entries. */
+    size_t capacity;   /* Allocated capacity of entries array. */
 };
 
 /* ---- Value constructors ---- */
@@ -228,6 +250,38 @@ ObjArray *obj_array_clone_deep(const ObjArray *src);
  * a deep clone so the caller can safely mutate it.
  */
 void obj_array_ensure_owned(Value *v);
+
+/* Allocate a new empty ObjMap with refcount 1. Returns NULL on failure. */
+ObjMap *obj_map_new(void);
+
+/* Insert or update a key-value pair in a map. Clones key and value. */
+void obj_map_set(ObjMap *m, const Value *key, const Value *val);
+
+/* Return pointer to value for key, or NULL if not found. Does not clone. */
+Value *obj_map_get(const ObjMap *m, const Value *key);
+
+/* Return true if key exists in the map. */
+bool obj_map_has(const ObjMap *m, const Value *key);
+
+/* Create a full independent deep copy of an ObjMap (refcount 1). */
+ObjMap *obj_map_clone_deep(const ObjMap *src);
+
+/*
+ * Copy-on-write helper: if the map's refcount > 1, replace it with
+ * a deep clone so the caller can safely mutate it.
+ */
+void obj_map_ensure_owned(Value *v);
+
+/* Create a map Value (takes ownership of the ObjMap reference). */
+Value make_map(ObjMap *m);
+
+/*
+ * Compare two values for equality. Used by map key lookup and by
+ * the VM's equality operators. Handles all value types including
+ * VAL_ARRAY (structural equality). VAL_MAP equality is added in a
+ * later step.
+ */
+bool value_equal(const Value *a, const Value *b);
 
 /* ---- Value utilities ---- */
 
