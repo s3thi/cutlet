@@ -1441,7 +1441,10 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_INDEX_GET: {
             /* Read array[index]: pop index, pop array, push element.
-             * Negative indices wrap from end (e.g. -1 = last element).
+             * Supports two index types:
+             *   - Number: scalar index (negative wraps from end).
+             *   - Array of booleans: mask index — returns a new array
+             *     containing elements where the mask is true.
              * Non-integer or out-of-bounds indices produce runtime errors. */
             Value idx_val, arr_val;
             if (!vm_pop(vm, &idx_val)) {
@@ -1457,6 +1460,57 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "cannot index %s", t);
             }
+
+            /* ---- Boolean mask indexing ---- */
+            if (idx_val.type == VAL_ARRAY) {
+                ObjArray *src = arr_val.array;
+                ObjArray *mask = idx_val.array;
+                /* Mask must be same length as source array. */
+                if (mask->count != src->count) {
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm,
+                                            "mask length (%zu) does not match array length (%zu)",
+                                            mask->count, src->count);
+                }
+                /* Validate all mask elements are booleans. */
+                for (size_t i = 0; i < mask->count; i++) {
+                    if (mask->data[i].type != VAL_BOOL) {
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "mask array must contain only booleans");
+                    }
+                }
+                /* Build result array from elements where mask is true. */
+                ObjArray *result_arr = obj_array_new();
+                if (!result_arr) {
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm, "out of memory");
+                }
+                for (size_t i = 0; i < src->count; i++) {
+                    if (mask->data[i].boolean) {
+                        Value elem;
+                        if (!value_clone(&elem, &src->data[i])) {
+                            /* Clean up partial result via value_free. */
+                            Value partial = make_array(result_arr);
+                            value_free(&partial);
+                            value_free(&arr_val);
+                            value_free(&idx_val);
+                            return vm_runtime_error(vm, "memory allocation failed");
+                        }
+                        obj_array_push(result_arr, elem);
+                    }
+                }
+                value_free(&arr_val);
+                value_free(&idx_val);
+                if (!vm_push(vm, make_array(result_arr))) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* ---- Scalar number indexing ---- */
             if (idx_val.type != VAL_NUMBER) {
                 value_free(&arr_val);
                 value_free(&idx_val);

@@ -2532,6 +2532,38 @@ TEST(test_index_assign_returns_value) {
 }
 
 /* ============================================================
+ * Boolean mask indexing
+ * ============================================================ */
+
+/* [10, 20, 30][[true, false, true]] => [10, 30] */
+TEST(test_mask_basic) {
+    assert_vm_formatted("[10, 20, 30][[true, false, true]]", "[10, 30]", "mask basic");
+}
+
+/* [10, 20, 30][[false, false, false]] => [] */
+TEST(test_mask_all_false) {
+    assert_vm_formatted("[10, 20, 30][[false, false, false]]", "[]", "mask all false");
+}
+
+/* [10, 20, 30][[true, true, true]] => [10, 20, 30] */
+TEST(test_mask_all_true) {
+    assert_vm_formatted("[10, 20, 30][[true, true, true]]", "[10, 20, 30]", "mask all true");
+}
+
+/* Combine with vectorization: my xs = [1, 2, 3, 4, 5]\nxs[xs @> 3] => [4, 5] */
+TEST(test_mask_with_vectorize) {
+    assert_vm_formatted("my xs = [1, 2, 3, 4, 5]\nxs[xs @> 3]", "[4, 5]", "mask with vectorize");
+}
+
+/* Mask length mismatch => error */
+TEST(test_mask_length_mismatch) {
+    assert_vm_error("[10, 20, 30][[true, false]]", "mask length mismatch");
+}
+
+/* Non-boolean elements in mask => error */
+TEST(test_mask_non_boolean) { assert_vm_error("[1, 2, 3][[1, 0, 1]]", "mask non-boolean"); }
+
+/* ============================================================
  * Array concatenation (++)
  * ============================================================ */
 
@@ -3284,6 +3316,14 @@ int main(void) {
     RUN_TEST(test_index_assign_cow);
     RUN_TEST(test_index_nested);
     RUN_TEST(test_index_assign_returns_value);
+
+    printf("\nBoolean mask indexing:\n");
+    RUN_TEST(test_mask_basic);
+    RUN_TEST(test_mask_all_false);
+    RUN_TEST(test_mask_all_true);
+    RUN_TEST(test_mask_with_vectorize);
+    RUN_TEST(test_mask_length_mismatch);
+    RUN_TEST(test_mask_non_boolean);
 
     printf("\nArray concatenation (++):\n");
     RUN_TEST(test_concat_arrays_basic);
