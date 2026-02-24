@@ -2899,6 +2899,75 @@ TEST(test_map_function_key_error) {
 }
 
 /* ============================================================
+ * Map indexing (read)
+ * ============================================================ */
+
+/* {a: 1, b: 2}["a"] => 1 */
+TEST(test_map_index_get_string_key) {
+    assert_vm_number("{a: 1, b: 2}[\"a\"]", 1.0, "map index string key");
+}
+
+/* {a: 1, b: 2}["c"] => nothing (missing key) */
+TEST(test_map_index_get_missing_key) {
+    assert_vm_formatted("{a: 1, b: 2}[\"c\"]", "nothing", "map index missing key");
+}
+
+/* {[1]: "one"}[1] => "one" (number key) */
+TEST(test_map_index_get_number_key) {
+    assert_vm_formatted("{[1]: \"one\"}[1]", "one", "map index number key");
+}
+
+/* {[true]: "yes"}[true] => "yes" (boolean key) */
+TEST(test_map_index_get_bool_key) {
+    assert_vm_formatted("{[true]: \"yes\"}[true]", "yes", "map index bool key");
+}
+
+/* Error: invalid key type for map index */
+TEST(test_map_index_get_invalid_key) {
+    assert_vm_error("{a: 1}[fn(x) is x end]", "map index invalid key");
+}
+
+/* ============================================================
+ * Map indexing (write / assignment)
+ * ============================================================ */
+
+/* my m = {a: 1}\nm["a"] = 99\nm => {a: 99} */
+TEST(test_map_index_set_existing) {
+    assert_vm_formatted("my m = {a: 1}\nm[\"a\"] = 99\nm", "{a: 99}", "map index set existing");
+}
+
+/* my m = {a: 1}\nm["b"] = 2\nm => {a: 1, b: 2} (insert new key) */
+TEST(test_map_index_set_new_key) {
+    assert_vm_formatted("my m = {a: 1}\nm[\"b\"] = 2\nm", "{a: 1, b: 2}", "map index set new key");
+}
+
+/* COW: my m1 = {a: 1}\nmy m2 = m1\nm2["a"] = 99\nm1 => {a: 1} */
+TEST(test_map_index_set_cow) {
+    assert_vm_formatted("my m1 = {a: 1}\nmy m2 = m1\nm2[\"a\"] = 99\nm1", "{a: 1}",
+                        "map COW index set");
+}
+
+/* ============================================================
+ * Map projection (index with array of keys)
+ * ============================================================ */
+
+/* {a: 1, b: 2, c: 3}[["a", "c"]] => {a: 1, c: 3} */
+TEST(test_map_projection_basic) {
+    assert_vm_formatted("{a: 1, b: 2, c: 3}[[\"a\", \"c\"]]", "{a: 1, c: 3}",
+                        "map projection basic");
+}
+
+/* {a: 1, b: 2}[["a", "z"]] => {a: 1} (missing keys skipped) */
+TEST(test_map_projection_missing_keys) {
+    assert_vm_formatted("{a: 1, b: 2}[[\"a\", \"z\"]]", "{a: 1}", "map projection missing keys");
+}
+
+/* {a: 1}[[]] => {} (empty key array) */
+TEST(test_map_projection_empty_keys) {
+    assert_vm_formatted("{a: 1}[[]]", "{}", "map projection empty keys");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3451,6 +3520,26 @@ int main(void) {
     RUN_TEST(test_map_bool_keys_eval);
     RUN_TEST(test_map_duplicate_key_eval);
     RUN_TEST(test_map_function_key_error);
+
+    /* ---- Map indexing (read) ---- */
+    printf("\nMap indexing (read):\n");
+    RUN_TEST(test_map_index_get_string_key);
+    RUN_TEST(test_map_index_get_missing_key);
+    RUN_TEST(test_map_index_get_number_key);
+    RUN_TEST(test_map_index_get_bool_key);
+    RUN_TEST(test_map_index_get_invalid_key);
+
+    /* ---- Map indexing (write) ---- */
+    printf("\nMap indexing (write):\n");
+    RUN_TEST(test_map_index_set_existing);
+    RUN_TEST(test_map_index_set_new_key);
+    RUN_TEST(test_map_index_set_cow);
+
+    /* ---- Map projection ---- */
+    printf("\nMap projection:\n");
+    RUN_TEST(test_map_projection_basic);
+    RUN_TEST(test_map_projection_missing_keys);
+    RUN_TEST(test_map_projection_empty_keys);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

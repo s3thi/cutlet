@@ -1462,11 +1462,12 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_INDEX_GET: {
-            /* Read array[index]: pop index, pop array, push element.
-             * Supports two index types:
-             *   - Number: scalar index (negative wraps from end).
-             *   - Array of booleans: mask index — returns a new array
-             *     containing elements where the mask is true.
+            /* Read container[index]: pop index, pop container, push element.
+             * Supports arrays and maps:
+             *   Array + Number: scalar index (negative wraps from end).
+             *   Array + Array of booleans: mask index — returns filtered array.
+             *   Map + Array: projection — returns sub-map for given keys.
+             *   Map + scalar: key lookup — returns value or nothing.
              * Non-integer or out-of-bounds indices produce runtime errors. */
             Value idx_val, arr_val;
             if (!vm_pop(vm, &idx_val)) {
@@ -1476,6 +1477,69 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+
+            /* ---- Map indexing ---- */
+            if (arr_val.type == VAL_MAP) {
+                ObjMap *map = arr_val.map;
+
+                /* Map + Array => projection (sub-map for given keys). */
+                if (idx_val.type == VAL_ARRAY) {
+                    ObjArray *key_arr = idx_val.array;
+                    ObjMap *result = obj_map_new();
+                    if (!result) {
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "out of memory");
+                    }
+                    for (size_t i = 0; i < key_arr->count; i++) {
+                        Value *found = obj_map_get(map, &key_arr->data[i]);
+                        if (found) {
+                            obj_map_set(result, &key_arr->data[i], found);
+                        }
+                        /* Missing keys are silently skipped. */
+                    }
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, make_map(result))) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                    break;
+                }
+
+                /* Map + scalar key => key lookup. */
+                /* Validate key type: only strings, numbers, booleans, nothing. */
+                if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
+                    idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
+                    const char *kt = value_type_name(idx_val.type);
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+
+                Value *found = obj_map_get(map, &idx_val);
+                if (found) {
+                    Value result;
+                    if (!value_clone(&result, found)) {
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "memory allocation failed");
+                    }
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, result)) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                } else {
+                    /* Missing key returns nothing. */
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, make_nothing())) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                }
+                break;
+            }
+
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
@@ -1571,16 +1635,17 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_INDEX_SET: {
-            /* Write array[index] = value.
+            /* Write container[index] = value.
              *
-             * Stack in:  [..., value, array, index]   (TOS = index)
-             * Pop index, pop array. Peek value (now at TOS).
-             * COW the array if refcount > 1, set element, push modified array.
-             * Stack out: [..., value, modified_array]
+             * Stack in:  [..., value, container, index]   (TOS = index)
+             * Pop index, pop container. Peek value (now at TOS).
+             * COW the container if refcount > 1, set element, push modified container.
+             * Stack out: [..., value, modified_container]
              *
              * The compiler follows this with SET_GLOBAL/LOCAL to write the
-             * modified array back to the source variable, then OP_POP to
-             * discard the modified array, leaving value as the result. */
+             * modified container back to the source variable, then OP_POP to
+             * discard the modified container, leaving value as the result.
+             * Supports both arrays (by numeric index) and maps (by key). */
             Value idx_val, arr_val;
             if (!vm_pop(vm, &idx_val)) {
                 return vm_runtime_error(vm, "stack underflow");
@@ -1589,13 +1654,36 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
-            /* Peek at the value (now at TOS after popping index and array). */
+            /* Peek at the value (now at TOS after popping index and container). */
             Value val;
             if (!vm_peek(vm, 0, &val)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+
+            /* ---- Map index set ---- */
+            if (arr_val.type == VAL_MAP) {
+                /* Validate key type: only strings, numbers, booleans, nothing. */
+                if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
+                    idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
+                    const char *kt = value_type_name(idx_val.type);
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+                /* COW: ensure we own the backing store before mutating. */
+                obj_map_ensure_owned(&arr_val);
+                /* Insert or update the key-value pair. */
+                obj_map_set(arr_val.map, &idx_val, &val);
+                value_free(&idx_val);
+                /* Push the modified map on top of the value. */
+                if (!vm_push(vm, arr_val)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
