@@ -57,6 +57,8 @@ Value make_error(const char *fmt, ...) {
 
 Value make_closure(ObjClosure *cl) { return (Value){.type = VAL_CLOSURE, .closure = cl}; }
 
+Value make_array(ObjArray *arr) { return (Value){.type = VAL_ARRAY, .array = arr}; }
+
 ObjUpvalue *obj_upvalue_new(Value *slot) {
     ObjUpvalue *uv = calloc(1, sizeof(ObjUpvalue));
     if (!uv)
@@ -147,6 +149,77 @@ void obj_function_free(ObjFunction *fn) {
     free(fn);
 }
 
+/* ---- ObjArray utilities ---- */
+
+ObjArray *obj_array_new(void) {
+    ObjArray *arr = calloc(1, sizeof(ObjArray));
+    if (!arr)
+        return NULL;
+    arr->refcount = 1;
+    arr->data = NULL;
+    arr->count = 0;
+    arr->capacity = 0;
+    return arr;
+}
+
+void obj_array_push(ObjArray *arr, Value v) {
+    if (!arr)
+        return;
+    /* Grow backing array when full. */
+    if (arr->count >= arr->capacity) {
+        size_t new_cap = arr->capacity < 8 ? 8 : arr->capacity * 2;
+        Value *new_data = realloc(arr->data, new_cap * sizeof(Value));
+        if (!new_data)
+            return; /* Silent failure on OOM — keeps existing data intact. */
+        arr->data = new_data;
+        arr->capacity = new_cap;
+    }
+    arr->data[arr->count++] = v; /* Takes ownership of v. */
+}
+
+ObjArray *obj_array_clone_deep(const ObjArray *src) {
+    if (!src)
+        return NULL;
+    ObjArray *clone = obj_array_new();
+    if (!clone)
+        return NULL;
+    if (src->count > 0) {
+        clone->data = malloc(src->count * sizeof(Value));
+        if (!clone->data) {
+            free(clone);
+            return NULL;
+        }
+        clone->capacity = src->count;
+        clone->count = src->count;
+        /* Deep-clone each element so strings etc. are independent copies. */
+        for (size_t i = 0; i < src->count; i++) {
+            value_clone(&clone->data[i], &src->data[i]);
+        }
+    }
+    return clone;
+}
+
+void obj_array_ensure_owned(Value *v) {
+    if (!v || v->type != VAL_ARRAY || !v->array)
+        return;
+    if (v->array->refcount <= 1)
+        return; /* Already sole owner — no copy needed. */
+    /* Detach: decrement the shared refcount and replace with a deep clone. */
+    v->array->refcount--;
+    v->array = obj_array_clone_deep(v->array);
+}
+
+/* Free an ObjArray's elements and backing storage (unconditionally). */
+static void obj_array_free(ObjArray *arr) {
+    if (!arr)
+        return;
+    for (size_t i = 0; i < arr->count; i++) {
+        value_free(&arr->data[i]);
+    }
+    free(arr->data);
+    free(arr);
+}
+
 void value_free(Value *v) {
     if (!v)
         return;
@@ -165,6 +238,13 @@ void value_free(Value *v) {
     if (v->type == VAL_CLOSURE && v->closure) {
         obj_closure_free(v->closure);
         v->closure = NULL;
+    }
+    if (v->type == VAL_ARRAY && v->array) {
+        if (v->array->refcount > 0)
+            v->array->refcount--;
+        if (v->array->refcount == 0)
+            obj_array_free(v->array);
+        v->array = NULL;
     }
 }
 
@@ -238,6 +318,51 @@ char *value_format(const Value *v) {
         return strdup("<fn>");
     }
 
+    case VAL_ARRAY: {
+        if (!v->array || v->array->count == 0)
+            return strdup("[]");
+        /*
+         * Format as "[elem1, elem2, ...]".
+         * Build by formatting each element and concatenating with ", ".
+         */
+        /* First pass: format all elements and compute total length. */
+        size_t count = v->array->count;
+        char **parts = (char **)malloc(count * sizeof(char *));
+        if (!parts)
+            return strdup("[...]");
+        size_t total = 2; /* "[" and "]" */
+        for (size_t i = 0; i < count; i++) {
+            parts[i] = value_format(&v->array->data[i]);
+            total += strlen(parts[i]);
+            if (i > 0)
+                total += 2; /* ", " separator */
+        }
+        /* Second pass: assemble the string. */
+        char *buf = malloc(total + 1);
+        if (!buf) {
+            for (size_t i = 0; i < count; i++)
+                free(parts[i]);
+            free((void *)parts);
+            return strdup("[...]");
+        }
+        char *p = buf;
+        *p++ = '[';
+        for (size_t i = 0; i < count; i++) {
+            if (i > 0) {
+                *p++ = ',';
+                *p++ = ' ';
+            }
+            size_t slen = strlen(parts[i]);
+            memcpy(p, parts[i], slen);
+            p += slen;
+            free(parts[i]);
+        }
+        *p++ = ']';
+        *p = '\0';
+        free((void *)parts);
+        return buf;
+    }
+
     default:
         return strdup("???");
     }
@@ -255,6 +380,8 @@ bool is_truthy(const Value *v) {
         return true;
     case VAL_CLOSURE:
         return true;
+    case VAL_ARRAY:
+        return v->array != NULL && v->array->count > 0;
     case VAL_NOTHING: // NOLINT(bugprone-branch-clone)
         return false;
     case VAL_ERROR: // NOLINT(bugprone-branch-clone)
@@ -291,6 +418,14 @@ bool value_clone(Value *out, const Value *src) {
             out->closure->refcount++;
     } else {
         out->closure = NULL;
+    }
+    if (src->type == VAL_ARRAY) {
+        /* Shared ownership via refcount — structural sharing (COW). */
+        out->array = src->array;
+        if (out->array)
+            out->array->refcount++;
+    } else {
+        out->array = NULL;
     }
     return true;
 }
