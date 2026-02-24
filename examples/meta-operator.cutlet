@@ -1,0 +1,52 @@
+# The @ meta-operator: reduction, vectorization, and mask indexing
+
+# --- Reduction (prefix @op) ---
+
+# Fold an operator across an array from left to right
+say(@+ [1, 2, 3, 4, 5])        # 15
+say(@* [1, 2, 3, 4, 5])        # 120
+say(@- [10, 3, 2])              # 5
+say(@++ ["hello", " ", "world"]) # hello world
+
+# Short-circuit logical folds
+say(@and [true, true, false])   # false
+say(@or [false, false, "yes"])  # yes
+
+# --- Vectorization (infix @op) ---
+
+# Element-wise operations on two arrays
+say([1, 2, 3] @+ [10, 20, 30]) # [11, 22, 33]
+say([2, 3, 4] @* [5, 6, 7])    # [10, 18, 28]
+
+# Scalar broadcast
+say([1, 2, 3] @* 10)           # [10, 20, 30]
+say(100 @- [1, 2, 3])          # [99, 98, 97]
+say([2, 3, 4] @** 2)           # [4, 9, 16]
+
+# Vectorized comparison produces boolean arrays
+say([1, 2, 3, 4, 5] @> 3)     # [false, false, false, true, true]
+
+# --- Custom functions with @ ---
+
+fn max(a, b) is if a > b then a else b end end
+
+# Custom reduction
+say(@max [3, 1, 4, 1, 5, 9, 2, 6])   # 9
+
+# Custom vectorization
+say([1, 5, 3] @max [4, 2, 6])  # [4, 5, 6]
+
+# --- Boolean mask indexing ---
+
+my xs = [10, 20, 30, 40, 50]
+say(xs[[true, false, true, false, true]])  # [10, 30, 50]
+
+# --- Combining @ with mask indexing ---
+
+# Filter: keep scores >= 80
+my scores = [85, 92, 67, 74, 95, 58]
+say(scores[scores @>= 80])     # [85, 92, 95]
+
+# Sum of elements greater than 3
+my data = [1, 5, 2, 8, 3, 7]
+say(@+ data[data @> 3])        # 20

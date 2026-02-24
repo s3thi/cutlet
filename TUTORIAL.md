@@ -761,7 +761,105 @@ end
 squares                 # => [1, 4, 9, 16, 25]
 
 # ============================================================
-# 13. say() for output
+# 13. The @ meta-operator
+# ============================================================
+
+# The @ meta-operator lifts operators and functions to work across
+# arrays. It has two forms: prefix (reduction/fold) and infix
+# (element-wise vectorization).
+
+# --- Prefix @op: reduction (fold) ---
+
+# @op array folds an operator across the array from left to right.
+@+ [1, 2, 3, 4, 5]     # => 15   (1+2+3+4+5)
+@* [1, 2, 3, 4, 5]     # => 120  (1*2*3*4*5)
+@- [10, 3, 2]           # => 5    ((10-3)-2)
+@++ ["a", "b", "c"]     # => abc
+
+# Single-element arrays return that element.
+@+ [42]                 # => 42
+
+# Empty arrays are a runtime error.
+# @+ []                # => ERR cannot reduce empty array
+
+# @and and @or fold with short-circuit semantics.
+@and [true, true, false]    # => false (stops at first falsy)
+@and [1, 2, 3]              # => 3     (all truthy, returns last)
+@or [false, 0, "hi"]        # => hi    (stops at first truthy)
+@or [false, 0, ""]          # => ""    (all falsy, returns last)
+
+# --- Infix @op: vectorization (element-wise) ---
+
+# expr @op expr applies the operator to matching elements.
+[1, 2, 3] @+ [4, 5, 6]     # => [5, 7, 9]
+[1, 2, 3] @* [4, 5, 6]     # => [4, 10, 18]
+["a", "b"] @++ ["1", "2"]   # => [a1, b2]
+
+# Scalar broadcast: when one operand is a scalar, it's used
+# for every element.
+[1, 2, 3] @* 10             # => [10, 20, 30]
+10 @- [1, 2, 3]             # => [9, 8, 7]
+[1, 2, 3] @** 2             # => [1, 4, 9]
+
+# Vectorized comparison produces boolean arrays.
+[1, 2, 3] @> 2              # => [false, false, true]
+[10, 20, 30] @>= 20         # => [false, true, true]
+
+# Mismatched array lengths are a runtime error.
+# [1, 2] @+ [1, 2, 3]     # => ERR array length mismatch
+
+# Both scalars are also an error (use the regular operator instead).
+# 1 @+ 2                  # => ERR @ requires at least one array operand
+
+# Precedence follows the inner operator: @* binds tighter than @+.
+[1, 2] @+ [3, 4] @* [5, 6]  # => [16, 26]  ([1,2] @+ [15,24])
+
+# --- @fn: custom function reduction and vectorization ---
+
+# @identifier works with user-defined functions too.
+# For reduction, the function must take two arguments.
+fn max(a, b) is if a > b then a else b end end
+@max [3, 1, 4, 1, 5]       # => 5
+
+fn add(a, b) is a + b end
+@add [1, 2, 3]              # => 6
+
+# For vectorization, the function is called on matching pairs.
+fn mul(a, b) is a * b end
+[1, 2, 3] @mul [4, 5, 6]   # => [4, 10, 18]
+
+# Scalar broadcast works with custom functions too.
+fn add1(a, b) is a + b end
+[1, 2, 3] @add1 10          # => [11, 12, 13]
+
+# --- Boolean mask indexing ---
+
+# When you index an array with a boolean array, it acts as a mask:
+# elements where the mask is true are kept.
+my xs = [10, 20, 30, 40, 50]
+xs[[true, false, true, false, true]]  # => [10, 30, 50]
+
+# All false => empty array.
+[1, 2, 3][[false, false, false]]      # => []
+
+# The mask must be the same length as the array.
+# [1, 2, 3][[true, false]]   # => ERR mask length mismatch
+
+# The mask must contain only booleans.
+# [1, 2, 3][[1, 0, 1]]      # => ERR mask must contain only booleans
+
+# --- Combining @ with mask indexing ---
+
+# This is where @ really shines. Vectorized comparison produces a
+# boolean array, which you can use directly as a mask.
+my scores = [85, 92, 67, 74, 95]
+scores[scores @>= 70]               # => [85, 92, 74, 95]
+
+my data = [1, 2, 3, 4, 5, 6, 7, 8]
+data[data @> 3]                      # => [4, 5, 6, 7, 8]
+
+# ============================================================
+# 14. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -776,7 +874,7 @@ say(nothing)    # prints: nothing
 say("result: " ++ str(42))   # prints: result: 42
 
 # ============================================================
-# 14. Running Cutlet programs
+# 15. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -797,7 +895,7 @@ say("result: " ++ str(42))   # prints: result: 42
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 15. The REPL
+# 16. The REPL
 # ============================================================
 
 # Start an interactive REPL:
