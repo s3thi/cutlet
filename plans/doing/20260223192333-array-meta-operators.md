@@ -368,6 +368,23 @@ Should work automatically if the parser handles `fn` as the identifier in `@fn(.
 - [x] Step 2: `@` prefix — reduction with built-in operators — added AST_REDUCE, OP_REDUCE, OP_AND/OP_OR op-bytes, reduce_apply_op helper, short-circuit @and/@or, 8 parser tests + 12 VM tests
 - [x] Step 3: `@` infix — vectorization with built-in operators — added AST_VECTORIZE, OP_VECTORIZE, infix TOK_META parsing with inner-operator precedence, scalar broadcasting, 7 parser tests + 10 VM tests
 - [x] Step 4: `@` with custom functions — added OP_REDUCE_CALL/OP_VECTORIZE_CALL opcodes, refactored VM dispatch loop into vm_run() for recursive calls, vm_call_value() helper for calling closures/natives, emit_load_callable() compiler helper, 11 VM tests
+- [x] Step 5: Boolean mask indexing — extended OP_INDEX_GET to accept boolean array masks, validates mask is all-booleans and same length as source, 6 VM tests
+- [x] Step 6: Integration + REPL + cleanup — verified disassembler/AST/REPL integration, added 14 CLI integration tests (pipe evaluation, --bytecode/--ast/--tokens for all 4 opcodes, end-to-end vectorize+mask)
+
+## Summary
+
+All 6 steps complete. The `@` meta-operator provides reduction (`@op expr`), vectorization (`expr @op expr`), custom function reduction/vectorization (`@fn`), and boolean mask indexing (`arr[bool_arr]`).
+
+**Files touched across all steps:**
+- `src/tokenizer.h`, `src/tokenizer.c` — TOK_META token type
+- `src/parser.h`, `src/parser.c` — AST_REDUCE, AST_VECTORIZE nodes, prefix/infix parsing
+- `src/chunk.h`, `src/chunk.c` — OP_REDUCE, OP_VECTORIZE, OP_REDUCE_CALL, OP_VECTORIZE_CALL, OP_AND, OP_OR opcodes + disassembly
+- `src/compiler.c` — reduce/vectorize compilation, custom function bytecode generation
+- `src/vm.c` — reduce/vectorize execution, custom fn call dispatch, boolean mask indexing
+- `tests/test_tokenizer.c` — 15 tokenizer tests
+- `tests/test_parser.c` — 15 parser tests
+- `tests/test_vm.c` — 39 VM tests
+- `tests/test_cli.sh` — 14 CLI integration tests
 
 ---
 End of plan.

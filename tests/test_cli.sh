@@ -1083,6 +1083,121 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Meta-operator @ (reduce, vectorize, custom fn, mask indexing)
+# ============================================================
+echo
+echo "Meta-operator @ (integration):"
+
+# Basic reduction via local REPL pipe
+test_local_repl "@+ reduction via pipe" "@+ [1, 2, 3]" "6"
+
+# Vectorization via local REPL pipe
+test_local_repl "@+ vectorize via pipe" "[1, 2, 3] @+ [4, 5, 6]" "[5, 7, 9]"
+
+# Scalar broadcast via local REPL pipe
+test_local_repl "@* scalar broadcast" "[1, 2, 3] @* 10" "[10, 20, 30]"
+
+# Boolean mask indexing via local REPL pipe
+test_local_repl "mask indexing via pipe" "[10, 20, 30][[true, false, true]]" "[10, 30]"
+
+# Combined vectorize + mask end-to-end via cutlet run
+test_run_file "vectorize + mask e2e" 'my scores = [85, 92, 67, 74, 95]
+say(scores[scores @>= 70])' "[85, 92, 74, 95]"
+
+# Custom function reduction via cutlet run
+test_run_file "custom fn reduce" 'fn max(a, b) is if a > b then a else b end end
+say(@max [3, 1, 4, 1, 5])' "5"
+
+# Custom function vectorization via cutlet run
+test_run_file "custom fn vectorize" 'fn mul(a, b) is a * b end
+say([1, 2, 3] @mul [4, 5, 6])' "[4, 10, 18]"
+
+# --bytecode shows OP_REDUCE for reduction
+bc_reduce_result=$(printf '@+ [1, 2, 3]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_reduce_result" | grep -q "OP_REDUCE" && echo "$bc_reduce_result" | grep -q "OP_ADD"; then
+    echo "  PASS: --bytecode shows OP_REDUCE OP_ADD"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_REDUCE OP_ADD"
+    echo "    Got: $bc_reduce_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode shows OP_VECTORIZE for vectorization
+bc_vec_result=$(printf '[1, 2] @* [3, 4]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_vec_result" | grep -q "OP_VECTORIZE" && echo "$bc_vec_result" | grep -q "OP_MULTIPLY"; then
+    echo "  PASS: --bytecode shows OP_VECTORIZE OP_MULTIPLY"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_VECTORIZE OP_MULTIPLY"
+    echo "    Got: $bc_vec_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode shows OP_REDUCE_CALL for custom function reduction
+bc_rc_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'fn add(a, b) is a + b end
+@add [1, 2, 3]' > "$bc_rc_tmpfile"
+bc_rc_result=$("$CUTLET" run "$bc_rc_tmpfile" --bytecode 2>/dev/null)
+if echo "$bc_rc_result" | grep -q "OP_REDUCE_CALL"; then
+    echo "  PASS: --bytecode shows OP_REDUCE_CALL"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_REDUCE_CALL"
+    echo "    Got: $bc_rc_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_rc_tmpfile"
+
+# --bytecode shows OP_VECTORIZE_CALL for custom function vectorization
+bc_vc_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'fn mul(a, b) is a * b end
+[1, 2] @mul [3, 4]' > "$bc_vc_tmpfile"
+bc_vc_result=$("$CUTLET" run "$bc_vc_tmpfile" --bytecode 2>/dev/null)
+if echo "$bc_vc_result" | grep -q "OP_VECTORIZE_CALL"; then
+    echo "  PASS: --bytecode shows OP_VECTORIZE_CALL"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_VECTORIZE_CALL"
+    echo "    Got: $bc_vc_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_vc_tmpfile"
+
+# --ast shows REDUCE node
+ast_reduce_result=$(printf '@+ [1, 2]' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_reduce_result" | grep -q "REDUCE"; then
+    echo "  PASS: --ast shows REDUCE node"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows REDUCE node"
+    echo "    Got: $ast_reduce_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --ast shows VECTORIZE node
+ast_vec_result=$(printf '[1, 2] @+ [3, 4]' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_vec_result" | grep -q "VECTORIZE"; then
+    echo "  PASS: --ast shows VECTORIZE node"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows VECTORIZE node"
+    echo "    Got: $ast_vec_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --tokens shows META token
+tokens_meta_result=$(printf '@+ [1, 2]' | "$CUTLET" repl --tokens 2>/dev/null)
+if echo "$tokens_meta_result" | grep -q "META"; then
+    echo "  PASS: --tokens shows META token"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --tokens shows META token"
+    echo "    Got: $tokens_meta_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)
