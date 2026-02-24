@@ -1001,6 +1001,88 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Arrays (cutlet run + local REPL)
+# ============================================================
+echo
+echo "Arrays:"
+
+# Array literal via REPL pipe
+test_local_repl "repl array literal" "[1, 2, 3]" "[1, 2, 3]"
+
+# Empty array via REPL pipe
+test_local_repl "repl empty array" "[]" "[]"
+
+# Array indexing via REPL pipe
+test_local_repl "repl array index" "[10, 20, 30][1]" "20"
+
+# Array with operations via cutlet run
+test_run_file "array create and index" 'my xs = [10, 20, 30]
+say(xs[0])
+say(xs[2])' "10
+30"
+
+# Array index assignment via cutlet run
+test_run_file "array index assignment" 'my xs = [1, 2, 3]
+xs[0] = 99
+say(xs)' "[99, 2, 3]"
+
+# Array concatenation via cutlet run
+test_run_file "array concatenation" 'my a = [1, 2]
+my b = [3, 4]
+say(a ++ b)' "[1, 2, 3, 4]"
+
+# Array built-in functions via cutlet run
+test_run_file "array builtins" 'my xs = [1, 2, 3]
+say(len(xs))
+say(push(xs, 4))
+say(pop(xs))' "3
+[1, 2, 3, 4]
+[1, 2]"
+
+# Array equality via cutlet run
+test_run_file "array equality" 'say([1, 2, 3] == [1, 2, 3])
+say([1, 2] == [1, 2, 3])
+say([] == [])' "true
+false
+true"
+
+# Multiline array literal via REPL pipe (continuation)
+test_local_repl "repl multiline array" "$(printf '[1,\n2,\n3]')" "[1, 2, 3]"
+
+# --bytecode shows OP_ARRAY for array literal
+bc_array_result=$(printf '[1, 2]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_array_result" | grep -q "OP_ARRAY"; then
+    echo "  PASS: --bytecode shows OP_ARRAY"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_ARRAY"
+    echo "    Got: $bc_array_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --ast shows ARRAY node
+ast_array_result=$(printf '[1, 2]' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_array_result" | grep -q "ARRAY"; then
+    echo "  PASS: --ast shows ARRAY node"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows ARRAY node"
+    echo "    Got: $ast_array_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode shows OP_INDEX_GET for array indexing
+bc_idx_result=$(printf '[1, 2][0]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_idx_result" | grep -q "OP_INDEX_GET"; then
+    echo "  PASS: --bytecode shows OP_INDEX_GET"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_INDEX_GET"
+    echo "    Got: $bc_idx_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

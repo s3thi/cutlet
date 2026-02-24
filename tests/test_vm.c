@@ -2629,6 +2629,41 @@ TEST(test_pop_non_array_error) { assert_vm_error("pop(42)", "pop non-array"); }
 TEST(test_len_push_compose) { assert_vm_number("len(push([1, 2], 3))", 3.0, "len(push(...))"); }
 
 /* ============================================================
+ * Array equality
+ * ============================================================ */
+
+/* [1, 2, 3] == [1, 2, 3] => true */
+TEST(test_array_eq_same) { assert_vm_bool("[1, 2, 3] == [1, 2, 3]", true, "array == same"); }
+
+/* [1, 2] == [1, 2, 3] => false (different length) */
+TEST(test_array_eq_diff_len) { assert_vm_bool("[1, 2] == [1, 2, 3]", false, "array == diff len"); }
+
+/* [1, 2] == [1, 3] => false (different element) */
+TEST(test_array_eq_diff_elem) { assert_vm_bool("[1, 2] == [1, 3]", false, "array == diff elem"); }
+
+/* [] == [] => true */
+TEST(test_array_eq_empty) { assert_vm_bool("[] == []", true, "[] == []"); }
+
+/* [1, 2] == "hello" => false (different types) */
+TEST(test_array_eq_diff_type) { assert_vm_bool("[1, 2] == \"hello\"", false, "array == string"); }
+
+/* [1, 2, 3] != [1, 2, 3] => false */
+TEST(test_array_neq_same) { assert_vm_bool("[1, 2, 3] != [1, 2, 3]", false, "array != same"); }
+
+/* [1, 2] != [1, 2, 3] => true */
+TEST(test_array_neq_diff) { assert_vm_bool("[1, 2] != [1, 2, 3]", true, "array != diff"); }
+
+/* Nested array equality: [[1, 2], [3]] == [[1, 2], [3]] => true */
+TEST(test_array_eq_nested) {
+    assert_vm_bool("[[1, 2], [3]] == [[1, 2], [3]]", true, "nested array ==");
+}
+
+/* Nested array inequality: [[1, 2], [3]] == [[1, 2], [4]] => false */
+TEST(test_array_eq_nested_diff) {
+    assert_vm_bool("[[1, 2], [3]] == [[1, 2], [4]]", false, "nested array != diff");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3108,6 +3143,17 @@ int main(void) {
     RUN_TEST(test_pop_no_mutate);
     RUN_TEST(test_pop_non_array_error);
     RUN_TEST(test_len_push_compose);
+
+    printf("\nArray equality:\n");
+    RUN_TEST(test_array_eq_same);
+    RUN_TEST(test_array_eq_diff_len);
+    RUN_TEST(test_array_eq_diff_elem);
+    RUN_TEST(test_array_eq_empty);
+    RUN_TEST(test_array_eq_diff_type);
+    RUN_TEST(test_array_neq_same);
+    RUN_TEST(test_array_neq_diff);
+    RUN_TEST(test_array_eq_nested);
+    RUN_TEST(test_array_eq_nested_diff);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

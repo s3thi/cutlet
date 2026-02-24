@@ -760,6 +760,9 @@ static AstNode *parse_atom(Parser *p) {
                 return NULL;
             }
 
+            /* Skip newlines after opening '[' — allows multiline arrays. */
+            skip_newlines(p);
+
             /* Check for empty array: immediate ']' */
             if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
                   p->current.value[0] == ']')) {
@@ -781,6 +784,9 @@ static AstNode *parse_atom(Parser *p) {
                        p->current.value[0] == ',') {
                     advance(p); /* consume ',' */
 
+                    /* Skip newlines after comma — allows multiline arrays. */
+                    skip_newlines(p);
+
                     /* Allow trailing comma: if next token is ']', stop */
                     if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
                         p->current.value[0] == ']') {
@@ -800,6 +806,9 @@ static AstNode *parse_atom(Parser *p) {
                     }
                 }
             }
+
+            /* Skip newlines before closing ']' — allows multiline arrays. */
+            skip_newlines(p);
 
             /* Expect closing ']' */
             if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||

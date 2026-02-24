@@ -2320,6 +2320,18 @@ TEST(test_array_nested) {
     PASS();
 }
 
+/* Parse multiline array [1,\n2,\n3] => same as [1, 2, 3] */
+TEST(test_array_multiline) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[1,\n2,\n3]", &node, &err), "should parse multiline array");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [ARRAY [NUMBER 1] [NUMBER 2] [NUMBER 3]]", "multiline array AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
 /* ============================================================
  * Array indexing parsing
  * ============================================================ */
@@ -2779,6 +2791,7 @@ int main(void) {
     RUN_TEST(test_array_expressions);
     RUN_TEST(test_array_trailing_comma);
     RUN_TEST(test_array_nested);
+    RUN_TEST(test_array_multiline);
 
     printf("\nArray indexing parsing:\n");
     RUN_TEST(test_index_read_ident);
