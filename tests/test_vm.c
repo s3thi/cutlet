@@ -2761,6 +2761,79 @@ TEST(test_vectorize_precedence) {
 }
 
 /* ============================================================
+ * Custom function reduction (@fn prefix)
+ * ============================================================ */
+
+/* @add [1, 2, 3] with user-defined add function → 6 */
+TEST(test_reduce_custom_add) {
+    assert_vm_number("fn add(a, b) is a + b end\n@add [1, 2, 3]", 6.0, "@add custom reduce");
+}
+
+/* @max [3, 1, 4, 1, 5] with user-defined max → 5 */
+TEST(test_reduce_custom_max) {
+    assert_vm_number("fn max(a, b) is if a > b then a else b end end\n@max [3, 1, 4, 1, 5]", 5.0,
+                     "@max custom reduce");
+}
+
+/* @add [42] with single element → 42 */
+TEST(test_reduce_custom_single) {
+    assert_vm_number("fn add(a, b) is a + b end\n@add [42]", 42.0, "@add single element");
+}
+
+/* @add [] with empty array → error */
+TEST(test_reduce_custom_empty_error) {
+    assert_vm_error("fn add(a, b) is a + b end\n@add []", "@add empty array error");
+}
+
+/* Custom reduce with a closure that captures a variable.
+ * add_offset(a, b) = a + b + offset where offset = 10.
+ * @add_offset [1, 2, 3] = add_offset(add_offset(1, 2), 3)
+ *                        = add_offset(13, 3) = 26. */
+TEST(test_reduce_custom_closure) {
+    assert_vm_number("my offset = 10\nfn add_offset(a, b) is a + b + offset end\n"
+                     "@add_offset [1, 2, 3]",
+                     26.0, "@add_offset closure reduce");
+}
+
+/* ============================================================
+ * Custom function vectorization (@fn infix)
+ * ============================================================ */
+
+/* [1, 2, 3] @mul [4, 5, 6] with user-defined mul → [4, 10, 18] */
+TEST(test_vectorize_custom_mul) {
+    assert_vm_formatted("fn mul(a, b) is a * b end\n[1, 2, 3] @mul [4, 5, 6]", "[4, 10, 18]",
+                        "@mul custom vectorize");
+}
+
+/* [1, 2, 3] @add1 10 with scalar broadcast → [11, 12, 13] */
+TEST(test_vectorize_custom_scalar_right) {
+    assert_vm_formatted("fn add1(a, b) is a + b end\n[1, 2, 3] @add1 10", "[11, 12, 13]",
+                        "@add1 scalar right broadcast");
+}
+
+/* Scalar left broadcast: 10 @add1 [1, 2, 3] → [11, 12, 13] */
+TEST(test_vectorize_custom_scalar_left) {
+    assert_vm_formatted("fn add1(a, b) is a + b end\n10 @add1 [1, 2, 3]", "[11, 12, 13]",
+                        "@add1 scalar left broadcast");
+}
+
+/* Custom vectorize with length mismatch → error */
+TEST(test_vectorize_custom_length_mismatch) {
+    assert_vm_error("fn add1(a, b) is a + b end\n[1, 2] @add1 [1, 2, 3]", "@add1 length mismatch");
+}
+
+/* Custom vectorize with both scalars → error */
+TEST(test_vectorize_custom_both_scalars) {
+    assert_vm_error("fn add1(a, b) is a + b end\n1 @add1 2", "@add1 both scalars error");
+}
+
+/* Custom vectorize with user-defined max */
+TEST(test_vectorize_custom_max) {
+    assert_vm_formatted("fn max(a, b) is if a > b then a else b end end\n[1, 5, 3] @max [4, 2, 6]",
+                        "[4, 5, 6]", "@max custom vectorize");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3279,6 +3352,23 @@ int main(void) {
     RUN_TEST(test_vectorize_concat);
     RUN_TEST(test_vectorize_and);
     RUN_TEST(test_vectorize_precedence);
+
+    /* ---- @fn prefix — custom function reduce ---- */
+    printf("\nCustom function reduce (@fn prefix):\n");
+    RUN_TEST(test_reduce_custom_add);
+    RUN_TEST(test_reduce_custom_max);
+    RUN_TEST(test_reduce_custom_single);
+    RUN_TEST(test_reduce_custom_empty_error);
+    RUN_TEST(test_reduce_custom_closure);
+
+    /* ---- @fn infix — custom function vectorize ---- */
+    printf("\nCustom function vectorize (@fn infix):\n");
+    RUN_TEST(test_vectorize_custom_mul);
+    RUN_TEST(test_vectorize_custom_scalar_right);
+    RUN_TEST(test_vectorize_custom_scalar_left);
+    RUN_TEST(test_vectorize_custom_length_mismatch);
+    RUN_TEST(test_vectorize_custom_both_scalars);
+    RUN_TEST(test_vectorize_custom_max);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

@@ -1138,51 +1138,84 @@ static int meta_op_to_opcode(const char *op) {
 }
 
 /*
- * Compile a reduction expression: @op expr → OP_REDUCE [inner_op].
- * The operand is compiled (pushing an array), then OP_REDUCE folds it.
- * Custom function reduction (@ident) is deferred to Step 4.
+ * Emit bytecode to load a named callable onto the stack.
+ * Resolves as local → upvalue → global, matching compile_ident/compile_call.
+ * Used by custom function reduction/vectorization to push the function
+ * before the operands.
+ */
+static void emit_load_callable(Compiler *c, const char *name, int line) {
+    if (c->context == COMPILE_FUNCTION) {
+        int slot = resolve_local(c, name);
+        if (slot >= 0) {
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+            return;
+        }
+        int upvalue = resolve_upvalue(c, name);
+        if (upvalue >= 0) {
+            emit_bytes(c, OP_GET_UPVALUE, (uint8_t)upvalue, line);
+            return;
+        }
+    }
+    /* Fall back to global. */
+    char *dup = compiler_strdup(c, name);
+    if (!dup)
+        return;
+    int idx = chunk_find_or_add_constant(c->chunk, make_string(dup));
+    if (idx < 0) {
+        compiler_error(c, "too many constants");
+        return;
+    }
+    emit_bytes(c, OP_GET_GLOBAL, (uint8_t)idx, line);
+}
+
+/*
+ * Compile a reduction expression: @op expr.
+ * Built-in operators use OP_REDUCE [inner_op].
+ * Custom functions use OP_REDUCE_CALL: push function, push array, then
+ * the VM folds by calling fn(acc, elem) for each element.
  */
 static void compile_reduce(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
     const char *op = node->value;
 
     int inner_op = meta_op_to_opcode(op);
-    if (inner_op < 0) {
-        /* Custom function reduction — not yet implemented (Step 4). */
-        compiler_error(c, "custom function reduction '@%s' not yet supported", op);
+    if (inner_op >= 0) {
+        /* Built-in operator: compile operand, emit OP_REDUCE. */
+        compile_node(c, node->left);
+        emit_bytes(c, OP_REDUCE, (uint8_t)inner_op, line);
         return;
     }
 
-    /* Compile the operand (should produce an array on the stack). */
+    /* Custom function: push callable first, then the array operand. */
+    emit_load_callable(c, op, line);
     compile_node(c, node->left);
-
-    /* Emit OP_REDUCE with the inner operation as a 1-byte operand. */
-    emit_bytes(c, OP_REDUCE, (uint8_t)inner_op, line);
+    emit_byte(c, OP_REDUCE_CALL, line);
 }
 
 /*
- * Compile a vectorize expression: expr @op expr → OP_VECTORIZE [inner_op].
- * Both operands are compiled (pushing left then right), then OP_VECTORIZE
- * applies the inner operation element-wise.
- * Custom function vectorization (@ident) is deferred to Step 4.
+ * Compile a vectorize expression: expr @op expr.
+ * Built-in operators use OP_VECTORIZE [inner_op].
+ * Custom functions use OP_VECTORIZE_CALL: push function, push left,
+ * push right, then the VM applies fn(left[i], right[i]) element-wise.
  */
 static void compile_vectorize(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
     const char *op = node->value;
 
     int inner_op = meta_op_to_opcode(op);
-    if (inner_op < 0) {
-        /* Custom function vectorization — not yet implemented (Step 4). */
-        compiler_error(c, "custom function vectorization '@%s' not yet supported", op);
+    if (inner_op >= 0) {
+        /* Built-in operator: compile both operands, emit OP_VECTORIZE. */
+        compile_node(c, node->left);
+        compile_node(c, node->right);
+        emit_bytes(c, OP_VECTORIZE, (uint8_t)inner_op, line);
         return;
     }
 
-    /* Compile left operand, then right operand. */
+    /* Custom function: push callable, then left, then right operands. */
+    emit_load_callable(c, op, line);
     compile_node(c, node->left);
     compile_node(c, node->right);
-
-    /* Emit OP_VECTORIZE with the inner operation as a 1-byte operand. */
-    emit_bytes(c, OP_VECTORIZE, (uint8_t)inner_op, line);
+    emit_byte(c, OP_VECTORIZE_CALL, line);
 }
 
 /* Compile any AST node by dispatching on its type. */

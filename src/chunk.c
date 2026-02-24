@@ -177,6 +177,10 @@ const char *opcode_name(OpCode op) {
         return "OP_REDUCE";
     case OP_VECTORIZE:
         return "OP_VECTORIZE";
+    case OP_REDUCE_CALL:
+        return "OP_REDUCE_CALL";
+    case OP_VECTORIZE_CALL:
+        return "OP_VECTORIZE_CALL";
     case OP_AND:
         return "OP_AND";
     case OP_OR:
@@ -361,6 +365,12 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
                       opcode_name((OpCode)inner_op));
         return offset + 2;
     }
+
+    /* OP_REDUCE_CALL / OP_VECTORIZE_CALL: no operands (function is on stack). */
+    case OP_REDUCE_CALL:
+    case OP_VECTORIZE_CALL:
+        dynbuf_printf(b, "%s\n", opcode_name((OpCode)instruction));
+        return offset + 1;
 
     /* OP_AND / OP_OR are op-byte constants only, not standalone opcodes.
      * If they appear in the instruction stream, show them as unknown. */

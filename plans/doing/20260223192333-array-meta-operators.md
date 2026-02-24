@@ -366,6 +366,8 @@ Should work automatically if the parser handles `fn` as the identifier in `@fn(.
 
 - [x] Step 1: Tokenizer — `TOK_META` for `@` — added TOK_META enum, read_meta() function, 15 tests covering operators/identifiers/errors, updated one existing test (`@` → `~`)
 - [x] Step 2: `@` prefix — reduction with built-in operators — added AST_REDUCE, OP_REDUCE, OP_AND/OP_OR op-bytes, reduce_apply_op helper, short-circuit @and/@or, 8 parser tests + 12 VM tests
+- [x] Step 3: `@` infix — vectorization with built-in operators — added AST_VECTORIZE, OP_VECTORIZE, infix TOK_META parsing with inner-operator precedence, scalar broadcasting, 7 parser tests + 10 VM tests
+- [x] Step 4: `@` with custom functions — added OP_REDUCE_CALL/OP_VECTORIZE_CALL opcodes, refactored VM dispatch loop into vm_run() for recursive calls, vm_call_value() helper for calling closures/natives, emit_load_callable() compiler helper, 11 VM tests
 
 ---
 End of plan.

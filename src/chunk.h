@@ -95,6 +95,15 @@ typedef enum {
                    * Pop 2 (left, right), push 1 (result array).
                    * Supports array-array, array-scalar, and scalar-array. */
 
+    /* Custom function reduction/vectorization — call user function in a loop.
+     * Unlike OP_REDUCE/OP_VECTORIZE which use a built-in op byte, these
+     * expect the callable (closure or native) to already be on the stack. */
+    OP_REDUCE_CALL,    /* Fold array with a callable. Stack: [fn, array] → [result].
+                        * Calls fn(acc, elem) for each element left-to-right. */
+    OP_VECTORIZE_CALL, /* Element-wise with a callable. Stack: [fn, left, right] → [result].
+                        * Calls fn(left[i], right[i]) for each element.
+                        * Supports array-array, array-scalar, scalar-array. */
+
     /* Logical op-byte constants used as OP_REDUCE/OP_VECTORIZE operands only.
      * These are not standalone VM opcodes — they encode @and / @or
      * reduction semantics with short-circuit behavior. */

@@ -76,6 +76,10 @@ static uint16_t read_short(CallFrame *frame) {
     return (uint16_t)((high << 8) | low);
 }
 
+/* Forward declarations for mutually recursive helpers. */
+static Value vm_run(VM *vm, int base_frame_count);
+static Value vm_call_value(VM *vm, const Value *fn_val, Value arg1, Value arg2);
+
 /* ---- Runtime error helper ---- */
 
 /*
@@ -582,14 +586,99 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
     };
 
     /* Push frame 0: the top-level script. */
-    CallFrame *frame = &vm.frames[vm.frame_count++];
-    frame->closure = &script_closure;
-    frame->ip = chunk->code;
-    frame->slots = vm.stack;
+    vm.frames[vm.frame_count].closure = &script_closure;
+    vm.frames[vm.frame_count].ip = chunk->code;
+    vm.frames[vm.frame_count].slots = vm.stack;
+    vm.frame_count++;
 
+    /* Run the dispatch loop. base_frame_count=0 means run until the
+     * top-level script returns (frame_count drops back to 0). */
+    return vm_run(&vm, 0);
+}
+
+/*
+ * Call a callable value (native function or closure) with two arguments.
+ * Pushes the callee and args onto the VM stack, invokes the function,
+ * and returns the result. For closures this re-enters the dispatch loop
+ * via vm_run(). Used by OP_REDUCE_CALL and OP_VECTORIZE_CALL.
+ *
+ * The caller retains ownership of fn_val, arg1, arg2 — this function
+ * clones what it needs. On error, returns a VAL_ERROR.
+ */
+static Value vm_call_value(VM *vm, const Value *fn_val, Value arg1, Value arg2) {
+    if (fn_val->type == VAL_FUNCTION) {
+        /* Native function: call directly without touching the VM stack. */
+        ObjFunction *fn = fn_val->function;
+        if (fn->arity != 2) {
+            value_free(&arg1);
+            value_free(&arg2);
+            return make_error("'%s' expects %d argument(s), got 2", fn->name ? fn->name : "<fn>",
+                              fn->arity);
+        }
+        Value args[2] = {arg1, arg2};
+        Value result = fn->native(2, args, vm->ctx);
+        value_free(&arg1);
+        value_free(&arg2);
+        return result;
+    }
+
+    if (fn_val->type == VAL_CLOSURE) {
+        ObjClosure *cl = fn_val->closure;
+        ObjFunction *fn = cl->function;
+        if (fn->arity != 2) {
+            value_free(&arg1);
+            value_free(&arg2);
+            return make_error("'%s' expects %d argument(s), got 2", fn->name ? fn->name : "<fn>",
+                              fn->arity);
+        }
+        if (vm->frame_count >= FRAMES_MAX) {
+            value_free(&arg1);
+            value_free(&arg2);
+            return make_error("stack overflow");
+        }
+        /* Push callee (clone the closure ref) and arguments onto the stack. */
+        Value callee_clone;
+        if (!value_clone(&callee_clone, fn_val)) {
+            value_free(&arg1);
+            value_free(&arg2);
+            return make_error("memory allocation failed");
+        }
+        if (!vm_push(vm, callee_clone) || !vm_push(vm, arg1) || !vm_push(vm, arg2)) {
+            return make_error("stack overflow");
+        }
+        /* Push a new call frame for the closure. */
+        CallFrame *new_frame = &vm->frames[vm->frame_count++];
+        new_frame->closure = cl;
+        new_frame->ip = fn->chunk->code;
+        new_frame->slots = vm->stack_top - 2 - 1; /* 2 args + callee */
+
+        /* Re-enter the dispatch loop. It will run the function body and
+         * return when OP_RETURN drops frame_count back to our level.
+         * The result is left on the stack by vm_run's OP_RETURN handler. */
+        int target = vm->frame_count - 1;
+        Value run_result = vm_run(vm, target);
+        if (run_result.type == VAL_ERROR) {
+            return run_result;
+        }
+        /* vm_run returned the OP_RETURN result directly when base frame was reached. */
+        return run_result;
+    }
+
+    value_free(&arg1);
+    value_free(&arg2);
+    return make_error("cannot call %s", value_type_name(fn_val->type));
+}
+
+/*
+ * Core dispatch loop. Runs until frame_count drops to base_frame_count
+ * (i.e. the frame that was current when the caller entered).
+ * This is called by vm_execute (base=0) and by vm_call_value (base=N)
+ * for recursive function calls during OP_REDUCE_CALL/OP_VECTORIZE_CALL.
+ */
+static Value vm_run(VM *vm, int base_frame_count) {
     for (;;) {
         /* Current frame may change during execution (calls/returns). */
-        frame = &vm.frames[vm.frame_count - 1];
+        CallFrame *frame = &vm->frames[vm->frame_count - 1];
         uint8_t instruction = read_byte(frame);
         switch ((OpCode)instruction) {
 
@@ -597,161 +686,161 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             uint8_t idx = read_byte(frame);
             Value v;
             if (!value_clone(&v, &frame->closure->function->chunk->constants[idx])) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
-            if (!vm_push(&vm, v)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, v)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_TRUE:
-            if (!vm_push(&vm, make_bool(true))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(true))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
 
         case OP_FALSE:
-            if (!vm_push(&vm, make_bool(false))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(false))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
 
         case OP_NOTHING:
-            if (!vm_push(&vm, make_nothing())) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_nothing())) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
 
         case OP_ADD: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
-            if (!vm_push(&vm, make_number(a.number + b.number))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(a.number + b.number))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_SUBTRACT: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
-            if (!vm_push(&vm, make_number(a.number - b.number))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(a.number - b.number))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_MULTIPLY: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
-            if (!vm_push(&vm, make_number(a.number * b.number))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(a.number * b.number))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_DIVIDE: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
             if (b.number == 0) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "division by zero");
+                return vm_runtime_error(vm, "division by zero");
             }
-            if (!vm_push(&vm, make_number(a.number / b.number))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(a.number / b.number))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_MODULO: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
             if (b.number == 0) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "modulo by zero");
+                return vm_runtime_error(vm, "modulo by zero");
             }
             /* Python-style modulo: result has the sign of the divisor.
              * Formula: a % b = a - b * floor(a / b) */
             double result = a.number - b.number * floor(a.number / b.number);
-            if (!vm_push(&vm, make_number(result))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(result))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_POWER: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER || b.type != VAL_NUMBER) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "arithmetic requires numbers");
+                return vm_runtime_error(vm, "arithmetic requires numbers");
             }
-            if (!vm_push(&vm, make_number(pow(a.number, b.number)))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(pow(a.number, b.number)))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -764,12 +853,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * Mixed types (one array, one non-array) produce a runtime error.
              * Use str() for explicit string conversion of non-string values. */
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
 
             /* Array concatenation: both operands must be arrays. */
@@ -780,7 +869,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 if (!result) {
                     value_free(&a);
                     value_free(&b);
-                    return vm_runtime_error(&vm, "memory allocation failed");
+                    return vm_runtime_error(vm, "memory allocation failed");
                 }
                 /* Append all elements from left array, then right array. */
                 for (size_t i = 0; i < la->count; i++) {
@@ -791,7 +880,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                         /* Free partially-built result array. */
                         Value tmp = make_array(result);
                         value_free(&tmp);
-                        return vm_runtime_error(&vm, "memory allocation failed");
+                        return vm_runtime_error(vm, "memory allocation failed");
                     }
                     obj_array_push(result, elem);
                 }
@@ -802,14 +891,14 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                         value_free(&b);
                         Value tmp = make_array(result);
                         value_free(&tmp);
-                        return vm_runtime_error(&vm, "memory allocation failed");
+                        return vm_runtime_error(vm, "memory allocation failed");
                     }
                     obj_array_push(result, elem);
                 }
                 value_free(&a);
                 value_free(&b);
-                if (!vm_push(&vm, make_array(result))) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (!vm_push(vm, make_array(result))) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 break;
             }
@@ -820,7 +909,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 const char *tb = value_type_name(b.type);
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "cannot concatenate %s with %s", ta, tb);
+                return vm_runtime_error(vm, "cannot concatenate %s with %s", ta, tb);
             }
 
             /* String concatenation: both operands must be strings. */
@@ -829,7 +918,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 const char *tb = value_type_name(b.type);
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "++ requires strings, got %s and %s", ta, tb);
+                return vm_runtime_error(vm, "++ requires strings, got %s and %s", ta, tb);
             }
             size_t sla = strlen(a.string);
             size_t slb = strlen(b.string);
@@ -837,175 +926,175 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (!sresult) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             memcpy(sresult, a.string, sla);
             memcpy(sresult + sla, b.string, slb);
             sresult[sla + slb] = '\0';
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_string(sresult))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_string(sresult))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_NEGATE: {
             Value a;
-            if (!vm_pop(&vm, &a)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &a)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (a.type != VAL_NUMBER) {
                 value_free(&a);
-                return vm_runtime_error(&vm, "unary minus requires a number");
+                return vm_runtime_error(vm, "unary minus requires a number");
             }
-            if (!vm_push(&vm, make_number(-a.number))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_number(-a.number))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_EQUAL: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             bool eq = values_equal(&a, &b);
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(eq))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(eq))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_NOT_EQUAL: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             bool eq = values_equal(&a, &b);
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(!eq))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(!eq))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_LESS: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "%s", err_msg);
+                return vm_runtime_error(vm, "%s", err_msg);
             }
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(cmp < 0))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(cmp < 0))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_GREATER: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "%s", err_msg);
+                return vm_runtime_error(vm, "%s", err_msg);
             }
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(cmp > 0))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(cmp > 0))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_LESS_EQUAL: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "%s", err_msg);
+                return vm_runtime_error(vm, "%s", err_msg);
             }
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(cmp <= 0))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(cmp <= 0))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_GREATER_EQUAL: {
             Value b, a;
-            if (!vm_pop(&vm, &b)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &b)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &a)) {
+            if (!vm_pop(vm, &a)) {
                 value_free(&b);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             int cmp;
             const char *err_msg;
             if (!values_compare(&a, &b, &cmp, &err_msg)) {
                 value_free(&a);
                 value_free(&b);
-                return vm_runtime_error(&vm, "%s", err_msg);
+                return vm_runtime_error(vm, "%s", err_msg);
             }
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_bool(cmp >= 0))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(cmp >= 0))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         case OP_NOT: {
             Value a;
-            if (!vm_pop(&vm, &a)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &a)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             bool truthy = is_truthy(&a);
             value_free(&a);
-            if (!vm_push(&vm, make_bool(!truthy))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_bool(!truthy))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1015,12 +1104,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — the value stays as the expression result). */
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             RuntimeVarStatus status = runtime_var_define(name, &tos);
             if (status != RUNTIME_VAR_OK) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             break;
         }
@@ -1031,13 +1120,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             Value val = {0};
             RuntimeVarStatus status = runtime_var_get(name, &val);
             if (status == RUNTIME_VAR_NOT_FOUND) {
-                return vm_runtime_error(&vm, "unknown variable '%s'", name);
+                return vm_runtime_error(vm, "unknown variable '%s'", name);
             }
             if (status != RUNTIME_VAR_OK) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
-            if (!vm_push(&vm, val)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, val)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1047,15 +1136,15 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             const char *name = frame->closure->function->chunk->constants[idx].string;
             /* Peek TOS (don't pop — value stays as expression result). */
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             RuntimeVarStatus status = runtime_var_assign(name, &tos);
             if (status == RUNTIME_VAR_NOT_FOUND) {
-                return vm_runtime_error(&vm, "undefined variable '%s'", name);
+                return vm_runtime_error(vm, "undefined variable '%s'", name);
             }
             if (status != RUNTIME_VAR_OK) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             break;
         }
@@ -1067,10 +1156,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             uint8_t slot = read_byte(frame);
             Value v;
             if (!value_clone(&v, &frame->slots[slot])) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
-            if (!vm_push(&vm, v)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, v)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1081,12 +1170,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * TOS stays on the stack as the expression result. */
             uint8_t slot = read_byte(frame);
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             Value cloned;
             if (!value_clone(&cloned, &tos)) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             value_free(&frame->slots[slot]);
             frame->slots[slot] = cloned;
@@ -1101,15 +1190,15 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * closed field (closed). Clone the value and push it. */
             uint8_t slot = read_byte(frame);
             if (!frame->closure->upvalues) {
-                return vm_runtime_error(&vm, "no upvalues in current closure");
+                return vm_runtime_error(vm, "no upvalues in current closure");
             }
             ObjUpvalue *uv = frame->closure->upvalues[slot];
             Value v;
             if (!value_clone(&v, uv->location)) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
-            if (!vm_push(&vm, v)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, v)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1121,16 +1210,16 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * cloned into it. */
             uint8_t slot = read_byte(frame);
             if (!frame->closure->upvalues) {
-                return vm_runtime_error(&vm, "no upvalues in current closure");
+                return vm_runtime_error(vm, "no upvalues in current closure");
             }
             ObjUpvalue *uv = frame->closure->upvalues[slot];
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             Value cloned;
             if (!value_clone(&cloned, &tos)) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             value_free(uv->location);
             *uv->location = cloned;
@@ -1146,8 +1235,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         case OP_JUMP_IF_FALSE: {
             uint16_t offset = read_short(frame);
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (!is_truthy(&tos)) {
                 frame->ip += offset;
@@ -1158,8 +1247,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         case OP_JUMP_IF_TRUE: {
             uint16_t offset = read_short(frame);
             Value tos;
-            if (!vm_peek(&vm, 0, &tos)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, 0, &tos)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (is_truthy(&tos)) {
                 frame->ip += offset;
@@ -1176,8 +1265,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
         case OP_POP: {
             Value v;
-            if (!vm_pop(&vm, &v)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &v)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             value_free(&v);
             break;
@@ -1188,10 +1277,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * value (same effect as OP_POP but closes first). Used by
              * block scoping to close captured locals before they leave
              * scope. */
-            close_upvalues(&vm, vm.stack_top - 1);
+            close_upvalues(vm, vm->stack_top - 1);
             Value v;
-            if (!vm_pop(&vm, &v)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &v)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             value_free(&v);
             break;
@@ -1205,8 +1294,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * shared with the stack Value. We must NOT free the peeked
              * copy; vm_free_stack (inside vm_runtime_error) handles it. */
             Value callee;
-            if (!vm_peek(&vm, argc, &callee)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_peek(vm, argc, &callee)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
 
             if (callee.type == VAL_FUNCTION) {
@@ -1215,7 +1304,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 ObjFunction *fn = callee.function;
 
                 if (argc != fn->arity) {
-                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                    return vm_runtime_error(vm, "'%s' expects %d argument%s, got %d",
                                             fn->name ? fn->name : "<fn>", fn->arity,
                                             fn->arity == 1 ? "" : "s", argc);
                 }
@@ -1223,15 +1312,15 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 /* Native function: pop args into temp array, call, push result. */
                 Value args[256];
                 for (int i = argc - 1; i >= 0; i--) {
-                    vm_pop(&vm, &args[i]);
+                    vm_pop(vm, &args[i]);
                 }
                 /* Pop the callee itself. */
                 Value callee_val;
-                vm_pop(&vm, &callee_val);
+                vm_pop(vm, &callee_val);
 
                 /* Call the native. fn->native is read before callee_val
                  * is freed, so the pointer is still valid. */
-                Value result = fn->native(argc, args, vm.ctx);
+                Value result = fn->native(argc, args, vm->ctx);
 
                 /* Free the argument values and the callee. */
                 for (int i = 0; i < argc; i++) {
@@ -1240,11 +1329,11 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 value_free(&callee_val);
 
                 if (result.type == VAL_ERROR) {
-                    vm_free_stack(&vm);
+                    vm_free_stack(vm);
                     return result;
                 }
-                if (!vm_push(&vm, result)) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
             } else if (callee.type == VAL_CLOSURE) {
                 /* User-defined function via closure. The closure is
@@ -1253,20 +1342,20 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 ObjFunction *fn = cl->function;
 
                 if (argc != fn->arity) {
-                    return vm_runtime_error(&vm, "'%s' expects %d argument%s, got %d",
+                    return vm_runtime_error(vm, "'%s' expects %d argument%s, got %d",
                                             fn->name ? fn->name : "<fn>", fn->arity,
                                             fn->arity == 1 ? "" : "s", argc);
                 }
 
-                if (vm.frame_count >= FRAMES_MAX) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (vm->frame_count >= FRAMES_MAX) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
-                CallFrame *new_frame = &vm.frames[vm.frame_count++];
+                CallFrame *new_frame = &vm->frames[vm->frame_count++];
                 new_frame->closure = cl;
                 new_frame->ip = fn->chunk->code;
-                new_frame->slots = vm.stack_top - argc - 1;
+                new_frame->slots = vm->stack_top - argc - 1;
             } else {
-                return vm_runtime_error(&vm, "cannot call %s", value_type_name(callee.type));
+                return vm_runtime_error(vm, "cannot call %s", value_type_name(callee.type));
             }
             break;
         }
@@ -1281,7 +1370,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             ObjFunction *fn = frame->closure->function->chunk->constants[idx].function;
             ObjClosure *cl = obj_closure_new(fn, fn->upvalue_count);
             if (!cl) {
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             /* Read upvalue descriptors and populate the closure's upvalue array.
              * Each descriptor is a pair of (is_local, index) bytes:
@@ -1292,7 +1381,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 uint8_t is_local = read_byte(frame);
                 uint8_t index = read_byte(frame);
                 if (is_local) {
-                    cl->upvalues[i] = capture_upvalue(&vm, &frame->slots[index]);
+                    cl->upvalues[i] = capture_upvalue(vm, &frame->slots[index]);
                 } else {
                     /* Copy an upvalue from the enclosing closure.
                      * The enclosing closure must have upvalues for this path. */
@@ -1307,11 +1396,11 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 if (!cl->upvalues[i]) {
                     /* Free the partially-constructed closure on failure. */
                     value_free(&(Value){.type = VAL_CLOSURE, .closure = cl});
-                    return vm_runtime_error(&vm, "memory allocation failed");
+                    return vm_runtime_error(vm, "memory allocation failed");
                 }
             }
-            if (!vm_push(&vm, make_closure(cl))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_closure(cl))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1323,20 +1412,20 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             uint8_t count = read_byte(frame);
             ObjArray *arr = obj_array_new();
             if (!arr) {
-                return vm_runtime_error(&vm, "out of memory");
+                return vm_runtime_error(vm, "out of memory");
             }
 
             /* Pre-grow the array to the correct size. Pop values into
              * a temporary buffer, then push them in element order. */
             Value temp[256];
             for (int i = count - 1; i >= 0; i--) {
-                if (!vm_pop(&vm, &temp[i])) {
+                if (!vm_pop(vm, &temp[i])) {
                     /* Free already-popped values */
                     for (int j = i + 1; j < count; j++)
                         value_free(&temp[j]);
                     free(arr->data);
                     free(arr);
-                    return vm_runtime_error(&vm, "stack underflow");
+                    return vm_runtime_error(vm, "stack underflow");
                 }
             }
             /* Append elements in order (first element = index 0). */
@@ -1344,8 +1433,8 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 obj_array_push(arr, temp[i]); /* takes ownership */
             }
 
-            if (!vm_push(&vm, make_array(arr))) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, make_array(arr))) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1355,30 +1444,30 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * Negative indices wrap from end (e.g. -1 = last element).
              * Non-integer or out-of-bounds indices produce runtime errors. */
             Value idx_val, arr_val;
-            if (!vm_pop(&vm, &idx_val)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &idx_val)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &arr_val)) {
+            if (!vm_pop(vm, &arr_val)) {
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "cannot index %s", t);
+                return vm_runtime_error(vm, "cannot index %s", t);
             }
             if (idx_val.type != VAL_NUMBER) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index must be an integer");
+                return vm_runtime_error(vm, "index must be an integer");
             }
             double raw_idx = idx_val.number;
             /* Check that the index is an integer. */
             if (raw_idx != floor(raw_idx)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index must be an integer");
+                return vm_runtime_error(vm, "index must be an integer");
             }
             long long int_idx = (long long)raw_idx;
             ObjArray *arr = arr_val.array;
@@ -1388,19 +1477,19 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (int_idx < 0 || (size_t)int_idx >= arr->count) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index out of bounds");
+                return vm_runtime_error(vm, "index out of bounds");
             }
             /* Clone the element at the index and push it. */
             Value result;
             if (!value_clone(&result, &arr->data[(size_t)int_idx])) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             value_free(&arr_val);
             value_free(&idx_val);
-            if (!vm_push(&vm, result)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, result)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1417,36 +1506,36 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * modified array back to the source variable, then OP_POP to
              * discard the modified array, leaving value as the result. */
             Value idx_val, arr_val;
-            if (!vm_pop(&vm, &idx_val)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &idx_val)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &arr_val)) {
+            if (!vm_pop(vm, &arr_val)) {
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             /* Peek at the value (now at TOS after popping index and array). */
             Value val;
-            if (!vm_peek(&vm, 0, &val)) {
+            if (!vm_peek(vm, 0, &val)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "cannot index %s", t);
+                return vm_runtime_error(vm, "cannot index %s", t);
             }
             if (idx_val.type != VAL_NUMBER) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index must be an integer");
+                return vm_runtime_error(vm, "index must be an integer");
             }
             double raw_idx = idx_val.number;
             if (raw_idx != floor(raw_idx)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index must be an integer");
+                return vm_runtime_error(vm, "index must be an integer");
             }
             long long int_idx = (long long)raw_idx;
             /* Handle negative indices. */
@@ -1455,7 +1544,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (int_idx < 0 || (size_t)int_idx >= arr_val.array->count) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "index out of bounds");
+                return vm_runtime_error(vm, "index out of bounds");
             }
             /* COW: ensure we own the backing store before mutating. */
             obj_array_ensure_owned(&arr_val);
@@ -1465,13 +1554,13 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (!value_clone(&cloned_val, &val)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             arr_val.array->data[(size_t)int_idx] = cloned_val;
             value_free(&idx_val);
             /* Push the modified array on top of the value. */
-            if (!vm_push(&vm, arr_val)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, arr_val)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1482,28 +1571,28 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * Pop 1 array, push 1 result. */
             uint8_t inner_op = read_byte(frame);
             Value arr_val;
-            if (!vm_pop(&vm, &arr_val)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &arr_val)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
             if (arr_val.type != VAL_ARRAY) {
                 value_free(&arr_val);
-                return vm_runtime_error(&vm, "@ requires an array operand");
+                return vm_runtime_error(vm, "@ requires an array operand");
             }
             ObjArray *arr = arr_val.array;
             if (arr->count == 0) {
                 value_free(&arr_val);
-                return vm_runtime_error(&vm, "cannot reduce empty array");
+                return vm_runtime_error(vm, "cannot reduce empty array");
             }
             /* Single element: clone and return. */
             if (arr->count == 1) {
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "memory allocation failed");
+                    return vm_runtime_error(vm, "memory allocation failed");
                 }
                 value_free(&arr_val);
-                if (!vm_push(&vm, result)) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 break;
             }
@@ -1514,21 +1603,21 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "memory allocation failed");
+                    return vm_runtime_error(vm, "memory allocation failed");
                 }
                 for (size_t i = 0; i < arr->count; i++) {
                     value_free(&result);
                     if (!value_clone(&result, &arr->data[i])) {
                         value_free(&arr_val);
-                        return vm_runtime_error(&vm, "memory allocation failed");
+                        return vm_runtime_error(vm, "memory allocation failed");
                     }
                     if (!is_truthy(&arr->data[i])) {
                         break; /* Short-circuit: found falsy element. */
                     }
                 }
                 value_free(&arr_val);
-                if (!vm_push(&vm, result)) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 break;
             }
@@ -1537,21 +1626,21 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "memory allocation failed");
+                    return vm_runtime_error(vm, "memory allocation failed");
                 }
                 for (size_t i = 0; i < arr->count; i++) {
                     value_free(&result);
                     if (!value_clone(&result, &arr->data[i])) {
                         value_free(&arr_val);
-                        return vm_runtime_error(&vm, "memory allocation failed");
+                        return vm_runtime_error(vm, "memory allocation failed");
                     }
                     if (is_truthy(&arr->data[i])) {
                         break; /* Short-circuit: found truthy element. */
                     }
                 }
                 value_free(&arr_val);
-                if (!vm_push(&vm, result)) {
-                    return vm_runtime_error(&vm, "stack overflow");
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 break;
             }
@@ -1562,31 +1651,31 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             Value acc;
             if (!value_clone(&acc, &arr->data[0])) {
                 value_free(&arr_val);
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
             for (size_t i = 1; i < arr->count; i++) {
                 /* Push accumulator and current element, then apply op. */
-                if (!vm_push(&vm, acc)) {
+                if (!vm_push(vm, acc)) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "stack overflow");
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 Value elem;
                 if (!value_clone(&elem, &arr->data[i])) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "stack overflow");
+                    return vm_runtime_error(vm, "stack overflow");
                 }
-                if (!vm_push(&vm, elem)) {
+                if (!vm_push(vm, elem)) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "stack overflow");
+                    return vm_runtime_error(vm, "stack overflow");
                 }
                 /* Apply the binary operation using a mini-dispatch.
                  * We pop two values and produce one result, just like the
                  * normal opcode handlers do. We temporarily inject the
                  * inner opcode into the bytecode stream conceptually. */
                 Value b, a;
-                if (!vm_pop(&vm, &b) || !vm_pop(&vm, &a)) {
+                if (!vm_pop(vm, &b) || !vm_pop(vm, &a)) {
                     value_free(&arr_val);
-                    return vm_runtime_error(&vm, "stack underflow in reduce");
+                    return vm_runtime_error(vm, "stack underflow in reduce");
                 }
                 Value result = reduce_apply_op((OpCode)inner_op, &a, &b);
                 value_free(&a);
@@ -1594,15 +1683,15 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 if (result.type == VAL_ERROR) {
                     value_free(&arr_val);
                     /* Include element index in error for debugging. */
-                    Value err = vm_runtime_error(&vm, "reduce element %zu: %s", i, result.string);
+                    Value err = vm_runtime_error(vm, "reduce element %zu: %s", i, result.string);
                     value_free(&result);
                     return err;
                 }
                 acc = result;
             }
             value_free(&arr_val);
-            if (!vm_push(&vm, acc)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, acc)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1613,12 +1702,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * Pop right, pop left, push result array. */
             uint8_t inner_op = read_byte(frame);
             Value right_val, left_val;
-            if (!vm_pop(&vm, &right_val)) {
-                return vm_runtime_error(&vm, "stack underflow");
+            if (!vm_pop(vm, &right_val)) {
+                return vm_runtime_error(vm, "stack underflow");
             }
-            if (!vm_pop(&vm, &left_val)) {
+            if (!vm_pop(vm, &left_val)) {
                 value_free(&right_val);
-                return vm_runtime_error(&vm, "stack underflow");
+                return vm_runtime_error(vm, "stack underflow");
             }
 
             bool left_is_array = (left_val.type == VAL_ARRAY);
@@ -1628,7 +1717,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (!left_is_array && !right_is_array) {
                 value_free(&left_val);
                 value_free(&right_val);
-                return vm_runtime_error(&vm, "@ requires at least one array operand");
+                return vm_runtime_error(vm, "@ requires at least one array operand");
             }
 
             /* Determine iteration count and validate length match. */
@@ -1640,7 +1729,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                     value_free(&left_val);
                     value_free(&right_val);
                     return vm_runtime_error(
-                        &vm, "array length mismatch in @op (left=%zu, right=%zu)", lc, rc);
+                        vm, "array length mismatch in @op (left=%zu, right=%zu)", lc, rc);
                 }
                 count = left_val.array->count;
             } else if (left_is_array) {
@@ -1654,7 +1743,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             if (!result_arr) {
                 value_free(&left_val);
                 value_free(&right_val);
-                return vm_runtime_error(&vm, "memory allocation failed");
+                return vm_runtime_error(vm, "memory allocation failed");
             }
 
             for (size_t i = 0; i < count; i++) {
@@ -1672,7 +1761,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                             value_free(&tmp);
                             value_free(&left_val);
                             value_free(&right_val);
-                            return vm_runtime_error(&vm, "memory allocation failed");
+                            return vm_runtime_error(vm, "memory allocation failed");
                         }
                     } else {
                         if (!value_clone(&elem_result, b)) {
@@ -1680,7 +1769,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                             value_free(&tmp);
                             value_free(&left_val);
                             value_free(&right_val);
-                            return vm_runtime_error(&vm, "memory allocation failed");
+                            return vm_runtime_error(vm, "memory allocation failed");
                         }
                     }
                 } else if ((OpCode)inner_op == OP_OR) {
@@ -1691,7 +1780,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                             value_free(&tmp);
                             value_free(&left_val);
                             value_free(&right_val);
-                            return vm_runtime_error(&vm, "memory allocation failed");
+                            return vm_runtime_error(vm, "memory allocation failed");
                         }
                     } else {
                         if (!value_clone(&elem_result, b)) {
@@ -1699,7 +1788,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                             value_free(&tmp);
                             value_free(&left_val);
                             value_free(&right_val);
-                            return vm_runtime_error(&vm, "memory allocation failed");
+                            return vm_runtime_error(vm, "memory allocation failed");
                         }
                     }
                 } else {
@@ -1710,7 +1799,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                         value_free(&tmp);
                         value_free(&left_val);
                         value_free(&right_val);
-                        Value err = vm_runtime_error(&vm, "vectorize element %zu: %s", i,
+                        Value err = vm_runtime_error(vm, "vectorize element %zu: %s", i,
                                                      elem_result.string);
                         value_free(&elem_result);
                         return err;
@@ -1724,8 +1813,193 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             value_free(&right_val);
 
             Value result = make_array(result_arr);
-            if (!vm_push(&vm, result)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, result)) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_REDUCE_CALL: {
+            /* Fold an array with a user-defined or native function.
+             * Stack layout: [fn, array]. Pop array, peek fn (kept for
+             * repeated calls), fold by calling fn(acc, elem) for each
+             * element left-to-right. Pop fn when done, push result. */
+            Value arr_val;
+            if (!vm_pop(vm, &arr_val)) {
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            if (arr_val.type != VAL_ARRAY) {
+                value_free(&arr_val);
+                return vm_runtime_error(vm, "@ requires an array operand");
+            }
+            ObjArray *arr = arr_val.array;
+            if (arr->count == 0) {
+                value_free(&arr_val);
+                /* Pop the function too before erroring. */
+                Value fn_discard;
+                vm_pop(vm, &fn_discard);
+                value_free(&fn_discard);
+                return vm_runtime_error(vm, "cannot reduce empty array");
+            }
+            /* Single element: clone it, pop fn, push result. */
+            if (arr->count == 1) {
+                Value result;
+                if (!value_clone(&result, &arr->data[0])) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                value_free(&arr_val);
+                Value fn_discard;
+                vm_pop(vm, &fn_discard);
+                value_free(&fn_discard);
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+            /* General fold: acc = arr[0], then fn(acc, arr[i]) for i=1..n-1.
+             * The function is on the stack below; we peek it for each call. */
+            Value fn_val;
+            if (!vm_peek(vm, 0, &fn_val)) {
+                value_free(&arr_val);
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            Value acc;
+            if (!value_clone(&acc, &arr->data[0])) {
+                value_free(&arr_val);
+                return vm_runtime_error(vm, "memory allocation failed");
+            }
+            for (size_t i = 1; i < arr->count; i++) {
+                Value elem;
+                if (!value_clone(&elem, &arr->data[i])) {
+                    value_free(&acc);
+                    value_free(&arr_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                Value result = vm_call_value(vm, &fn_val, acc, elem);
+                if (result.type == VAL_ERROR) {
+                    value_free(&arr_val);
+                    Value fn_discard;
+                    vm_pop(vm, &fn_discard);
+                    value_free(&fn_discard);
+                    vm_free_stack(vm);
+                    return result;
+                }
+                acc = result;
+            }
+            value_free(&arr_val);
+            /* Pop the function. */
+            Value fn_discard;
+            vm_pop(vm, &fn_discard);
+            value_free(&fn_discard);
+            if (!vm_push(vm, acc)) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_VECTORIZE_CALL: {
+            /* Element-wise operation with a user-defined or native function.
+             * Stack layout: [fn, left, right]. Pop right, pop left, peek fn.
+             * Call fn(left[i], right[i]) for each element. Supports
+             * array-array, array-scalar, and scalar-array broadcasting. */
+            Value right_val, left_val;
+            if (!vm_pop(vm, &right_val)) {
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            if (!vm_pop(vm, &left_val)) {
+                value_free(&right_val);
+                return vm_runtime_error(vm, "stack underflow");
+            }
+
+            bool left_is_array = (left_val.type == VAL_ARRAY);
+            bool right_is_array = (right_val.type == VAL_ARRAY);
+
+            /* Both scalars — not allowed. */
+            if (!left_is_array && !right_is_array) {
+                value_free(&left_val);
+                value_free(&right_val);
+                Value fn_discard;
+                vm_pop(vm, &fn_discard);
+                value_free(&fn_discard);
+                return vm_runtime_error(vm, "@ requires at least one array operand");
+            }
+
+            /* Validate matching lengths for two arrays. */
+            size_t count;
+            if (left_is_array && right_is_array) {
+                if (left_val.array->count != right_val.array->count) {
+                    size_t lc = left_val.array->count;
+                    size_t rc = right_val.array->count;
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    Value fn_discard;
+                    vm_pop(vm, &fn_discard);
+                    value_free(&fn_discard);
+                    return vm_runtime_error(
+                        vm, "array length mismatch in @op (left=%zu, right=%zu)", lc, rc);
+                }
+                count = left_val.array->count;
+            } else if (left_is_array) {
+                count = left_val.array->count;
+            } else {
+                count = right_val.array->count;
+            }
+
+            /* Peek at the function (it's below left and right, which are now popped). */
+            Value fn_val;
+            if (!vm_peek(vm, 0, &fn_val)) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "stack underflow");
+            }
+
+            /* Build result array by calling fn(a, b) for each element pair. */
+            ObjArray *result_arr = obj_array_new();
+            if (!result_arr) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "memory allocation failed");
+            }
+
+            for (size_t i = 0; i < count; i++) {
+                const Value *a = left_is_array ? &left_val.array->data[i] : &left_val;
+                const Value *b = right_is_array ? &right_val.array->data[i] : &right_val;
+
+                Value a_clone, b_clone;
+                if (!value_clone(&a_clone, a) || !value_clone(&b_clone, b)) {
+                    Value tmp = make_array(result_arr);
+                    value_free(&tmp);
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+
+                Value elem_result = vm_call_value(vm, &fn_val, a_clone, b_clone);
+                if (elem_result.type == VAL_ERROR) {
+                    Value tmp = make_array(result_arr);
+                    value_free(&tmp);
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    Value fn_discard;
+                    vm_pop(vm, &fn_discard);
+                    value_free(&fn_discard);
+                    vm_free_stack(vm);
+                    return elem_result;
+                }
+                obj_array_push(result_arr, elem_result);
+            }
+
+            value_free(&left_val);
+            value_free(&right_val);
+            /* Pop the function. */
+            Value fn_discard;
+            vm_pop(vm, &fn_discard);
+            value_free(&fn_discard);
+
+            Value result = make_array(result_arr);
+            if (!vm_push(vm, result)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
@@ -1735,24 +2009,24 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
          * somehow appear in the instruction stream, treat as an error. */
         case OP_AND:
         case OP_OR:
-            return vm_runtime_error(&vm, "OP_AND/OP_OR are not standalone opcodes");
+            return vm_runtime_error(vm, "OP_AND/OP_OR are not standalone opcodes");
 
         case OP_RETURN: {
             /* Pop the return value from the stack. */
             Value result;
-            if (vm.stack_top > frame->slots) {
-                vm_pop(&vm, &result);
+            if (vm->stack_top > frame->slots) {
+                vm_pop(vm, &result);
             } else {
                 result = make_nothing();
             }
 
             /* Pop the current call frame. */
-            vm.frame_count--;
+            vm->frame_count--;
 
-            if (vm.frame_count == 0) {
+            if (vm->frame_count == 0) {
                 /* Returning from the top-level script: end of program.
                  * Free any remaining values on the stack and return. */
-                vm_free_stack(&vm);
+                vm_free_stack(vm);
                 return result; // NOLINT(clang-analyzer-core.StackAddressEscape)
             }
 
@@ -1760,26 +2034,33 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
              * window before we pop those slots. This moves captured
              * values from the stack into the upvalue's closed field,
              * so closures that outlive this call frame still work. */
-            close_upvalues(&vm, frame->slots);
+            close_upvalues(vm, frame->slots);
 
             /* Returning from a user function: discard the called
              * function's stack window (callee + args + locals), then
              * push the return value for the caller. */
-            while (vm.stack_top > frame->slots) {
+            while (vm->stack_top > frame->slots) {
                 Value v;
-                vm_pop(&vm, &v);
+                vm_pop(vm, &v);
                 value_free(&v);
             }
 
+            /* If returning to the base frame level (set by vm_call_value
+             * for recursive dispatch), return the result directly instead
+             * of pushing it onto the stack. */
+            if (vm->frame_count == base_frame_count) {
+                return result;
+            }
+
             /* Push the return value back onto the caller's stack. */
-            if (!vm_push(&vm, result)) {
-                return vm_runtime_error(&vm, "stack overflow");
+            if (!vm_push(vm, result)) {
+                return vm_runtime_error(vm, "stack overflow");
             }
             break;
         }
 
         default:
-            return vm_runtime_error(&vm, "unknown opcode %d", instruction);
+            return vm_runtime_error(vm, "unknown opcode %d", instruction);
         }
     }
 }
