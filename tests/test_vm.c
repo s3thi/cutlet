@@ -2532,6 +2532,42 @@ TEST(test_index_assign_returns_value) {
 }
 
 /* ============================================================
+ * Array concatenation (++)
+ * ============================================================ */
+
+/* [1, 2] ++ [3, 4] => [1, 2, 3, 4] */
+TEST(test_concat_arrays_basic) {
+    assert_vm_formatted("[1, 2] ++ [3, 4]", "[1, 2, 3, 4]", "array concat basic");
+}
+
+/* [] ++ [1] => [1] */
+TEST(test_concat_array_empty_left) { assert_vm_formatted("[] ++ [1]", "[1]", "empty left concat"); }
+
+/* [1] ++ [] => [1] */
+TEST(test_concat_array_empty_right) {
+    assert_vm_formatted("[1] ++ []", "[1]", "empty right concat");
+}
+
+/* [] ++ [] => [] */
+TEST(test_concat_array_both_empty) { assert_vm_formatted("[] ++ []", "[]", "both empty concat"); }
+
+/* [[1]] ++ [[2]] => [[1], [2]] */
+TEST(test_concat_array_nested) {
+    assert_vm_formatted("[[1]] ++ [[2]]", "[[1], [2]]", "nested array concat");
+}
+
+/* [1] ++ 2 => error */
+TEST(test_concat_array_num_error) { assert_vm_error("[1] ++ 2", "array ++ number"); }
+
+/* 1 ++ [2] => error */
+TEST(test_concat_num_array_error) { assert_vm_error("1 ++ [2]", "number ++ array"); }
+
+/* "a" ++ "b" still works => "ab" (existing string concat unchanged) */
+TEST(test_concat_strings_still_works) {
+    assert_vm_string("\"a\" ++ \"b\"", "ab", "string concat unchanged");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2982,6 +3018,16 @@ int main(void) {
     RUN_TEST(test_index_assign_cow);
     RUN_TEST(test_index_nested);
     RUN_TEST(test_index_assign_returns_value);
+
+    printf("\nArray concatenation (++):\n");
+    RUN_TEST(test_concat_arrays_basic);
+    RUN_TEST(test_concat_array_empty_left);
+    RUN_TEST(test_concat_array_empty_right);
+    RUN_TEST(test_concat_array_both_empty);
+    RUN_TEST(test_concat_array_nested);
+    RUN_TEST(test_concat_array_num_error);
+    RUN_TEST(test_concat_num_array_error);
+    RUN_TEST(test_concat_strings_still_works);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

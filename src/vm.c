@@ -557,8 +557,12 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
         }
 
         case OP_CONCAT: {
-            /* String concatenation: both operands must be strings.
-             * Use str() for explicit conversion of non-string values. */
+            /* Concatenation operator (++).
+             * Supports two modes:
+             *   - array ++ array  → new array with elements from both
+             *   - string ++ string → new concatenated string
+             * Mixed types (one array, one non-array) produce a runtime error.
+             * Use str() for explicit string conversion of non-string values. */
             Value b, a;
             if (!vm_pop(&vm, &b)) {
                 return vm_runtime_error(&vm, "stack underflow");
@@ -567,7 +571,59 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 value_free(&b);
                 return vm_runtime_error(&vm, "stack underflow");
             }
-            /* Reject non-string operands with a clear error. */
+
+            /* Array concatenation: both operands must be arrays. */
+            if (a.type == VAL_ARRAY && b.type == VAL_ARRAY) {
+                ObjArray *la = a.array;
+                ObjArray *lb = b.array;
+                ObjArray *result = obj_array_new();
+                if (!result) {
+                    value_free(&a);
+                    value_free(&b);
+                    return vm_runtime_error(&vm, "memory allocation failed");
+                }
+                /* Append all elements from left array, then right array. */
+                for (size_t i = 0; i < la->count; i++) {
+                    Value elem;
+                    if (!value_clone(&elem, &la->data[i])) {
+                        value_free(&a);
+                        value_free(&b);
+                        /* Free partially-built result array. */
+                        Value tmp = make_array(result);
+                        value_free(&tmp);
+                        return vm_runtime_error(&vm, "memory allocation failed");
+                    }
+                    obj_array_push(result, elem);
+                }
+                for (size_t i = 0; i < lb->count; i++) {
+                    Value elem;
+                    if (!value_clone(&elem, &lb->data[i])) {
+                        value_free(&a);
+                        value_free(&b);
+                        Value tmp = make_array(result);
+                        value_free(&tmp);
+                        return vm_runtime_error(&vm, "memory allocation failed");
+                    }
+                    obj_array_push(result, elem);
+                }
+                value_free(&a);
+                value_free(&b);
+                if (!vm_push(&vm, make_array(result))) {
+                    return vm_runtime_error(&vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* Mixed array/non-array is an error. */
+            if (a.type == VAL_ARRAY || b.type == VAL_ARRAY) {
+                const char *ta = value_type_name(a.type);
+                const char *tb = value_type_name(b.type);
+                value_free(&a);
+                value_free(&b);
+                return vm_runtime_error(&vm, "cannot concatenate %s with %s", ta, tb);
+            }
+
+            /* String concatenation: both operands must be strings. */
             if (a.type != VAL_STRING || b.type != VAL_STRING) {
                 const char *ta = value_type_name(a.type);
                 const char *tb = value_type_name(b.type);
@@ -575,20 +631,20 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
                 value_free(&b);
                 return vm_runtime_error(&vm, "++ requires strings, got %s and %s", ta, tb);
             }
-            size_t la = strlen(a.string);
-            size_t lb = strlen(b.string);
-            char *result = malloc(la + lb + 1);
-            if (!result) {
+            size_t sla = strlen(a.string);
+            size_t slb = strlen(b.string);
+            char *sresult = malloc(sla + slb + 1);
+            if (!sresult) {
                 value_free(&a);
                 value_free(&b);
                 return vm_runtime_error(&vm, "memory allocation failed");
             }
-            memcpy(result, a.string, la);
-            memcpy(result + la, b.string, lb);
-            result[la + lb] = '\0';
+            memcpy(sresult, a.string, sla);
+            memcpy(sresult + sla, b.string, slb);
+            sresult[sla + slb] = '\0';
             value_free(&a);
             value_free(&b);
-            if (!vm_push(&vm, make_string(result))) {
+            if (!vm_push(&vm, make_string(sresult))) {
                 return vm_runtime_error(&vm, "stack overflow");
             }
             break;
