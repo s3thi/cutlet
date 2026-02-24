@@ -2967,6 +2967,32 @@ TEST(test_map_projection_empty_keys) {
     assert_vm_formatted("{a: 1}[[]]", "{}", "map projection empty keys");
 }
 
+/* --- Map merge (++) --- */
+
+TEST(test_map_merge_basic) {
+    assert_vm_formatted("{a: 1, b: 2} ++ {b: 3, c: 4}", "{a: 1, b: 3, c: 4}", "map merge basic");
+}
+
+TEST(test_map_merge_empty_left) {
+    assert_vm_formatted("{} ++ {a: 1}", "{a: 1}", "map merge empty left");
+}
+
+TEST(test_map_merge_empty_right) {
+    assert_vm_formatted("{a: 1} ++ {}", "{a: 1}", "map merge empty right");
+}
+
+TEST(test_map_merge_both_empty) { assert_vm_formatted("{} ++ {}", "{}", "map merge both empty"); }
+
+TEST(test_map_merge_map_num_error) { assert_vm_error("{a: 1} ++ 2", "map ++ number"); }
+
+TEST(test_map_merge_string_map_error) { assert_vm_error("\"a\" ++ {b: 1}", "string ++ map"); }
+
+TEST(test_map_merge_array_map_error) { assert_vm_error("[1] ++ {a: 1}", "array ++ map"); }
+
+TEST(test_map_merge_strings_unchanged) {
+    assert_vm_string("\"a\" ++ \"b\"", "ab", "string concat still works after map merge");
+}
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -3540,6 +3566,16 @@ int main(void) {
     RUN_TEST(test_map_projection_basic);
     RUN_TEST(test_map_projection_missing_keys);
     RUN_TEST(test_map_projection_empty_keys);
+
+    printf("\nMap merge (++):\n");
+    RUN_TEST(test_map_merge_basic);
+    RUN_TEST(test_map_merge_empty_left);
+    RUN_TEST(test_map_merge_empty_right);
+    RUN_TEST(test_map_merge_both_empty);
+    RUN_TEST(test_map_merge_map_num_error);
+    RUN_TEST(test_map_merge_string_map_error);
+    RUN_TEST(test_map_merge_array_map_error);
+    RUN_TEST(test_map_merge_strings_unchanged);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

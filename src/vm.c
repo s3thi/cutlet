@@ -816,10 +816,11 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_CONCAT: {
             /* Concatenation operator (++).
-             * Supports two modes:
-             *   - array ++ array  → new array with elements from both
+             * Supports three modes:
+             *   - array ++ array   → new array with elements from both
+             *   - map ++ map       → new map merged (right side wins on key conflicts)
              *   - string ++ string → new concatenated string
-             * Mixed types (one array, one non-array) produce a runtime error.
+             * Mixed types produce a runtime error.
              * Use str() for explicit string conversion of non-string values. */
             Value b, a;
             if (!vm_pop(vm, &b)) {
@@ -872,8 +873,36 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 break;
             }
 
-            /* Mixed array/non-array is an error. */
-            if (a.type == VAL_ARRAY || b.type == VAL_ARRAY) {
+            /* Map merge: both operands must be maps.
+             * Right-hand side wins on key conflicts. */
+            if (a.type == VAL_MAP && b.type == VAL_MAP) {
+                ObjMap *la = a.map;
+                ObjMap *lb = b.map;
+                ObjMap *result = obj_map_new();
+                if (!result) {
+                    value_free(&a);
+                    value_free(&b);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                /* Copy all entries from left map. */
+                for (size_t i = 0; i < la->count; i++) {
+                    obj_map_set(result, &la->entries[i].key, &la->entries[i].value);
+                }
+                /* Insert/overwrite with entries from right map. */
+                for (size_t i = 0; i < lb->count; i++) {
+                    obj_map_set(result, &lb->entries[i].key, &lb->entries[i].value);
+                }
+                value_free(&a);
+                value_free(&b);
+                if (!vm_push(vm, make_map(result))) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* Mixed array/map/non-collection is an error. */
+            if (a.type == VAL_ARRAY || b.type == VAL_ARRAY || a.type == VAL_MAP ||
+                b.type == VAL_MAP) {
                 const char *ta = value_type_name(a.type);
                 const char *tb = value_type_name(b.type);
                 value_free(&a);
