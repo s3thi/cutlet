@@ -2320,6 +2320,72 @@ TEST(test_array_nested) {
     PASS();
 }
 
+/* ============================================================
+ * Array indexing parsing
+ * ============================================================ */
+
+/* Parse xs[0] => [INDEX [IDENT xs] [NUMBER 0]] */
+TEST(test_index_read_ident) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("xs[0]", &node, &err), "should parse index read");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [INDEX [IDENT xs] [NUMBER 0]]", "index read AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse [10, 20, 30][1] => [INDEX [ARRAY ...] [NUMBER 1]] */
+TEST(test_index_read_literal) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[10, 20, 30][1]", &node, &err), "should parse literal index");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [INDEX [ARRAY [NUMBER 10] [NUMBER 20] [NUMBER 30]] [NUMBER 1]]",
+                  "literal index AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse xs[0] = 99 => [INDEX_ASSIGN [IDENT xs] [NUMBER 0] [NUMBER 99]] */
+TEST(test_index_assign) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("xs[0] = 99", &node, &err), "should parse index assignment");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [INDEX_ASSIGN [IDENT xs] [NUMBER 0] [NUMBER 99]]", "index assign AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse xs[1 + 2] => index expression can be complex */
+TEST(test_index_expr) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("xs[1 + 2]", &node, &err), "should parse index with expression");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [INDEX [IDENT xs] [BINOP + [NUMBER 1] [NUMBER 2]]]",
+                  "index with expr AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse xs[0][1] => chained indexing */
+TEST(test_index_chained) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("xs[0][1]", &node, &err), "should parse chained index");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [INDEX [INDEX [IDENT xs] [NUMBER 0]] [NUMBER 1]]", "chained index AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
 /* parser_is_complete: unclosed array bracket is incomplete */
 TEST(test_is_incomplete_array_unclosed) {
     ASSERT(!parser_is_complete("[1, 2"), "unclosed array should be incomplete");
@@ -2713,6 +2779,13 @@ int main(void) {
     RUN_TEST(test_array_expressions);
     RUN_TEST(test_array_trailing_comma);
     RUN_TEST(test_array_nested);
+
+    printf("\nArray indexing parsing:\n");
+    RUN_TEST(test_index_read_ident);
+    RUN_TEST(test_index_read_literal);
+    RUN_TEST(test_index_assign);
+    RUN_TEST(test_index_expr);
+    RUN_TEST(test_index_chained);
 
     printf("\nparser_is_complete() - array literals:\n");
     RUN_TEST(test_is_incomplete_array_unclosed);

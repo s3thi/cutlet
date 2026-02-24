@@ -131,6 +131,20 @@ static bool values_equal(const Value *a, const Value *b) {
     case VAL_CLOSURE:
         /* Identity-based: only equal if pointing to the same ObjClosure. */
         return a->closure == b->closure;
+    case VAL_ARRAY: {
+        /* Structural equality: same length and all elements pairwise equal. */
+        const ObjArray *aa = a->array;
+        const ObjArray *ba = b->array;
+        if (aa == ba)
+            return true; /* Same backing store — trivially equal. */
+        if (aa->count != ba->count)
+            return false;
+        for (size_t i = 0; i < aa->count; i++) {
+            if (!values_equal(&aa->data[i], &ba->data[i]))
+                return false;
+        }
+        return true;
+    }
     default:
         return false;
     }
@@ -252,6 +266,8 @@ static const char *value_type_name(ValueType type) {
     case VAL_FUNCTION:
     case VAL_CLOSURE:
         return "function";
+    case VAL_ARRAY:
+        return "array";
     case VAL_ERROR:
         return "error";
     default:
@@ -1073,6 +1089,132 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
             }
 
             if (!vm_push(&vm, make_array(arr))) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_INDEX_GET: {
+            /* Read array[index]: pop index, pop array, push element.
+             * Negative indices wrap from end (e.g. -1 = last element).
+             * Non-integer or out-of-bounds indices produce runtime errors. */
+            Value idx_val, arr_val;
+            if (!vm_pop(&vm, &idx_val)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &arr_val)) {
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (arr_val.type != VAL_ARRAY) {
+                const char *t = value_type_name(arr_val.type);
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "cannot index %s", t);
+            }
+            if (idx_val.type != VAL_NUMBER) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index must be an integer");
+            }
+            double raw_idx = idx_val.number;
+            /* Check that the index is an integer. */
+            if (raw_idx != floor(raw_idx)) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index must be an integer");
+            }
+            long long int_idx = (long long)raw_idx;
+            ObjArray *arr = arr_val.array;
+            /* Handle negative indices (wrap from end). */
+            if (int_idx < 0)
+                int_idx += (long long)arr->count;
+            if (int_idx < 0 || (size_t)int_idx >= arr->count) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index out of bounds");
+            }
+            /* Clone the element at the index and push it. */
+            Value result;
+            if (!value_clone(&result, &arr->data[(size_t)int_idx])) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            value_free(&arr_val);
+            value_free(&idx_val);
+            if (!vm_push(&vm, result)) {
+                return vm_runtime_error(&vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_INDEX_SET: {
+            /* Write array[index] = value.
+             *
+             * Stack in:  [..., value, array, index]   (TOS = index)
+             * Pop index, pop array. Peek value (now at TOS).
+             * COW the array if refcount > 1, set element, push modified array.
+             * Stack out: [..., value, modified_array]
+             *
+             * The compiler follows this with SET_GLOBAL/LOCAL to write the
+             * modified array back to the source variable, then OP_POP to
+             * discard the modified array, leaving value as the result. */
+            Value idx_val, arr_val;
+            if (!vm_pop(&vm, &idx_val)) {
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (!vm_pop(&vm, &arr_val)) {
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            /* Peek at the value (now at TOS after popping index and array). */
+            Value val;
+            if (!vm_peek(&vm, 0, &val)) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "stack underflow");
+            }
+            if (arr_val.type != VAL_ARRAY) {
+                const char *t = value_type_name(arr_val.type);
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "cannot index %s", t);
+            }
+            if (idx_val.type != VAL_NUMBER) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index must be an integer");
+            }
+            double raw_idx = idx_val.number;
+            if (raw_idx != floor(raw_idx)) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index must be an integer");
+            }
+            long long int_idx = (long long)raw_idx;
+            /* Handle negative indices. */
+            if (int_idx < 0)
+                int_idx += (long long)arr_val.array->count;
+            if (int_idx < 0 || (size_t)int_idx >= arr_val.array->count) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "index out of bounds");
+            }
+            /* COW: ensure we own the backing store before mutating. */
+            obj_array_ensure_owned(&arr_val);
+            /* Free old element and clone the new value into the slot. */
+            value_free(&arr_val.array->data[(size_t)int_idx]);
+            Value cloned_val;
+            if (!value_clone(&cloned_val, &val)) {
+                value_free(&arr_val);
+                value_free(&idx_val);
+                return vm_runtime_error(&vm, "memory allocation failed");
+            }
+            arr_val.array->data[(size_t)int_idx] = cloned_val;
+            value_free(&idx_val);
+            /* Push the modified array on top of the value. */
+            if (!vm_push(&vm, arr_val)) {
                 return vm_runtime_error(&vm, "stack overflow");
             }
             break;

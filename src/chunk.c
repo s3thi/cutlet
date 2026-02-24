@@ -169,6 +169,10 @@ const char *opcode_name(OpCode op) {
         return "OP_CLOSE_UPVALUE";
     case OP_ARRAY:
         return "OP_ARRAY";
+    case OP_INDEX_GET:
+        return "OP_INDEX_GET";
+    case OP_INDEX_SET:
+        return "OP_INDEX_SET";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -277,6 +281,8 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_NOT:
     case OP_POP:
     case OP_CLOSE_UPVALUE:
+    case OP_INDEX_GET:
+    case OP_INDEX_SET:
     case OP_RETURN:
         dynbuf_printf(b, "%s\n", opcode_name((OpCode)instruction));
         return offset + 1;

@@ -912,6 +912,53 @@ static AstNode *parse_assignment(Parser *p) {
         size_t op_line = p->current.line;
         size_t op_col = p->current.col;
 
+        /* Index assignment: expr[idx] = value → AST_INDEX_ASSIGN */
+        if (left->type == AST_INDEX) {
+            advance(p); /* consume '=' */
+            AstNode *rhs = parse_assignment(p);
+            if (!rhs) {
+                ast_free(left);
+                return NULL;
+            }
+
+            /* Build AST_INDEX_ASSIGN: left=array, right=index, children[0]=value.
+             * We steal the array and index pointers from the AST_INDEX node. */
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                ast_free(left);
+                ast_free(rhs);
+                parser_error(p, op_line, op_col, "memory allocation failed");
+                return NULL;
+            }
+            AstNode **children = (AstNode **)malloc(sizeof(AstNode *));
+            if (!children) {
+                free(node);
+                ast_free(left);
+                ast_free(rhs);
+                parser_error(p, op_line, op_col, "memory allocation failed");
+                return NULL;
+            }
+            children[0] = rhs;
+
+            node->type = AST_INDEX_ASSIGN;
+            node->value = NULL;
+            node->left = left->left;   /* array expression (stolen from AST_INDEX) */
+            node->right = left->right; /* index expression (stolen from AST_INDEX) */
+            node->grouped = false;
+            node->line = op_line;
+            node->children = children;
+            node->child_count = 1;
+            node->params = NULL;
+            node->param_count = 0;
+
+            /* Free the original AST_INDEX shell without freeing left/right. */
+            left->left = NULL;
+            left->right = NULL;
+            ast_free(left);
+
+            return node;
+        }
+
         if (left->type != AST_IDENT || left->grouped) {
             parser_error(p, op_line, op_col, "invalid assignment target");
             ast_free(left);
@@ -950,8 +997,62 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
 
     /* Loop: consume infix operators with sufficient precedence.
      * Handles both symbol operators (TOK_OPERATOR) and keyword operators
-     * like "and"/"or" (TOK_IDENT that act as infix operators). */
+     * like "and"/"or" (TOK_IDENT that act as infix operators).
+     * Also handles postfix '[' for array indexing (precedence 10). */
     while (!p->has_error && (p->current.type == TOK_OPERATOR || is_keyword_infix(&p->current))) {
+
+        /* Postfix '[' — array indexing: expr[expr].
+         * Precedence 10 (highest, above **). Left-associative so
+         * xs[0][1] parses as (xs[0])[1]. */
+        if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+            p->current.value[0] == '[') {
+            /* Index precedence is 10; only parse if min_prec allows it. */
+            if (10 < min_prec)
+                break;
+
+            size_t bracket_line = p->current.line;
+            size_t bracket_col = p->current.col;
+            advance(p); /* consume '[' */
+
+            /* Parse the index expression (full precedence reset). */
+            AstNode *index_expr = parse_assignment(p);
+            if (!index_expr) {
+                ast_free(left);
+                return NULL;
+            }
+
+            /* Expect closing ']' */
+            if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                p->current.value[0] != ']') {
+                parser_error(p, p->current.line, p->current.col, "expected ']' after index");
+                ast_free(left);
+                ast_free(index_expr);
+                return NULL;
+            }
+            advance(p); /* consume ']' */
+
+            /* Build AST_INDEX node: left=array, right=index. */
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                ast_free(left);
+                ast_free(index_expr);
+                parser_error(p, bracket_line, bracket_col, "memory allocation failed");
+                return NULL;
+            }
+            node->type = AST_INDEX;
+            node->value = NULL;
+            node->left = left;
+            node->right = index_expr;
+            node->grouped = false;
+            node->line = bracket_line;
+            node->children = NULL;
+            node->child_count = 0;
+            node->params = NULL;
+            node->param_count = 0;
+            left = node;
+            continue;
+        }
+
         const char *op_value = p->current.value;
         size_t op_len = p->current.value_len;
         size_t op_line = p->current.line;
@@ -2083,6 +2184,10 @@ const char *ast_node_type_str(AstNodeType type) {
         return "FN";
     case AST_ARRAY:
         return "ARRAY";
+    case AST_INDEX:
+        return "INDEX";
+    case AST_INDEX_ASSIGN:
+        return "INDEX_ASSIGN";
     default:
         return "UNKNOWN";
     }
@@ -2438,6 +2543,56 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf + pos, len - pos, ") %s]", body_str);
         free(body_str);
+        return buf;
+    }
+
+    if (node->type == AST_INDEX) {
+        /* Index read: [INDEX [array] [index]] */
+        char *arr_str = ast_format_node(node->left);
+        char *idx_str = ast_format_node(node->right);
+        if (!arr_str || !idx_str) {
+            free(arr_str);
+            free(idx_str);
+            return NULL;
+        }
+        size_t len = 1 + strlen(type_str) + 1 + strlen(arr_str) + 1 + strlen(idx_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(arr_str);
+            free(idx_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s]", type_str, arr_str, idx_str);
+        free(arr_str);
+        free(idx_str);
+        return buf;
+    }
+
+    if (node->type == AST_INDEX_ASSIGN) {
+        /* Index write: [INDEX_ASSIGN [array] [index] [value]]
+         * left = array expr, right = index expr, children[0] = value expr */
+        char *arr_str = ast_format_node(node->left);
+        char *idx_str = ast_format_node(node->right);
+        char *val_str = (node->child_count > 0) ? ast_format_node(node->children[0]) : NULL;
+        if (!arr_str || !idx_str || !val_str) {
+            free(arr_str);
+            free(idx_str);
+            free(val_str);
+            return NULL;
+        }
+        size_t len = 1 + strlen(type_str) + 1 + strlen(arr_str) + 1 + strlen(idx_str) + 1 +
+                     strlen(val_str) + 1 + 1;
+        char *buf = malloc(len);
+        if (!buf) {
+            free(arr_str);
+            free(idx_str);
+            free(val_str);
+            return NULL;
+        }
+        snprintf(buf, len, "[%s %s %s %s]", type_str, arr_str, idx_str, val_str);
+        free(arr_str);
+        free(idx_str);
+        free(val_str);
         return buf;
     }
 

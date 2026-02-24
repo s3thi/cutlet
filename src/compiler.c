@@ -861,6 +861,79 @@ static void compile_array(Compiler *c, const AstNode *node) {
     emit_bytes(c, OP_ARRAY, (uint8_t)node->child_count, line);
 }
 
+/*
+ * Compile an index read: array[index]
+ * Pushes the array expression, then the index expression, then emits OP_INDEX_GET.
+ */
+static void compile_index(Compiler *c, const AstNode *node) {
+    compile_node(c, node->left);  /* push array */
+    compile_node(c, node->right); /* push index */
+    emit_byte(c, OP_INDEX_GET, (int)node->line);
+}
+
+/*
+ * Compile an index assignment: expr[index] = value
+ *
+ * Stack discipline:
+ *   1. Push value first (so it stays as the expression result).
+ *   2. Push array (clone from variable lookup).
+ *   3. Push index.
+ *   4. OP_INDEX_SET: pop index, pop array, peek value, COW, mutate.
+ *      Push modified array on top.  Stack: [..., value, modified_array].
+ *   5. If the array source is a variable (AST_IDENT), emit SET_GLOBAL/
+ *      SET_LOCAL/SET_UPVALUE to write the modified array back.
+ *   6. OP_POP to discard the modified array.  Result = value at TOS.
+ */
+static void compile_index_assign(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* 1. Compile value — pushed first so it becomes the expression result. */
+    compile_node(c, node->children[0]);
+
+    /* 2. Compile array expression (typically a variable read). */
+    compile_node(c, node->left);
+
+    /* 3. Compile index expression. */
+    compile_node(c, node->right);
+
+    /* 4. OP_INDEX_SET: mutates array, pushes modified array on top of value. */
+    emit_byte(c, OP_INDEX_SET, line);
+
+    /* 5. If the array source is a named variable, write the modified array
+     *    back so the mutation is visible. OP_SET_* peeks TOS (modified array). */
+    if (node->left->type == AST_IDENT) {
+        const char *name = node->left->value;
+
+        if (c->context == COMPILE_FUNCTION) {
+            int slot = resolve_local(c, name);
+            if (slot >= 0) {
+                emit_bytes(c, OP_SET_LOCAL, (uint8_t)slot, line);
+                goto writeback_done;
+            }
+            int upvalue = resolve_upvalue(c, name);
+            if (upvalue >= 0) {
+                emit_bytes(c, OP_SET_UPVALUE, (uint8_t)upvalue, line);
+                goto writeback_done;
+            }
+        }
+
+        /* Fall back to global. */
+        char *gname = compiler_strdup(c, name);
+        if (!gname)
+            return;
+        int idx = chunk_find_or_add_constant(c->chunk, make_string(gname));
+        if (idx < 0) {
+            compiler_error(c, "too many constants");
+            return;
+        }
+        emit_bytes(c, OP_SET_GLOBAL, (uint8_t)idx, line);
+    }
+
+writeback_done:
+    /* 6. Pop the modified array; value remains at TOS. */
+    emit_byte(c, OP_POP, line);
+}
+
 static void compile_function(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
@@ -1088,6 +1161,12 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_ARRAY:
         compile_array(c, node);
+        break;
+    case AST_INDEX:
+        compile_index(c, node);
+        break;
+    case AST_INDEX_ASSIGN:
+        compile_index_assign(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

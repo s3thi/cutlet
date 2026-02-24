@@ -2486,6 +2486,52 @@ TEST(test_array_nested_eval) {
 }
 
 /* ============================================================
+ * Array indexing
+ * ============================================================ */
+
+/* [10, 20, 30][0] => 10 */
+TEST(test_index_first) { assert_vm_number("[10, 20, 30][0]", 10.0, "index first"); }
+
+/* [10, 20, 30][2] => 30 */
+TEST(test_index_last) { assert_vm_number("[10, 20, 30][2]", 30.0, "index last"); }
+
+/* [10, 20, 30][-1] => 30 (negative wraps from end) */
+TEST(test_index_negative_one) { assert_vm_number("[10, 20, 30][-1]", 30.0, "index -1"); }
+
+/* [10, 20, 30][-3] => 10 (negative wraps to first) */
+TEST(test_index_negative_three) { assert_vm_number("[10, 20, 30][-3]", 10.0, "index -3"); }
+
+/* [10, 20, 30][3] => error "index out of bounds" */
+TEST(test_index_oob_positive) { assert_vm_error("[10, 20, 30][3]", "oob positive"); }
+
+/* [10, 20, 30][-4] => error "index out of bounds" */
+TEST(test_index_oob_negative) { assert_vm_error("[10, 20, 30][-4]", "oob negative"); }
+
+/* 42[0] => error "cannot index" */
+TEST(test_index_non_array) { assert_vm_error("42[0]", "index non-array"); }
+
+/* [1, 2][0.5] => error "index must be an integer" */
+TEST(test_index_non_integer) { assert_vm_error("[1, 2][0.5]", "index non-integer"); }
+
+/* my xs = [10, 20, 30]\nxs[0] = 99\nxs => [99, 20, 30] */
+TEST(test_index_assign_eval) {
+    assert_vm_formatted("my xs = [10, 20, 30]\nxs[0] = 99\nxs", "[99, 20, 30]", "index assign");
+}
+
+/* COW: my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs => [1, 2] */
+TEST(test_index_assign_cow) {
+    assert_vm_formatted("my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs", "[1, 2]", "COW index assign");
+}
+
+/* Nested indexing: [[1, 2], [3, 4]][1][0] => 3 */
+TEST(test_index_nested) { assert_vm_number("[[1, 2], [3, 4]][1][0]", 3.0, "nested index"); }
+
+/* Index assignment returns the assigned value */
+TEST(test_index_assign_returns_value) {
+    assert_vm_number("my xs = [10, 20, 30]\nxs[1] = 42", 42.0, "index assign returns value");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2922,6 +2968,20 @@ int main(void) {
     RUN_TEST(test_array_numbers_eval);
     RUN_TEST(test_array_expressions_eval);
     RUN_TEST(test_array_nested_eval);
+
+    printf("\nArray indexing:\n");
+    RUN_TEST(test_index_first);
+    RUN_TEST(test_index_last);
+    RUN_TEST(test_index_negative_one);
+    RUN_TEST(test_index_negative_three);
+    RUN_TEST(test_index_oob_positive);
+    RUN_TEST(test_index_oob_negative);
+    RUN_TEST(test_index_non_array);
+    RUN_TEST(test_index_non_integer);
+    RUN_TEST(test_index_assign_eval);
+    RUN_TEST(test_index_assign_cow);
+    RUN_TEST(test_index_nested);
+    RUN_TEST(test_index_assign_returns_value);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
