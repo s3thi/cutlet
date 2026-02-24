@@ -1,0 +1,73 @@
+# Arrays: ordered collections of values
+
+# Array literals
+my xs = [1, 2, 3, 4, 5]
+say(xs)               # [1, 2, 3, 4, 5]
+
+# Empty array
+my empty = []
+say(empty)            # []
+
+# Mixed types
+my mixed = [1, "two", true, nothing]
+say(mixed)            # [1, two, true, nothing]
+
+# Nested arrays
+my grid = [[1, 2], [3, 4]]
+say(grid)             # [[1, 2], [3, 4]]
+
+# Indexing (zero-based)
+say(xs[0])            # 1
+say(xs[4])            # 5
+
+# Negative indices wrap from the end
+say(xs[-1])           # 5
+say(xs[-2])           # 4
+
+# Index assignment (copy-on-write)
+my ys = xs
+ys[0] = 99
+say(ys)               # [99, 2, 3, 4, 5]
+say(xs)               # [1, 2, 3, 4, 5] (unchanged)
+
+# Nested indexing
+say(grid[1][0])       # 3
+
+# Concatenation with ++
+say([1, 2] ++ [3, 4]) # [1, 2, 3, 4]
+
+# Built-in functions: len, push, pop
+say(len(xs))          # 5
+say(len(empty))       # 0
+
+say(push(xs, 6))      # [1, 2, 3, 4, 5, 6]
+say(xs)               # [1, 2, 3, 4, 5] (push returns new array)
+
+say(pop(xs))          # [1, 2, 3, 4]
+say(xs)               # [1, 2, 3, 4, 5] (pop returns new array)
+
+# Equality (structural, recursive)
+say([1, 2, 3] == [1, 2, 3])   # true
+say([1, 2] == [1, 2, 3])      # false
+say([] == [])                  # true
+
+# Truthiness: non-empty is truthy, empty is falsy
+say(not [])           # true
+say(not [1])          # false
+
+# Building arrays in a loop
+my squares = []
+my i = 1
+while i <= 5 do
+  squares = push(squares, i ** 2)
+  i = i + 1
+end
+say(squares)          # [1, 4, 9, 16, 25]
+
+# Multiline array literals
+my colors = [
+  "red",
+  "green",
+  "blue",
+]
+say(colors)           # [red, green, blue]

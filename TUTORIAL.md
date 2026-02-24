@@ -658,7 +658,110 @@ say(outer())            # prints: 100
 # - Pass as arguments to higher-order functions
 
 # ============================================================
-# 12. say() for output
+# 12. Arrays
+# ============================================================
+
+# Arrays are ordered, indexable collections of values.
+# They use value semantics with copy-on-write for efficiency.
+
+# Array literals use square brackets.
+[1, 2, 3]              # => [1, 2, 3]
+[]                      # => [] (empty array)
+[1, "two", true]        # => [1, two, true] (mixed types)
+[[1, 2], [3, 4]]        # => [[1, 2], [3, 4]] (nested)
+
+# Trailing commas are allowed.
+[1, 2, 3,]             # => [1, 2, 3]
+
+# Multiline arrays work — newlines inside brackets are ignored.
+my colors = [
+  "red",
+  "green",
+  "blue",
+]
+colors                  # => [red, green, blue]
+
+# Elements can be any expression.
+[1 + 1, 2 * 3, 4 ** 2] # => [2, 6, 16]
+
+# Indexing is zero-based with square brackets.
+my xs = [10, 20, 30, 40, 50]
+xs[0]                   # => 10
+xs[4]                   # => 50
+
+# Negative indices wrap from the end.
+xs[-1]                  # => 50
+xs[-2]                  # => 40
+
+# Out-of-bounds is a runtime error.
+# xs[5]                # => ERR index out of bounds
+# xs[-6]               # => ERR index out of bounds
+
+# Index assignment.
+xs[0] = 99
+xs                      # => [99, 20, 30, 40, 50]
+
+# Copy-on-write: assigning an array shares the backing store.
+# Mutation triggers a copy, so the original is never changed.
+my ys = xs
+ys[0] = 1
+ys                      # => [1, 20, 30, 40, 50]
+xs                      # => [99, 20, 30, 40, 50] (unchanged)
+
+# Nested indexing chains.
+my grid = [[1, 2], [3, 4]]
+grid[1][0]              # => 3
+
+# Concatenation with ++ (both sides must be arrays).
+[1, 2] ++ [3, 4]       # => [1, 2, 3, 4]
+[] ++ [1]               # => [1]
+
+# ++ still works for strings when neither side is an array.
+"a" ++ "b"              # => ab
+
+# Mixing arrays with non-arrays in ++ is an error.
+# [1] ++ 2             # => ERR cannot concatenate array with number
+
+# len() returns the number of elements (also works on strings).
+len([1, 2, 3])          # => 3
+len([])                 # => 0
+len("hello")            # => 5
+
+# push() returns a new array with an element appended.
+push([1, 2], 3)         # => [1, 2, 3]
+push([], "a")           # => [a]
+
+# pop() returns a new array without the last element.
+pop([1, 2, 3])          # => [1, 2]
+pop([1])                # => []
+# pop([])              # => ERR pop() on empty array
+
+# push() and pop() do NOT mutate — they return new arrays.
+my nums = [1, 2]
+push(nums, 3)
+nums                    # => [1, 2] (unchanged)
+
+# Equality is structural and recursive.
+[1, 2, 3] == [1, 2, 3]     # => true
+[1, 2] == [1, 2, 3]        # => false
+[] == []                    # => true
+[[1]] == [[1]]              # => true
+
+# Truthiness: non-empty arrays are truthy, empty arrays are falsy.
+not []                  # => true
+not [1]                 # => false
+
+# Building an array in a loop.
+my squares = []
+my i = 1
+while i <= 5 do
+  squares = push(squares, i ** 2)
+  i = i + 1
+end
+squares                 # => [1, 4, 9, 16, 25]
+
+# ============================================================
+# 13. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -673,7 +776,7 @@ say(nothing)    # prints: nothing
 say("result: " ++ str(42))   # prints: result: 42
 
 # ============================================================
-# 13. Running Cutlet programs
+# 14. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -694,7 +797,7 @@ say("result: " ++ str(42))   # prints: result: 42
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 14. The REPL
+# 15. The REPL
 # ============================================================
 
 # Start an interactive REPL:
