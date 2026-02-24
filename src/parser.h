@@ -35,8 +35,9 @@ typedef enum {
     AST_INDEX,        /* index read: expr[expr] — left=array, right=index */
     AST_INDEX_ASSIGN, /* index write: expr[expr] = expr — left=array, right=index, children[0]=value
                        */
-    AST_REDUCE,       /* reduction: @op expr — value=op/name, left=operand */
-    AST_VECTORIZE,    /* vectorize: expr @op expr — value=op/name, left=lhs, right=rhs */
+    AST_MAP,       /* map literal: {key: value, ...} — children are alternating key/value pairs */
+    AST_REDUCE,    /* reduction: @op expr — value=op/name, left=operand */
+    AST_VECTORIZE, /* vectorize: expr @op expr — value=op/name, left=lhs, right=rhs */
 } AstNodeType;
 
 typedef struct AstNode {

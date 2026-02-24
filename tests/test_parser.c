@@ -2612,6 +2612,83 @@ TEST(test_vectorize_precedence) {
 }
 
 /* ============================================================
+ * Map literal parsing
+ * ============================================================ */
+
+/* Parse {} => [MAP] */
+TEST(test_map_empty) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("{}", &node, &err), "should parse empty map");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [MAP]", "empty map AST format");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse {a: 1, b: 2} => [MAP [STRING a] [NUMBER 1] [STRING b] [NUMBER 2]] */
+TEST(test_map_bare_keys) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("{a: 1, b: 2}", &node, &err), "should parse bare key map");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [MAP [STRING a] [NUMBER 1] [STRING b] [NUMBER 2]]", "bare key map AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse {[1 + 2]: "three"} => [MAP [BINOP + ...] [STRING three]] */
+TEST(test_map_computed_key) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("{[1 + 2]: \"three\"}", &node, &err), "should parse computed key map");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [MAP [BINOP + [NUMBER 1] [NUMBER 2]] [STRING three]]",
+                  "computed key map AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse {a: 1,} => same as {a: 1} (trailing comma) */
+TEST(test_map_trailing_comma) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("{a: 1,}", &node, &err), "should parse map with trailing comma");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [MAP [STRING a] [NUMBER 1]]", "trailing comma map AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* Parse {"key": "value"} => [MAP [STRING key] [STRING value]] */
+TEST(test_map_expression_key) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("{\"key\": \"value\"}", &node, &err), "should parse string expression key");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [MAP [STRING key] [STRING value]]", "expression key map AST");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
+/* parser_is_complete: unclosed map is incomplete */
+TEST(test_is_incomplete_map_unclosed) {
+    ASSERT(!parser_is_complete("{a: 1"), "unclosed map should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: closed map is complete */
+TEST(test_is_complete_map) {
+    ASSERT(parser_is_complete("{a: 1, b: 2}"), "closed map should be complete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3023,6 +3100,17 @@ int main(void) {
     RUN_TEST(test_vectorize_scalar_broadcast);
     RUN_TEST(test_vectorize_custom_func);
     RUN_TEST(test_vectorize_precedence);
+
+    printf("\nMap literal parsing:\n");
+    RUN_TEST(test_map_empty);
+    RUN_TEST(test_map_bare_keys);
+    RUN_TEST(test_map_computed_key);
+    RUN_TEST(test_map_trailing_comma);
+    RUN_TEST(test_map_expression_key);
+
+    printf("\nparser_is_complete() - map literals:\n");
+    RUN_TEST(test_is_incomplete_map_unclosed);
+    RUN_TEST(test_is_complete_map);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

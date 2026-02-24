@@ -2866,6 +2866,39 @@ TEST(test_vectorize_custom_max) {
 }
 
 /* ============================================================
+ * Map literals
+ * ============================================================ */
+
+/* Eval {} => {} */
+TEST(test_map_empty_eval) { assert_vm_formatted("{}", "{}", "empty map"); }
+
+/* Eval {a: 1, b: 2} => {a: 1, b: 2} */
+TEST(test_map_bare_keys_eval) {
+    assert_vm_formatted("{a: 1, b: 2}", "{a: 1, b: 2}", "bare key map");
+}
+
+/* Eval {[1 + 2]: "three"} => {3: three} */
+TEST(test_map_computed_key_eval) {
+    assert_vm_formatted("{[1 + 2]: \"three\"}", "{3: three}", "computed key map");
+}
+
+/* Eval {[true]: "yes", [false]: "no"} => {true: yes, false: no} */
+TEST(test_map_bool_keys_eval) {
+    assert_vm_formatted("{[true]: \"yes\", [false]: \"no\"}", "{true: yes, false: no}",
+                        "bool key map");
+}
+
+/* Eval {a: 1, a: 2} => {a: 2} (last value wins for duplicate keys) */
+TEST(test_map_duplicate_key_eval) {
+    assert_vm_formatted("{a: 1, a: 2}", "{a: 2}", "duplicate key last wins");
+}
+
+/* Error: key is a function => runtime error */
+TEST(test_map_function_key_error) {
+    assert_vm_error("{[fn(x) is x end]: 1}", "function key error");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3409,6 +3442,15 @@ int main(void) {
     RUN_TEST(test_vectorize_custom_length_mismatch);
     RUN_TEST(test_vectorize_custom_both_scalars);
     RUN_TEST(test_vectorize_custom_max);
+
+    /* ---- Map literals ---- */
+    printf("\nMap literals:\n");
+    RUN_TEST(test_map_empty_eval);
+    RUN_TEST(test_map_bare_keys_eval);
+    RUN_TEST(test_map_computed_key_eval);
+    RUN_TEST(test_map_bool_keys_eval);
+    RUN_TEST(test_map_duplicate_key_eval);
+    RUN_TEST(test_map_function_key_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

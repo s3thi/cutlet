@@ -512,7 +512,8 @@ static AstNode *parse_atom(Parser *p) {
         bool has_value = false;
         if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
             (next.type == TOK_OPERATOR && next.value_len == 1 &&
-             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '['))) {
+             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '[' ||
+              next.value[0] == '{'))) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
             /* Identifiers that start expressions: non-keyword idents,
@@ -586,7 +587,8 @@ static AstNode *parse_atom(Parser *p) {
         bool has_value = false;
         if (next.type == TOK_NUMBER || next.type == TOK_STRING ||
             (next.type == TOK_OPERATOR && next.value_len == 1 &&
-             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '['))) {
+             (next.value[0] == '(' || next.value[0] == '-' || next.value[0] == '[' ||
+              next.value[0] == '{'))) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
             has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
@@ -888,6 +890,196 @@ static AstNode *parse_atom(Parser *p) {
             node->line = t.line;
             node->children = children;
             node->child_count = elem_count;
+            node->params = NULL;
+            node->param_count = 0;
+            return node;
+        }
+
+        /* Open brace — map literal: {key: value, ...} */
+        if (t.value_len == 1 && t.value[0] == '{') {
+            advance(p);
+
+            /* Collect key-value pairs into a PtrArray (alternating key, value). */
+            PtrArray entries;
+            if (!ptr_array_init(&entries, 8)) {
+                parser_error(p, t.line, t.col, "memory allocation failed");
+                return NULL;
+            }
+
+            /* Skip newlines after opening '{' — allows multiline maps. */
+            skip_newlines(p);
+
+            /* Check for empty map: immediate '}' */
+            if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                  p->current.value[0] == '}')) {
+
+                /* Parse first key-value pair */
+                for (;;) {
+                    AstNode *key_node = NULL;
+
+                    /* Bare identifier key: IDENT followed by ':' becomes a string key.
+                     * We must copy the identifier text before advance() since
+                     * Token.value is owned by the tokenizer and invalidated. */
+                    if (p->current.type == TOK_IDENT && !is_reserved_keyword(&p->current)) {
+                        /* Save the identifier's text and metadata before advancing. */
+                        char *ident_text = malloc(p->current.value_len + 1);
+                        if (!ident_text) {
+                            free_expr_array(&entries);
+                            parser_error(p, p->current.line, p->current.col,
+                                         "memory allocation failed");
+                            return NULL;
+                        }
+                        memcpy(ident_text, p->current.value, p->current.value_len);
+                        ident_text[p->current.value_len] = '\0';
+                        size_t ident_len = p->current.value_len;
+                        size_t ident_line = p->current.line;
+                        size_t ident_col = p->current.col;
+
+                        advance(p);
+                        if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                            p->current.value[0] == ':') {
+                            /* Bare key — treat identifier as string literal. */
+                            key_node = make_leaf(AST_STRING, ident_text, ident_len, ident_line);
+                            free(ident_text);
+                            if (!key_node) {
+                                free_expr_array(&entries);
+                                parser_error(p, ident_line, ident_col, "memory allocation failed");
+                                return NULL;
+                            }
+                        } else {
+                            /* Not a bare key — this is actually an expression starting
+                             * with an identifier. Since we already consumed the ident,
+                             * build an AST_IDENT node and let it be used as the key expr.
+                             * Then expect ':' (which will likely error). */
+                            key_node = make_leaf(AST_IDENT, ident_text, ident_len, ident_line);
+                            free(ident_text);
+                            if (!key_node) {
+                                free_expr_array(&entries);
+                                parser_error(p, ident_line, ident_col, "memory allocation failed");
+                                return NULL;
+                            }
+                            /* Fall through to expect ':' below */
+                        }
+                    } else if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                               p->current.value[0] == '[') {
+                        /* Computed key: [expr] */
+                        advance(p); /* consume '[' */
+                        key_node = parse_assignment(p);
+                        if (!key_node) {
+                            free_expr_array(&entries);
+                            return NULL;
+                        }
+                        /* Expect closing ']' */
+                        if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                            p->current.value[0] != ']') {
+                            ast_free(key_node);
+                            free_expr_array(&entries);
+                            parser_error(p, p->current.line, p->current.col, "expected ']'");
+                            return NULL;
+                        }
+                        advance(p); /* consume ']' */
+                    } else {
+                        /* Expression key: any expression followed by ':' */
+                        key_node = parse_assignment(p);
+                        if (!key_node) {
+                            free_expr_array(&entries);
+                            return NULL;
+                        }
+                    }
+
+                    /* Expect ':' separator between key and value */
+                    if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                        p->current.value[0] != ':') {
+                        ast_free(key_node);
+                        free_expr_array(&entries);
+                        parser_error(p, p->current.line, p->current.col, "expected ':'");
+                        return NULL;
+                    }
+                    advance(p); /* consume ':' */
+
+                    /* Parse value expression */
+                    AstNode *val_node = parse_assignment(p);
+                    if (!val_node) {
+                        ast_free(key_node);
+                        free_expr_array(&entries);
+                        return NULL;
+                    }
+
+                    /* Add key and value to entries array */
+                    if (!ptr_array_push(&entries, key_node)) {
+                        ast_free(key_node);
+                        ast_free(val_node);
+                        free_expr_array(&entries);
+                        parser_error(p, t.line, t.col, "memory allocation failed");
+                        return NULL;
+                    }
+                    if (!ptr_array_push(&entries, val_node)) {
+                        ast_free(val_node);
+                        free_expr_array(&entries);
+                        parser_error(p, t.line, t.col, "memory allocation failed");
+                        return NULL;
+                    }
+
+                    /* Check for comma separator */
+                    if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                        p->current.value[0] == ',') {
+                        advance(p); /* consume ',' */
+
+                        /* Skip newlines after comma — allows multiline maps. */
+                        skip_newlines(p);
+
+                        /* Allow trailing comma: if next token is '}', stop */
+                        if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                            p->current.value[0] == '}') {
+                            break;
+                        }
+
+                        continue;
+                    }
+
+                    /* No comma — must be end of map */
+                    break;
+                }
+            }
+
+            /* Skip newlines before closing '}' — allows multiline maps. */
+            skip_newlines(p);
+
+            /* Expect closing '}' */
+            if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                p->current.value[0] != '}') {
+                parser_error(p, p->current.line, p->current.col, "expected '}'");
+                free_expr_array(&entries);
+                return NULL;
+            }
+            advance(p); /* consume '}' */
+
+            /* Build AST_MAP node using children/child_count. */
+            size_t entry_count = entries.count;
+            AstNode **children = NULL;
+            if (entry_count > 0) {
+                children = (AstNode **)ptr_array_release(&entries);
+            } else {
+                ptr_array_destroy(&entries);
+            }
+
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                for (size_t i = 0; i < entry_count; i++)
+                    ast_free(children[i]);
+                if (children)
+                    ptr_array_free_raw((void *)children);
+                parser_error(p, t.line, t.col, "memory allocation failed");
+                return NULL;
+            }
+            node->type = AST_MAP;
+            node->value = NULL;
+            node->left = NULL;
+            node->right = NULL;
+            node->grouped = false;
+            node->line = t.line;
+            node->children = children;
+            node->child_count = entry_count;
             node->params = NULL;
             node->param_count = 0;
             return node;
@@ -2301,6 +2493,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "FN";
     case AST_ARRAY:
         return "ARRAY";
+    case AST_MAP:
+        return "MAP";
     case AST_INDEX:
         return "INDEX";
     case AST_INDEX_ASSIGN:
@@ -2767,6 +2961,56 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    /* AST_MAP: [MAP key1 val1 key2 val2 ...] or [MAP] for empty.
+     * children are alternating key-value expression nodes. */
+    if (node->type == AST_MAP) {
+        if (node->child_count == 0) {
+            size_t len = 1 + strlen(type_str) + 1 + 1;
+            char *buf = malloc(len);
+            if (!buf)
+                return NULL;
+            snprintf(buf, len, "[%s]", type_str);
+            return buf;
+        }
+
+        /* Format all children and calculate total length. */
+        PtrArray child_strs;
+        if (!ptr_array_init(&child_strs, node->child_count))
+            return NULL;
+
+        size_t total_len = 1 + strlen(type_str); /* "[MAP" */
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < child_strs.count; j++)
+                    free(child_strs.items[j]);
+                ptr_array_destroy(&child_strs);
+                return NULL;
+            }
+            ptr_array_push(&child_strs, str);
+            total_len += 1 + strlen(str); /* " child" */
+        }
+        total_len += 1 + 1; /* "]" + NUL */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < child_strs.count; i++)
+                free(child_strs.items[i]);
+            ptr_array_destroy(&child_strs);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s", type_str);
+        for (size_t i = 0; i < child_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)child_strs.items[i]);
+            free(child_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&child_strs);
+        return buf;
+    }
+
     /* AST_REDUCE: [REDUCE op [operand]] — same shape as UNARY */
     if (node->type == AST_REDUCE) {
         char *operand_str = ast_format_node(node->left);
@@ -2931,6 +3175,16 @@ bool parser_is_complete(const char *input) {
 
     if (strstr(msg, "expected ']'") != NULL) {
         /* Unclosed array bracket - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected '}'") != NULL) {
+        /* Unclosed map brace - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected ':'") != NULL) {
+        /* Map key without colon - incomplete */
         return false;
     }
 

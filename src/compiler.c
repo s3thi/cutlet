@@ -862,6 +862,29 @@ static void compile_array(Compiler *c, const AstNode *node) {
 }
 
 /*
+ * Compile a map literal: compile each key-value pair (pushes 2N values),
+ * then emit OP_MAP [N] to build the map from N key-value pairs.
+ */
+static void compile_map(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* child_count is 2 * number_of_pairs (alternating key, value). */
+    size_t pair_count = node->child_count / 2;
+    if (pair_count > 255) {
+        compiler_error(c, "map literal cannot have more than 255 pairs");
+        return;
+    }
+
+    /* Compile each key-value pair — pushes key then value for each pair. */
+    for (size_t i = 0; i < node->child_count; i++) {
+        compile_node(c, node->children[i]);
+    }
+
+    /* Emit OP_MAP with pair count (not total stack values). */
+    emit_bytes(c, OP_MAP, (uint8_t)pair_count, line);
+}
+
+/*
  * Compile an index read: array[index]
  * Pushes the array expression, then the index expression, then emits OP_INDEX_GET.
  */
@@ -1281,6 +1304,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_ARRAY:
         compile_array(c, node);
+        break;
+    case AST_MAP:
+        compile_map(c, node);
         break;
     case AST_INDEX:
         compile_index(c, node);

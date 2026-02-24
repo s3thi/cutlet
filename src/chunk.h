@@ -83,8 +83,9 @@ typedef enum {
     OP_SET_UPVALUE,   /* Write captured variable. Operand: 1-byte upvalue index. Peek TOS. */
     OP_CLOSE_UPVALUE, /* Close the topmost open upvalue at TOS slot. Pop 1. */
 
-    /* Array operations */
-    OP_ARRAY,     /* Build array from top N stack values. Operand: 1-byte count */
+    /* Array and map operations */
+    OP_ARRAY, /* Build array from top N stack values. Operand: 1-byte count */
+    OP_MAP,   /* Build map from top 2N stack values (key-value pairs). Operand: 1-byte pair count */
     OP_INDEX_GET, /* Read array[index]. Pop 2 (array, index), push 1. */
     OP_INDEX_SET, /* Write array[index] = value. Pop 3 (array, index, value), push 1 (value). */
 

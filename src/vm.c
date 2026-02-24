@@ -1408,6 +1408,59 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_MAP: {
+            /* Build a map from the top 2*count values on the stack.
+             * Stack layout (bottom to top): key0, val0, key1, val1, ...
+             * The first key was pushed first (deepest on stack). */
+            uint8_t pair_count = read_byte(frame);
+            int total = pair_count * 2;
+
+            /* Pop all key-value pairs into a temporary buffer. */
+            Value temp[512]; /* max 255 pairs = 510 values */
+            for (int i = total - 1; i >= 0; i--) {
+                if (!vm_pop(vm, &temp[i])) {
+                    for (int j = i + 1; j < total; j++)
+                        value_free(&temp[j]);
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+            }
+
+            ObjMap *map = obj_map_new();
+            if (!map) {
+                for (int i = 0; i < total; i++)
+                    value_free(&temp[i]);
+                return vm_runtime_error(vm, "out of memory");
+            }
+
+            /* Insert pairs in order. Validate key types. */
+            for (int i = 0; i < total; i += 2) {
+                Value *key = &temp[i];
+                Value *val = &temp[i + 1];
+
+                /* Only strings, numbers, booleans, and nothing are valid keys. */
+                if (key->type != VAL_STRING && key->type != VAL_NUMBER && key->type != VAL_BOOL &&
+                    key->type != VAL_NOTHING) {
+                    const char *kt = value_type_name(key->type);
+                    /* Free remaining temp values and the partially built map. */
+                    for (int j = 0; j < total; j++)
+                        value_free(&temp[j]);
+                    Value map_val = make_map(map);
+                    value_free(&map_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+
+                obj_map_set(map, key, val);
+                /* obj_map_set clones key and value, so free the originals. */
+                value_free(key);
+                value_free(val);
+            }
+
+            if (!vm_push(vm, make_map(map))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_INDEX_GET: {
             /* Read array[index]: pop index, pop array, push element.
              * Supports two index types:
