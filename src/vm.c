@@ -189,6 +189,9 @@ static bool values_compare(const Value *a, const Value *b, int *result, const ch
     return false;
 }
 
+/* Forward declaration — defined after register_builtins(). */
+static const char *value_type_name(ValueType type);
+
 /* ---- Native function implementations ---- */
 
 /*
@@ -235,6 +238,82 @@ static Value native_str(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
+ * len(x) — return the length of an array or string.
+ * Arrays: number of elements. Strings: number of bytes.
+ * Other types produce a runtime error.
+ */
+static Value native_len(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
+    (void)ctx;
+
+    if (args[0].type == VAL_ARRAY) {
+        return make_number((double)args[0].array->count);
+    }
+    if (args[0].type == VAL_STRING) {
+        return make_number((double)strlen(args[0].string ? args[0].string : ""));
+    }
+    return make_error("len() requires an array or string, got %s", value_type_name(args[0].type));
+}
+
+/*
+ * push(arr, val) — return a new array with val appended.
+ * Does not mutate the original array (value semantics).
+ */
+static Value native_push(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
+    (void)ctx;
+
+    if (args[0].type != VAL_ARRAY) {
+        return make_error("push() requires an array as first argument, got %s",
+                          value_type_name(args[0].type));
+    }
+
+    /* Deep clone the input array so we don't mutate the original. */
+    ObjArray *new_arr = obj_array_clone_deep(args[0].array);
+    if (!new_arr)
+        return make_error("memory allocation failed");
+
+    /* Clone the value to append (new_arr takes ownership of the clone). */
+    Value elem;
+    value_clone(&elem, &args[1]);
+    obj_array_push(new_arr, elem);
+
+    return make_array(new_arr);
+}
+
+/*
+ * pop(arr) — return a new array without the last element.
+ * Does not mutate the original array (value semantics).
+ * Errors on empty arrays.
+ */
+static Value native_pop(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
+    (void)ctx;
+
+    if (args[0].type != VAL_ARRAY) {
+        return make_error("pop() requires an array, got %s", value_type_name(args[0].type));
+    }
+
+    ObjArray *src = args[0].array;
+    if (src->count == 0) {
+        return make_error("pop() on empty array");
+    }
+
+    /* Build a new array with all elements except the last. */
+    ObjArray *new_arr = obj_array_new();
+    if (!new_arr)
+        return make_error("memory allocation failed");
+
+    for (size_t i = 0; i < src->count - 1; i++) {
+        Value elem;
+        value_clone(&elem, &src->data[i]);
+        obj_array_push(new_arr, elem);
+    }
+
+    return make_array(new_arr);
+}
+
+/*
  * Register built-in functions as native VAL_FUNCTION values in the
  * global variable environment. Called at the start of each vm_execute()
  * to ensure builtins are always available (even if a previous eval
@@ -248,6 +327,18 @@ static void register_builtins(void) {
     Value str_fn = make_native("str", 1, native_str);
     runtime_var_define("str", &str_fn);
     value_free(&str_fn);
+
+    Value len_fn = make_native("len", 1, native_len);
+    runtime_var_define("len", &len_fn);
+    value_free(&len_fn);
+
+    Value push_fn = make_native("push", 2, native_push);
+    runtime_var_define("push", &push_fn);
+    value_free(&push_fn);
+
+    Value pop_fn = make_native("pop", 1, native_pop);
+    runtime_var_define("pop", &pop_fn);
+    value_free(&pop_fn);
 }
 
 /* ---- Type name helper ---- */

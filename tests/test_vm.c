@@ -2568,6 +2568,67 @@ TEST(test_concat_strings_still_works) {
 }
 
 /* ============================================================
+ * Built-in array functions: len, push, pop
+ * ============================================================ */
+
+/* len([1, 2, 3]) => 3 */
+TEST(test_len_array) { assert_vm_number("len([1, 2, 3])", 3.0, "len array"); }
+
+/* len([]) => 0 */
+TEST(test_len_empty) { assert_vm_number("len([])", 0.0, "len empty"); }
+
+/* len("hello") => 5 */
+TEST(test_len_string) { assert_vm_number("len(\"hello\")", 5.0, "len string"); }
+
+/* len("") => 0 */
+TEST(test_len_empty_string) { assert_vm_number("len(\"\")", 0.0, "len empty string"); }
+
+/* len(42) => error */
+TEST(test_len_number_error) { assert_vm_error("len(42)", "len number error"); }
+
+/* len(true) => error */
+TEST(test_len_bool_error) { assert_vm_error("len(true)", "len bool error"); }
+
+/* push([1, 2], 3) => [1, 2, 3] */
+TEST(test_push_basic) { assert_vm_formatted("push([1, 2], 3)", "[1, 2, 3]", "push basic"); }
+
+/* push([], "a") => ["a"] */
+TEST(test_push_empty) { assert_vm_formatted("push([], \"a\")", "[a]", "push onto empty"); }
+
+/* push does not mutate the original */
+TEST(test_push_no_mutate) {
+    assert_vm_formatted("my xs = [1, 2]\npush(xs, 3)\nxs", "[1, 2]", "push no mutate");
+}
+
+/* push returns new array with element appended */
+TEST(test_push_returns_new) {
+    assert_vm_formatted("push([10, 20], 30)", "[10, 20, 30]", "push returns new");
+}
+
+/* push(42, 1) => error (first arg must be array) */
+TEST(test_push_non_array_error) { assert_vm_error("push(42, 1)", "push non-array"); }
+
+/* pop([1, 2, 3]) => [1, 2] */
+TEST(test_pop_basic) { assert_vm_formatted("pop([1, 2, 3])", "[1, 2]", "pop basic"); }
+
+/* pop([1]) => [] */
+TEST(test_pop_single) { assert_vm_formatted("pop([1])", "[]", "pop single"); }
+
+/* pop([]) => error */
+TEST(test_pop_empty_error) { assert_vm_error("pop([])", "pop empty"); }
+
+/* pop does not mutate the original */
+TEST(test_pop_no_mutate) {
+    assert_vm_formatted("my xs = [1, 2, 3]\npop(xs)\nxs", "[1, 2, 3]", "pop no mutate");
+}
+
+/* pop(42) => error (must be array) */
+TEST(test_pop_non_array_error) { assert_vm_error("pop(42)", "pop non-array"); }
+
+/* Composable: len(push([1, 2], 3)) => 3 */
+TEST(test_len_push_compose) { assert_vm_number("len(push([1, 2], 3))", 3.0, "len(push(...))"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3028,6 +3089,25 @@ int main(void) {
     RUN_TEST(test_concat_array_num_error);
     RUN_TEST(test_concat_num_array_error);
     RUN_TEST(test_concat_strings_still_works);
+
+    printf("\nBuilt-in array functions (len, push, pop):\n");
+    RUN_TEST(test_len_array);
+    RUN_TEST(test_len_empty);
+    RUN_TEST(test_len_string);
+    RUN_TEST(test_len_empty_string);
+    RUN_TEST(test_len_number_error);
+    RUN_TEST(test_len_bool_error);
+    RUN_TEST(test_push_basic);
+    RUN_TEST(test_push_empty);
+    RUN_TEST(test_push_no_mutate);
+    RUN_TEST(test_push_returns_new);
+    RUN_TEST(test_push_non_array_error);
+    RUN_TEST(test_pop_basic);
+    RUN_TEST(test_pop_single);
+    RUN_TEST(test_pop_empty_error);
+    RUN_TEST(test_pop_no_mutate);
+    RUN_TEST(test_pop_non_array_error);
+    RUN_TEST(test_len_push_compose);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
