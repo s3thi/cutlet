@@ -254,9 +254,23 @@ bool value_equal(const Value *a, const Value *b) {
         }
         return true;
     }
-    case VAL_MAP:
-        /* Map equality is added in Step 7. For now, identity-based. */
-        return a->map == b->map;
+    case VAL_MAP: {
+        /* Structural equality: same number of entries, and for every
+         * key in map A, map B has the same key with an equal value.
+         * Key order does not matter. */
+        const ObjMap *ma = a->map;
+        const ObjMap *mb = b->map;
+        if (ma == mb)
+            return true; /* Same backing store — trivially equal. */
+        if (ma->count != mb->count)
+            return false;
+        for (size_t i = 0; i < ma->count; i++) {
+            const Value *bval = obj_map_get(mb, &ma->entries[i].key);
+            if (!bval || !value_equal(&ma->entries[i].value, bval))
+                return false;
+        }
+        return true;
+    }
     default:
         return false;
     }

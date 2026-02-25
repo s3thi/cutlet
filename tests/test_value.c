@@ -557,6 +557,176 @@ TEST(test_value_equal_different_types) {
     PASS();
 }
 
+/* ---- Map structural equality via value_equal ---- */
+
+TEST(test_value_equal_maps_same_keys) {
+    /* {a: 1, b: 2} == {a: 1, b: 2} → true (same keys, same order). */
+    ObjMap *m1 = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    Value kb = make_string(strdup("b"));
+    Value v2 = make_number(2);
+    obj_map_set(m1, &ka, &v1);
+    obj_map_set(m1, &kb, &v2);
+    value_free(&ka);
+    value_free(&v1);
+    value_free(&kb);
+    value_free(&v2);
+
+    ObjMap *m2 = obj_map_new();
+    ka = make_string(strdup("a"));
+    v1 = make_number(1);
+    kb = make_string(strdup("b"));
+    v2 = make_number(2);
+    obj_map_set(m2, &ka, &v1);
+    obj_map_set(m2, &kb, &v2);
+    value_free(&ka);
+    value_free(&v1);
+    value_free(&kb);
+    value_free(&v2);
+
+    Value a = make_map(m1);
+    Value b = make_map(m2);
+    ASSERT(value_equal(&a, &b) == true, "{a:1,b:2} == {a:1,b:2}");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_maps_different_order) {
+    /* {a: 1, b: 2} == {b: 2, a: 1} → true (order doesn't matter). */
+    ObjMap *m1 = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    Value kb = make_string(strdup("b"));
+    Value v2 = make_number(2);
+    obj_map_set(m1, &ka, &v1);
+    obj_map_set(m1, &kb, &v2);
+    value_free(&ka);
+    value_free(&v1);
+    value_free(&kb);
+    value_free(&v2);
+
+    ObjMap *m2 = obj_map_new();
+    kb = make_string(strdup("b"));
+    v2 = make_number(2);
+    ka = make_string(strdup("a"));
+    v1 = make_number(1);
+    obj_map_set(m2, &kb, &v2);
+    obj_map_set(m2, &ka, &v1);
+    value_free(&ka);
+    value_free(&v1);
+    value_free(&kb);
+    value_free(&v2);
+
+    Value a = make_map(m1);
+    Value b = make_map(m2);
+    ASSERT(value_equal(&a, &b) == true, "{a:1,b:2} == {b:2,a:1}");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_maps_different_values) {
+    /* {a: 1} == {a: 2} → false (same key, different value). */
+    ObjMap *m1 = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    obj_map_set(m1, &ka, &v1);
+    value_free(&ka);
+    value_free(&v1);
+
+    ObjMap *m2 = obj_map_new();
+    ka = make_string(strdup("a"));
+    Value v2 = make_number(2);
+    obj_map_set(m2, &ka, &v2);
+    value_free(&ka);
+    value_free(&v2);
+
+    Value a = make_map(m1);
+    Value b = make_map(m2);
+    ASSERT(value_equal(&a, &b) == false, "{a:1} != {a:2}");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_maps_different_count) {
+    /* {a: 1} == {a: 1, b: 2} → false (different number of entries). */
+    ObjMap *m1 = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    obj_map_set(m1, &ka, &v1);
+    value_free(&ka);
+    value_free(&v1);
+
+    ObjMap *m2 = obj_map_new();
+    ka = make_string(strdup("a"));
+    v1 = make_number(1);
+    Value kb = make_string(strdup("b"));
+    Value v2 = make_number(2);
+    obj_map_set(m2, &ka, &v1);
+    obj_map_set(m2, &kb, &v2);
+    value_free(&ka);
+    value_free(&v1);
+    value_free(&kb);
+    value_free(&v2);
+
+    Value a = make_map(m1);
+    Value b = make_map(m2);
+    ASSERT(value_equal(&a, &b) == false, "{a:1} != {a:1,b:2}");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_maps_empty) {
+    /* {} == {} → true. */
+    ObjMap *m1 = obj_map_new();
+    ObjMap *m2 = obj_map_new();
+    Value a = make_map(m1);
+    Value b = make_map(m2);
+    ASSERT(value_equal(&a, &b) == true, "{} == {}");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_maps_same_backing) {
+    /* Same ObjMap (refcount shared) → trivially true. */
+    ObjMap *m = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    obj_map_set(m, &ka, &v1);
+    value_free(&ka);
+    value_free(&v1);
+
+    Value a = make_map(m);
+    Value b;
+    value_clone(&b, &a);
+    ASSERT(value_equal(&a, &b) == true, "same backing store");
+    value_free(&a);
+    value_free(&b);
+    PASS();
+}
+
+TEST(test_value_equal_map_vs_nonmap) {
+    /* {a: 1} == "hello" → false (different types). */
+    ObjMap *m = obj_map_new();
+    Value ka = make_string(strdup("a"));
+    Value v1 = make_number(1);
+    obj_map_set(m, &ka, &v1);
+    value_free(&ka);
+    value_free(&v1);
+
+    Value a = make_map(m);
+    Value s = make_string(strdup("hello"));
+    ASSERT(value_equal(&a, &s) == false, "map != string");
+    value_free(&a);
+    value_free(&s);
+    PASS();
+}
+
 /* ============================================================
  * Mixed-type key map formatting
  * ============================================================ */
@@ -681,6 +851,15 @@ int main(void) {
     RUN_TEST(test_value_equal_bools);
     RUN_TEST(test_value_equal_nothing);
     RUN_TEST(test_value_equal_different_types);
+
+    printf("\nMap structural equality (value_equal):\n");
+    RUN_TEST(test_value_equal_maps_same_keys);
+    RUN_TEST(test_value_equal_maps_different_order);
+    RUN_TEST(test_value_equal_maps_different_values);
+    RUN_TEST(test_value_equal_maps_different_count);
+    RUN_TEST(test_value_equal_maps_empty);
+    RUN_TEST(test_value_equal_maps_same_backing);
+    RUN_TEST(test_value_equal_map_vs_nonmap);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

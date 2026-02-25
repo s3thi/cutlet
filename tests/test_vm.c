@@ -3033,6 +3033,32 @@ TEST(test_map_len_basic) { assert_vm_number("len({a: 1, b: 2})", 2, "len() map b
 
 TEST(test_map_len_empty) { assert_vm_number("len({})", 0, "len() empty map"); }
 
+/* ---- Map equality (Step 7) ---- */
+
+TEST(test_map_eq_same_order) {
+    assert_vm_bool("{a: 1, b: 2} == {a: 1, b: 2}", true, "map == same order");
+}
+
+TEST(test_map_eq_different_order) {
+    assert_vm_bool("{a: 1, b: 2} == {b: 2, a: 1}", true, "map == different order");
+}
+
+TEST(test_map_eq_different_values) {
+    assert_vm_bool("{a: 1} == {a: 2}", false, "map != different value");
+}
+
+TEST(test_map_eq_different_count) {
+    assert_vm_bool("{a: 1} == {a: 1, b: 2}", false, "map != different count");
+}
+
+TEST(test_map_eq_different_type) { assert_vm_bool("{a: 1} == [1]", false, "map != array"); }
+
+TEST(test_map_eq_empty) { assert_vm_bool("{} == {}", true, "empty maps equal"); }
+
+TEST(test_map_neq_true) { assert_vm_bool("{a: 1} != {a: 2}", true, "map != true"); }
+
+TEST(test_map_neq_false) { assert_vm_bool("{a: 1} != {a: 1}", false, "map != false"); }
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -3631,6 +3657,16 @@ int main(void) {
     RUN_TEST(test_map_has_key_non_map_error);
     RUN_TEST(test_map_len_basic);
     RUN_TEST(test_map_len_empty);
+
+    printf("\nMap equality:\n");
+    RUN_TEST(test_map_eq_same_order);
+    RUN_TEST(test_map_eq_different_order);
+    RUN_TEST(test_map_eq_different_values);
+    RUN_TEST(test_map_eq_different_count);
+    RUN_TEST(test_map_eq_different_type);
+    RUN_TEST(test_map_eq_empty);
+    RUN_TEST(test_map_neq_true);
+    RUN_TEST(test_map_neq_false);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
