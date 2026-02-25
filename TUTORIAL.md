@@ -1002,6 +1002,43 @@ data[data @> 3]                      # => [4, 5, 6, 7, 8]
 # [1, 2] @+ {a: 1}       # => ERR cannot vectorize array with map
 # Use values() or keys() to convert first.
 
+# --- @: (zip arrays into a map) ---
+
+# @: takes two arrays — keys on the left, values on the right — and
+# produces a map. It's the idiomatic way to construct a map from arrays.
+["a", "b", "c"] @: [1, 2, 3]        # => {a: 1, b: 2, c: 3}
+
+# Works with any valid key type (strings, numbers, booleans, nothing).
+[1, 2] @: ["one", "two"]            # => {1: one, 2: two}
+[true, false] @: ["yes", "no"]      # => {true: yes, false: no}
+
+# Empty arrays produce an empty map.
+[] @: []                              # => {}
+
+# Duplicate keys: last occurrence wins (same as map literal behavior).
+["a", "b", "a"] @: [1, 2, 3]        # => {a: 3, b: 2}
+
+# Compose with other @op operations.
+my names = ["alice", "bob"]
+my scores = [85, 92]
+names @: (scores @* 1.1)             # => {alice: 93.5, bob: 101.2}
+
+# Map inversion using keys() and values().
+my m = {x: 1, y: 2}
+values(m) @: keys(m)                 # => {1: x, 2: y}
+
+# Round-trip: decompose a map and zip it back.
+my m = {a: 1, b: 2}
+keys(m) @: values(m)                 # => {a: 1, b: 2}
+
+# Mismatched array lengths are a runtime error.
+# ["a"] @: [1, 2]                   # => ERR array length mismatch in @:
+# Non-array operands are a runtime error.
+# "a" @: [1]                        # => ERR @: requires two arrays
+# Invalid key types (e.g. functions) are a runtime error.
+# @: cannot be used as a prefix (reduction) operator.
+# @: [1, 2, 3]                      # => ERR ':' cannot be used as a reduction
+
 # --- Composability ---
 
 # Since keys(), values() return arrays and @ works on both arrays

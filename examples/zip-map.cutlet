@@ -1,0 +1,29 @@
+# Zip arrays into a map with @:
+
+# Basic: keys on the left, values on the right
+say(["a", "b", "c"] @: [1, 2, 3])
+
+# Number keys
+say([1, 2] @: ["one", "two"])
+
+# Boolean keys
+say([true, false] @: ["yes", "no"])
+
+# Empty arrays produce an empty map
+say([] @: [])
+
+# Duplicate keys: last occurrence wins
+say(["a", "b", "a"] @: [1, 2, 3])
+
+# Compose with @*: scale values before zipping
+my names = ["alice", "bob"]
+my scores = [85, 92]
+say(names @: (scores @* 2))
+
+# Map inversion via values() and keys()
+my m = {x: 1, y: 2}
+say(values(m) @: keys(m))
+
+# Round-trip: decompose and reassemble
+my m2 = {a: 10, b: 20}
+say(keys(m2) @: values(m2))
