@@ -1198,6 +1198,68 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Maps (integration)
+# ============================================================
+echo
+echo "Maps (integration):"
+
+# Map creation, indexing, and merge via cutlet run
+test_run_file "map create and index" 'my m = {name: "alice", age: 30}
+say(m["name"])
+say(m["age"])
+say(m["missing"])' "alice
+30
+nothing"
+
+# Map merge via cutlet run
+test_run_file "map merge" 'my m = {a: 1, b: 2} ++ {b: 3, c: 4}
+say(m)' "{a: 1, b: 3, c: 4}"
+
+# Map builtins via cutlet run
+test_run_file "map builtins" 'my m = {x: 10, y: 20}
+say(keys(m))
+say(values(m))
+say(has_key(m, "x"))
+say(len(m))' "[x, y]
+[10, 20]
+true
+2"
+
+# Map equality via cutlet run
+test_run_file "map equality" 'say({a: 1, b: 2} == {b: 2, a: 1})
+say({a: 1} == {a: 1, b: 2})
+say({} == {})
+say({a: 1} != {a: 2})' "true
+false
+true
+true"
+
+# Multiline map literal via REPL pipe (continuation)
+test_local_repl "repl multiline map" "$(printf '{a: 1,\nb: 2}')" "{a: 1, b: 2}"
+
+# --bytecode shows OP_MAP for map literal
+bc_map_result=$(printf '{a: 1}' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_map_result" | grep -q "OP_MAP"; then
+    echo "  PASS: --bytecode shows OP_MAP"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_MAP"
+    echo "    Got: $bc_map_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --ast shows MAP node
+ast_map_result=$(printf '{a: 1}' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_map_result" | grep -q "MAP"; then
+    echo "  PASS: --ast shows MAP node"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows MAP node"
+    echo "    Got: $ast_map_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

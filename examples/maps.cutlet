@@ -1,0 +1,76 @@
+# Maps: key-value collections
+
+# Map literals with bare identifier keys (treated as strings)
+my person = {name: "alice", age: 30, role: "admin"}
+say(person)               # {name: alice, age: 30, role: admin}
+
+# Empty map
+my empty = {}
+say(empty)                # {}
+
+# Computed keys with [expr] syntax
+my squares = {[1]: 1, [2]: 4, [3]: 9}
+say(squares)              # {1: 1, 2: 4, 3: 9}
+
+# Non-string keys: booleans
+my flags = {[true]: "yes", [false]: "no"}
+say(flags)                # {true: yes, false: no}
+
+# Duplicate keys: last value wins
+say({a: 1, a: 2})         # {a: 2}
+
+# Indexing (key lookup)
+say(person["name"])        # alice
+say(person["age"])         # 30
+
+# Missing key returns nothing (not an error)
+say(person["email"])       # nothing
+
+# Index assignment (with copy-on-write)
+my m1 = {x: 10}
+my m2 = m1
+m2["x"] = 99
+say(m1)                    # {x: 10} (unchanged)
+say(m2)                    # {x: 99}
+
+# Insert new key
+m2["y"] = 20
+say(m2)                    # {x: 99, y: 20}
+
+# Projection: index with an array of keys to select a sub-map
+my subset = person[["name", "role"]]
+say(subset)                # {name: alice, role: admin}
+
+# Missing projection keys are silently skipped
+say(person[["name", "zzz"]])  # {name: alice}
+
+# Merge with ++ (right side wins on key conflicts)
+my defaults = {color: "blue", size: 10}
+my overrides = {size: 20, bold: true}
+say(defaults ++ overrides) # {color: blue, size: 20, bold: true}
+
+# Built-in functions
+say(keys(person))          # [name, age, role]
+say(values(person))        # [alice, 30, admin]
+say(has_key(person, "name"))  # true
+say(has_key(person, "zzz"))   # false
+say(len(person))           # 3
+say(len(empty))            # 0
+
+# Equality is structural (key order doesn't matter)
+say({a: 1, b: 2} == {b: 2, a: 1})   # true
+say({a: 1} == {a: 1, b: 2})          # false
+say({} == {})                         # true
+
+# Truthiness: non-empty is truthy, empty is falsy
+say(not {})                # true
+say(not {a: 1})            # false
+
+# Building a map in a loop
+my square-map = {}
+my i = 1
+while i <= 5 do
+  square-map[str(i)] = i ** 2
+  i = i + 1
+end
+say(square-map)            # {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}

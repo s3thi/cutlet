@@ -220,6 +220,160 @@ static void obj_array_free(ObjArray *arr) {
     free(arr);
 }
 
+/* ---- Value equality (used by map key lookup and VM equality ops) ---- */
+
+bool value_equal(const Value *a, const Value *b) {
+    if (a->type != b->type)
+        return false;
+    switch (a->type) {
+    case VAL_NUMBER:
+        return a->number == b->number;
+    case VAL_STRING:
+        return strcmp(a->string, b->string) == 0;
+    case VAL_BOOL:
+        return a->boolean == b->boolean;
+    case VAL_NOTHING:
+        return true;
+    case VAL_FUNCTION:
+        /* Identity-based: only equal if pointing to the same ObjFunction. */
+        return a->function == b->function;
+    case VAL_CLOSURE:
+        /* Identity-based: only equal if pointing to the same ObjClosure. */
+        return a->closure == b->closure;
+    case VAL_ARRAY: {
+        /* Structural equality: same length and all elements pairwise equal. */
+        const ObjArray *aa = a->array;
+        const ObjArray *ba = b->array;
+        if (aa == ba)
+            return true; /* Same backing store — trivially equal. */
+        if (aa->count != ba->count)
+            return false;
+        for (size_t i = 0; i < aa->count; i++) {
+            if (!value_equal(&aa->data[i], &ba->data[i]))
+                return false;
+        }
+        return true;
+    }
+    case VAL_MAP: {
+        /* Structural equality: same number of entries, and for every
+         * key in map A, map B has the same key with an equal value.
+         * Key order does not matter. */
+        const ObjMap *ma = a->map;
+        const ObjMap *mb = b->map;
+        if (ma == mb)
+            return true; /* Same backing store — trivially equal. */
+        if (ma->count != mb->count)
+            return false;
+        for (size_t i = 0; i < ma->count; i++) {
+            const Value *bval = obj_map_get(mb, &ma->entries[i].key);
+            if (!bval || !value_equal(&ma->entries[i].value, bval))
+                return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+/* ---- ObjMap utilities ---- */
+
+ObjMap *obj_map_new(void) {
+    ObjMap *m = calloc(1, sizeof(ObjMap));
+    if (!m)
+        return NULL;
+    m->refcount = 1;
+    m->entries = NULL;
+    m->count = 0;
+    m->capacity = 0;
+    return m;
+}
+
+void obj_map_set(ObjMap *m, const Value *key, const Value *val) {
+    if (!m)
+        return;
+    /* Check if key already exists — update in place. */
+    for (size_t i = 0; i < m->count; i++) {
+        if (value_equal(&m->entries[i].key, key)) {
+            /* Replace existing value: free old, clone new. */
+            value_free(&m->entries[i].value);
+            value_clone(&m->entries[i].value, val);
+            return;
+        }
+    }
+    /* Key not found — insert at end. Grow if needed. */
+    if (m->count >= m->capacity) {
+        size_t new_cap = m->capacity < 8 ? 8 : m->capacity * 2;
+        MapEntry *new_entries = realloc(m->entries, new_cap * sizeof(MapEntry));
+        if (!new_entries)
+            return; /* Silent failure on OOM. */
+        m->entries = new_entries;
+        m->capacity = new_cap;
+    }
+    value_clone(&m->entries[m->count].key, key);
+    value_clone(&m->entries[m->count].value, val);
+    m->count++;
+}
+
+Value *obj_map_get(const ObjMap *m, const Value *key) {
+    if (!m)
+        return NULL;
+    for (size_t i = 0; i < m->count; i++) {
+        if (value_equal(&m->entries[i].key, key))
+            return &m->entries[i].value;
+    }
+    return NULL;
+}
+
+bool obj_map_has(const ObjMap *m, const Value *key) { return obj_map_get(m, key) != NULL; }
+
+ObjMap *obj_map_clone_deep(const ObjMap *src) {
+    if (!src)
+        return NULL;
+    ObjMap *clone = obj_map_new();
+    if (!clone)
+        return NULL;
+    if (src->count > 0) {
+        clone->entries = malloc(src->count * sizeof(MapEntry));
+        if (!clone->entries) {
+            free(clone);
+            return NULL;
+        }
+        clone->capacity = src->count;
+        clone->count = src->count;
+        /* Deep-clone each key and value so strings etc. are independent. */
+        for (size_t i = 0; i < src->count; i++) {
+            value_clone(&clone->entries[i].key, &src->entries[i].key);
+            value_clone(&clone->entries[i].value, &src->entries[i].value);
+        }
+    }
+    return clone;
+}
+
+void obj_map_ensure_owned(Value *v) {
+    if (!v || v->type != VAL_MAP || !v->map)
+        return;
+    if (v->map->refcount <= 1)
+        return; /* Already sole owner — no copy needed. */
+    /* Detach: decrement the shared refcount and replace with a deep clone. */
+    v->map->refcount--;
+    v->map = obj_map_clone_deep(v->map);
+}
+
+Value make_map(ObjMap *m) { return (Value){.type = VAL_MAP, .map = m}; }
+
+/* Free an ObjMap's entries and backing storage (unconditionally). */
+static void obj_map_free(ObjMap *m) {
+    if (!m)
+        return;
+    for (size_t i = 0; i < m->count; i++) {
+        value_free(&m->entries[i].key);
+        value_free(&m->entries[i].value);
+    }
+    free(m->entries);
+    free(m);
+}
+
 void value_free(Value *v) {
     if (!v)
         return;
@@ -245,6 +399,13 @@ void value_free(Value *v) {
         if (v->array->refcount == 0)
             obj_array_free(v->array);
         v->array = NULL;
+    }
+    if (v->type == VAL_MAP && v->map) {
+        if (v->map->refcount > 0)
+            v->map->refcount--;
+        if (v->map->refcount == 0)
+            obj_map_free(v->map);
+        v->map = NULL;
     }
 }
 
@@ -318,6 +479,66 @@ char *value_format(const Value *v) {
         return strdup("<fn>");
     }
 
+    case VAL_MAP: {
+        if (!v->map || v->map->count == 0)
+            return strdup("{}");
+        /*
+         * Format as "{key1: value1, key2: value2}".
+         * Build by formatting each key-value pair and concatenating.
+         */
+        size_t count = v->map->count;
+        /* Allocate arrays for formatted keys and values. */
+        char **key_parts = (char **)malloc(count * sizeof(char *));
+        char **val_parts = (char **)malloc(count * sizeof(char *));
+        if (!key_parts || !val_parts) {
+            free((void *)key_parts);
+            free((void *)val_parts);
+            return strdup("{...}");
+        }
+        size_t total = 2; /* "{" and "}" */
+        for (size_t i = 0; i < count; i++) {
+            key_parts[i] = value_format(&v->map->entries[i].key);
+            val_parts[i] = value_format(&v->map->entries[i].value);
+            total += strlen(key_parts[i]) + 2 + strlen(val_parts[i]); /* "key: value" */
+            if (i > 0)
+                total += 2; /* ", " separator */
+        }
+        /* Assemble the string. */
+        char *buf = malloc(total + 1);
+        if (!buf) {
+            for (size_t i = 0; i < count; i++) {
+                free(key_parts[i]);
+                free(val_parts[i]);
+            }
+            free((void *)key_parts);
+            free((void *)val_parts);
+            return strdup("{...}");
+        }
+        char *p = buf;
+        *p++ = '{';
+        for (size_t i = 0; i < count; i++) {
+            if (i > 0) {
+                *p++ = ',';
+                *p++ = ' ';
+            }
+            size_t klen = strlen(key_parts[i]);
+            memcpy(p, key_parts[i], klen);
+            p += klen;
+            *p++ = ':';
+            *p++ = ' ';
+            size_t vlen = strlen(val_parts[i]);
+            memcpy(p, val_parts[i], vlen);
+            p += vlen;
+            free(key_parts[i]);
+            free(val_parts[i]);
+        }
+        *p++ = '}';
+        *p = '\0';
+        free((void *)key_parts);
+        free((void *)val_parts);
+        return buf;
+    }
+
     case VAL_ARRAY: {
         if (!v->array || v->array->count == 0)
             return strdup("[]");
@@ -382,6 +603,8 @@ bool is_truthy(const Value *v) {
         return true;
     case VAL_ARRAY:
         return v->array != NULL && v->array->count > 0;
+    case VAL_MAP:
+        return v->map != NULL && v->map->count > 0;
     case VAL_NOTHING: // NOLINT(bugprone-branch-clone)
         return false;
     case VAL_ERROR: // NOLINT(bugprone-branch-clone)
@@ -426,6 +649,14 @@ bool value_clone(Value *out, const Value *src) {
             out->array->refcount++;
     } else {
         out->array = NULL;
+    }
+    if (src->type == VAL_MAP) {
+        /* Shared ownership via refcount — structural sharing (COW). */
+        out->map = src->map;
+        if (out->map)
+            out->map->refcount++;
+    } else {
+        out->map = NULL;
     }
     return true;
 }

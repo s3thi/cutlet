@@ -169,6 +169,8 @@ const char *opcode_name(OpCode op) {
         return "OP_CLOSE_UPVALUE";
     case OP_ARRAY:
         return "OP_ARRAY";
+    case OP_MAP:
+        return "OP_MAP";
     case OP_INDEX_GET:
         return "OP_INDEX_GET";
     case OP_INDEX_SET:
@@ -354,6 +356,13 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_ARRAY: {
         uint8_t count = chunk->code[offset + 1];
         dynbuf_printf(b, "%-20s count=%d\n", opcode_name((OpCode)instruction), count);
+        return offset + 2;
+    }
+
+    /* OP_MAP: 1-byte pair count (number of key-value pairs) */
+    case OP_MAP: {
+        uint8_t count = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s pairs=%d\n", opcode_name((OpCode)instruction), count);
         return offset + 2;
     }
 

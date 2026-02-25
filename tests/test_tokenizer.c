@@ -2596,6 +2596,148 @@ TEST(test_tok_meta_prefix) {
 }
 
 /* ============================================================
+ * Map literal brace/colon tokenization tests
+ * ============================================================ */
+
+/* {a: 1} → OPERATOR "{", IDENT "a", OPERATOR ":", NUMBER "1", OPERATOR "}" */
+TEST(test_tok_map_simple) {
+    Tokenizer *tok = tokenizer_create("{a: 1}");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "{", 1), "expected OPERATOR '{'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ":", 1), "expected OPERATOR ':'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "expected NUMBER '1'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "}", 1), "expected OPERATOR '}'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* {} → OPERATOR "{", OPERATOR "}" */
+TEST(test_tok_map_empty) {
+    Tokenizer *tok = tokenizer_create("{}");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "{", 1), "expected OPERATOR '{'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "}", 1), "expected OPERATOR '}'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* {[x]: 1} → OPERATOR "{", OPERATOR "[", IDENT "x", OPERATOR "]",
+ *            OPERATOR ":", NUMBER "1", OPERATOR "}" */
+TEST(test_tok_map_computed_key) {
+    Tokenizer *tok = tokenizer_create("{[x]: 1}");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "{", 1), "expected OPERATOR '{'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "[", 1), "expected OPERATOR '['");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "x", 1), "expected IDENT 'x'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "]", 1), "expected OPERATOR ']'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ":", 1), "expected OPERATOR ':'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "expected NUMBER '1'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "}", 1), "expected OPERATOR '}'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* : alone → OPERATOR ":" */
+TEST(test_tok_colon_alone) {
+    Tokenizer *tok = tokenizer_create(":");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ":", 1), "expected OPERATOR ':'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* {a: 1, b: 2} → {, a, :, 1, ,, b, :, 2, } */
+TEST(test_tok_map_multiple_entries) {
+    Tokenizer *tok = tokenizer_create("{a: 1, b: 2}");
+    ASSERT_NOT_NULL(tok, "tokenizer_create failed");
+
+    Token t;
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "{", 1), "expected '{'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "a", 1), "expected IDENT 'a'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ":", 1), "expected ':'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "1", 1), "expected NUMBER '1'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ",", 1), "expected ','");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_IDENT, "b", 1), "expected IDENT 'b'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, ":", 1), "expected ':'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_NUMBER, "2", 1), "expected NUMBER '2'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_TRUE(token_matches(&t, TOK_OPERATOR, "}", 1), "expected '}'");
+
+    ASSERT_TRUE(tokenizer_next(tok, &t), "next");
+    ASSERT_EQ(t.type, TOK_EOF, "expected EOF");
+
+    tokenizer_destroy(tok);
+    PASS();
+}
+
+/* ============================================================
  * Main test runner
  * ============================================================ */
 
@@ -2794,6 +2936,13 @@ int main(void) {
     RUN_TEST(test_tok_meta_greater_eq);
     RUN_TEST(test_tok_meta_in_expr);
     RUN_TEST(test_tok_meta_prefix);
+
+    /* Map literal brace/colon tokenization */
+    RUN_TEST(test_tok_map_simple);
+    RUN_TEST(test_tok_map_empty);
+    RUN_TEST(test_tok_map_computed_key);
+    RUN_TEST(test_tok_colon_alone);
+    RUN_TEST(test_tok_map_multiple_entries);
 
     printf("\n=== Summary ===\n");
     printf("Tests run:    %d\n", tests_run);

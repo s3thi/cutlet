@@ -2866,6 +2866,200 @@ TEST(test_vectorize_custom_max) {
 }
 
 /* ============================================================
+ * Map literals
+ * ============================================================ */
+
+/* Eval {} => {} */
+TEST(test_map_empty_eval) { assert_vm_formatted("{}", "{}", "empty map"); }
+
+/* Eval {a: 1, b: 2} => {a: 1, b: 2} */
+TEST(test_map_bare_keys_eval) {
+    assert_vm_formatted("{a: 1, b: 2}", "{a: 1, b: 2}", "bare key map");
+}
+
+/* Eval {[1 + 2]: "three"} => {3: three} */
+TEST(test_map_computed_key_eval) {
+    assert_vm_formatted("{[1 + 2]: \"three\"}", "{3: three}", "computed key map");
+}
+
+/* Eval {[true]: "yes", [false]: "no"} => {true: yes, false: no} */
+TEST(test_map_bool_keys_eval) {
+    assert_vm_formatted("{[true]: \"yes\", [false]: \"no\"}", "{true: yes, false: no}",
+                        "bool key map");
+}
+
+/* Eval {a: 1, a: 2} => {a: 2} (last value wins for duplicate keys) */
+TEST(test_map_duplicate_key_eval) {
+    assert_vm_formatted("{a: 1, a: 2}", "{a: 2}", "duplicate key last wins");
+}
+
+/* Error: key is a function => runtime error */
+TEST(test_map_function_key_error) {
+    assert_vm_error("{[fn(x) is x end]: 1}", "function key error");
+}
+
+/* ============================================================
+ * Map indexing (read)
+ * ============================================================ */
+
+/* {a: 1, b: 2}["a"] => 1 */
+TEST(test_map_index_get_string_key) {
+    assert_vm_number("{a: 1, b: 2}[\"a\"]", 1.0, "map index string key");
+}
+
+/* {a: 1, b: 2}["c"] => nothing (missing key) */
+TEST(test_map_index_get_missing_key) {
+    assert_vm_formatted("{a: 1, b: 2}[\"c\"]", "nothing", "map index missing key");
+}
+
+/* {[1]: "one"}[1] => "one" (number key) */
+TEST(test_map_index_get_number_key) {
+    assert_vm_formatted("{[1]: \"one\"}[1]", "one", "map index number key");
+}
+
+/* {[true]: "yes"}[true] => "yes" (boolean key) */
+TEST(test_map_index_get_bool_key) {
+    assert_vm_formatted("{[true]: \"yes\"}[true]", "yes", "map index bool key");
+}
+
+/* Error: invalid key type for map index */
+TEST(test_map_index_get_invalid_key) {
+    assert_vm_error("{a: 1}[fn(x) is x end]", "map index invalid key");
+}
+
+/* ============================================================
+ * Map indexing (write / assignment)
+ * ============================================================ */
+
+/* my m = {a: 1}\nm["a"] = 99\nm => {a: 99} */
+TEST(test_map_index_set_existing) {
+    assert_vm_formatted("my m = {a: 1}\nm[\"a\"] = 99\nm", "{a: 99}", "map index set existing");
+}
+
+/* my m = {a: 1}\nm["b"] = 2\nm => {a: 1, b: 2} (insert new key) */
+TEST(test_map_index_set_new_key) {
+    assert_vm_formatted("my m = {a: 1}\nm[\"b\"] = 2\nm", "{a: 1, b: 2}", "map index set new key");
+}
+
+/* COW: my m1 = {a: 1}\nmy m2 = m1\nm2["a"] = 99\nm1 => {a: 1} */
+TEST(test_map_index_set_cow) {
+    assert_vm_formatted("my m1 = {a: 1}\nmy m2 = m1\nm2[\"a\"] = 99\nm1", "{a: 1}",
+                        "map COW index set");
+}
+
+/* ============================================================
+ * Map projection (index with array of keys)
+ * ============================================================ */
+
+/* {a: 1, b: 2, c: 3}[["a", "c"]] => {a: 1, c: 3} */
+TEST(test_map_projection_basic) {
+    assert_vm_formatted("{a: 1, b: 2, c: 3}[[\"a\", \"c\"]]", "{a: 1, c: 3}",
+                        "map projection basic");
+}
+
+/* {a: 1, b: 2}[["a", "z"]] => {a: 1} (missing keys skipped) */
+TEST(test_map_projection_missing_keys) {
+    assert_vm_formatted("{a: 1, b: 2}[[\"a\", \"z\"]]", "{a: 1}", "map projection missing keys");
+}
+
+/* {a: 1}[[]] => {} (empty key array) */
+TEST(test_map_projection_empty_keys) {
+    assert_vm_formatted("{a: 1}[[]]", "{}", "map projection empty keys");
+}
+
+/* --- Map merge (++) --- */
+
+TEST(test_map_merge_basic) {
+    assert_vm_formatted("{a: 1, b: 2} ++ {b: 3, c: 4}", "{a: 1, b: 3, c: 4}", "map merge basic");
+}
+
+TEST(test_map_merge_empty_left) {
+    assert_vm_formatted("{} ++ {a: 1}", "{a: 1}", "map merge empty left");
+}
+
+TEST(test_map_merge_empty_right) {
+    assert_vm_formatted("{a: 1} ++ {}", "{a: 1}", "map merge empty right");
+}
+
+TEST(test_map_merge_both_empty) { assert_vm_formatted("{} ++ {}", "{}", "map merge both empty"); }
+
+TEST(test_map_merge_map_num_error) { assert_vm_error("{a: 1} ++ 2", "map ++ number"); }
+
+TEST(test_map_merge_string_map_error) { assert_vm_error("\"a\" ++ {b: 1}", "string ++ map"); }
+
+TEST(test_map_merge_array_map_error) { assert_vm_error("[1] ++ {a: 1}", "array ++ map"); }
+
+TEST(test_map_merge_strings_unchanged) {
+    assert_vm_string("\"a\" ++ \"b\"", "ab", "string concat still works after map merge");
+}
+
+/* --- Map builtin functions: keys(), values(), has_key(), len() --- */
+
+TEST(test_map_keys_basic) {
+    assert_vm_formatted("keys({name: \"alice\", age: 30})", "[name, age]", "keys() basic");
+}
+
+TEST(test_map_keys_empty) { assert_vm_formatted("keys({})", "[]", "keys() empty map"); }
+
+TEST(test_map_keys_non_map_error) { assert_vm_error("keys(42)", "keys() non-map error"); }
+
+TEST(test_map_values_basic) {
+    assert_vm_formatted("values({name: \"alice\", age: 30})", "[alice, 30]", "values() basic");
+}
+
+TEST(test_map_values_empty) { assert_vm_formatted("values({})", "[]", "values() empty map"); }
+
+TEST(test_map_values_non_map_error) { assert_vm_error("values(42)", "values() non-map error"); }
+
+TEST(test_map_has_key_true) { assert_vm_bool("has_key({a: 1}, \"a\")", true, "has_key() found"); }
+
+TEST(test_map_has_key_false) {
+    assert_vm_bool("has_key({a: 1}, \"b\")", false, "has_key() not found");
+}
+
+TEST(test_map_has_key_nothing_value) {
+    assert_vm_bool("has_key({a: nothing}, \"a\")", true, "has_key() key with nothing value");
+}
+
+TEST(test_map_has_key_empty_map) {
+    assert_vm_bool("has_key({}, \"a\")", false, "has_key() empty map");
+}
+
+TEST(test_map_has_key_non_map_error) {
+    assert_vm_error("has_key(\"str\", \"a\")", "has_key() non-map error");
+}
+
+TEST(test_map_len_basic) { assert_vm_number("len({a: 1, b: 2})", 2, "len() map basic"); }
+
+TEST(test_map_len_empty) { assert_vm_number("len({})", 0, "len() empty map"); }
+
+/* ---- Map equality (Step 7) ---- */
+
+TEST(test_map_eq_same_order) {
+    assert_vm_bool("{a: 1, b: 2} == {a: 1, b: 2}", true, "map == same order");
+}
+
+TEST(test_map_eq_different_order) {
+    assert_vm_bool("{a: 1, b: 2} == {b: 2, a: 1}", true, "map == different order");
+}
+
+TEST(test_map_eq_different_values) {
+    assert_vm_bool("{a: 1} == {a: 2}", false, "map != different value");
+}
+
+TEST(test_map_eq_different_count) {
+    assert_vm_bool("{a: 1} == {a: 1, b: 2}", false, "map != different count");
+}
+
+TEST(test_map_eq_different_type) { assert_vm_bool("{a: 1} == [1]", false, "map != array"); }
+
+TEST(test_map_eq_empty) { assert_vm_bool("{} == {}", true, "empty maps equal"); }
+
+TEST(test_map_neq_true) { assert_vm_bool("{a: 1} != {a: 2}", true, "map != true"); }
+
+TEST(test_map_neq_false) { assert_vm_bool("{a: 1} != {a: 1}", false, "map != false"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3409,6 +3603,70 @@ int main(void) {
     RUN_TEST(test_vectorize_custom_length_mismatch);
     RUN_TEST(test_vectorize_custom_both_scalars);
     RUN_TEST(test_vectorize_custom_max);
+
+    /* ---- Map literals ---- */
+    printf("\nMap literals:\n");
+    RUN_TEST(test_map_empty_eval);
+    RUN_TEST(test_map_bare_keys_eval);
+    RUN_TEST(test_map_computed_key_eval);
+    RUN_TEST(test_map_bool_keys_eval);
+    RUN_TEST(test_map_duplicate_key_eval);
+    RUN_TEST(test_map_function_key_error);
+
+    /* ---- Map indexing (read) ---- */
+    printf("\nMap indexing (read):\n");
+    RUN_TEST(test_map_index_get_string_key);
+    RUN_TEST(test_map_index_get_missing_key);
+    RUN_TEST(test_map_index_get_number_key);
+    RUN_TEST(test_map_index_get_bool_key);
+    RUN_TEST(test_map_index_get_invalid_key);
+
+    /* ---- Map indexing (write) ---- */
+    printf("\nMap indexing (write):\n");
+    RUN_TEST(test_map_index_set_existing);
+    RUN_TEST(test_map_index_set_new_key);
+    RUN_TEST(test_map_index_set_cow);
+
+    /* ---- Map projection ---- */
+    printf("\nMap projection:\n");
+    RUN_TEST(test_map_projection_basic);
+    RUN_TEST(test_map_projection_missing_keys);
+    RUN_TEST(test_map_projection_empty_keys);
+
+    printf("\nMap merge (++):\n");
+    RUN_TEST(test_map_merge_basic);
+    RUN_TEST(test_map_merge_empty_left);
+    RUN_TEST(test_map_merge_empty_right);
+    RUN_TEST(test_map_merge_both_empty);
+    RUN_TEST(test_map_merge_map_num_error);
+    RUN_TEST(test_map_merge_string_map_error);
+    RUN_TEST(test_map_merge_array_map_error);
+    RUN_TEST(test_map_merge_strings_unchanged);
+
+    printf("\nMap builtin functions (keys, values, has_key, len):\n");
+    RUN_TEST(test_map_keys_basic);
+    RUN_TEST(test_map_keys_empty);
+    RUN_TEST(test_map_keys_non_map_error);
+    RUN_TEST(test_map_values_basic);
+    RUN_TEST(test_map_values_empty);
+    RUN_TEST(test_map_values_non_map_error);
+    RUN_TEST(test_map_has_key_true);
+    RUN_TEST(test_map_has_key_false);
+    RUN_TEST(test_map_has_key_nothing_value);
+    RUN_TEST(test_map_has_key_empty_map);
+    RUN_TEST(test_map_has_key_non_map_error);
+    RUN_TEST(test_map_len_basic);
+    RUN_TEST(test_map_len_empty);
+
+    printf("\nMap equality:\n");
+    RUN_TEST(test_map_eq_same_order);
+    RUN_TEST(test_map_eq_different_order);
+    RUN_TEST(test_map_eq_different_values);
+    RUN_TEST(test_map_eq_different_count);
+    RUN_TEST(test_map_eq_different_type);
+    RUN_TEST(test_map_eq_empty);
+    RUN_TEST(test_map_neq_true);
+    RUN_TEST(test_map_neq_false);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

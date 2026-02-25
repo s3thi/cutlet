@@ -117,42 +117,9 @@ static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
 
 /* ---- Equality check ---- */
 
-static bool values_equal(const Value *a, const Value *b) {
-    if (a->type != b->type)
-        return false;
-    switch (a->type) {
-    case VAL_NUMBER:
-        return a->number == b->number;
-    case VAL_STRING:
-        return strcmp(a->string, b->string) == 0;
-    case VAL_BOOL:
-        return a->boolean == b->boolean;
-    case VAL_NOTHING:
-        return true;
-    case VAL_FUNCTION:
-        /* Identity-based: only equal if pointing to the same ObjFunction. */
-        return a->function == b->function;
-    case VAL_CLOSURE:
-        /* Identity-based: only equal if pointing to the same ObjClosure. */
-        return a->closure == b->closure;
-    case VAL_ARRAY: {
-        /* Structural equality: same length and all elements pairwise equal. */
-        const ObjArray *aa = a->array;
-        const ObjArray *ba = b->array;
-        if (aa == ba)
-            return true; /* Same backing store — trivially equal. */
-        if (aa->count != ba->count)
-            return false;
-        for (size_t i = 0; i < aa->count; i++) {
-            if (!values_equal(&aa->data[i], &ba->data[i]))
-                return false;
-        }
-        return true;
-    }
-    default:
-        return false;
-    }
-}
+/* Delegate to value_equal() in value.c — single source of truth for
+ * equality semantics across the VM and map key lookups. */
+static bool values_equal(const Value *a, const Value *b) { return value_equal(a, b); }
 
 /* ---- Ordered comparison ---- */
 
@@ -256,7 +223,11 @@ static Value native_len(int argc, Value *args, EvalContext *ctx) {
     if (args[0].type == VAL_STRING) {
         return make_number((double)strlen(args[0].string ? args[0].string : ""));
     }
-    return make_error("len() requires an array or string, got %s", value_type_name(args[0].type));
+    if (args[0].type == VAL_MAP) {
+        return make_number((double)args[0].map->count);
+    }
+    return make_error("len() requires an array, string, or map, got %s",
+                      value_type_name(args[0].type));
 }
 
 /*
@@ -318,6 +289,72 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
+ * keys(map) — return an array of the map's keys in insertion order.
+ */
+static Value native_keys(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("keys() requires a map, got %s", value_type_name(args[0].type));
+    }
+
+    ObjMap *m = args[0].map;
+    ObjArray *arr = obj_array_new();
+    if (!arr)
+        return make_error("memory allocation failed");
+
+    for (size_t i = 0; i < m->count; i++) {
+        Value key;
+        value_clone(&key, &m->entries[i].key);
+        obj_array_push(arr, key);
+    }
+
+    return make_array(arr);
+}
+
+/*
+ * values(map) — return an array of the map's values in insertion order.
+ */
+static Value native_values(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("values() requires a map, got %s", value_type_name(args[0].type));
+    }
+
+    ObjMap *m = args[0].map;
+    ObjArray *arr = obj_array_new();
+    if (!arr)
+        return make_error("memory allocation failed");
+
+    for (size_t i = 0; i < m->count; i++) {
+        Value val;
+        value_clone(&val, &m->entries[i].value);
+        obj_array_push(arr, val);
+    }
+
+    return make_array(arr);
+}
+
+/*
+ * has_key(map, key) — return true if the key exists in the map.
+ * Distinguishes "key absent" from "key present with value nothing".
+ */
+static Value native_has_key(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("has_key() requires a map as first argument, got %s",
+                          value_type_name(args[0].type));
+    }
+
+    return make_bool(obj_map_has(args[0].map, &args[1]));
+}
+
+/*
  * Register built-in functions as native VAL_FUNCTION values in the
  * global variable environment. Called at the start of each vm_execute()
  * to ensure builtins are always available (even if a previous eval
@@ -343,6 +380,18 @@ static void register_builtins(void) {
     Value pop_fn = make_native("pop", 1, native_pop);
     runtime_var_define("pop", &pop_fn);
     value_free(&pop_fn);
+
+    Value keys_fn = make_native("keys", 1, native_keys);
+    runtime_var_define("keys", &keys_fn);
+    value_free(&keys_fn);
+
+    Value values_fn = make_native("values", 1, native_values);
+    runtime_var_define("values", &values_fn);
+    value_free(&values_fn);
+
+    Value has_key_fn = make_native("has_key", 2, native_has_key);
+    runtime_var_define("has_key", &has_key_fn);
+    value_free(&has_key_fn);
 }
 
 /* ---- Type name helper ---- */
@@ -363,6 +412,8 @@ static const char *value_type_name(ValueType type) {
         return "function";
     case VAL_ARRAY:
         return "array";
+    case VAL_MAP:
+        return "map";
     case VAL_ERROR:
         return "error";
     default:
@@ -847,10 +898,11 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_CONCAT: {
             /* Concatenation operator (++).
-             * Supports two modes:
-             *   - array ++ array  → new array with elements from both
+             * Supports three modes:
+             *   - array ++ array   → new array with elements from both
+             *   - map ++ map       → new map merged (right side wins on key conflicts)
              *   - string ++ string → new concatenated string
-             * Mixed types (one array, one non-array) produce a runtime error.
+             * Mixed types produce a runtime error.
              * Use str() for explicit string conversion of non-string values. */
             Value b, a;
             if (!vm_pop(vm, &b)) {
@@ -903,8 +955,36 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 break;
             }
 
-            /* Mixed array/non-array is an error. */
-            if (a.type == VAL_ARRAY || b.type == VAL_ARRAY) {
+            /* Map merge: both operands must be maps.
+             * Right-hand side wins on key conflicts. */
+            if (a.type == VAL_MAP && b.type == VAL_MAP) {
+                ObjMap *la = a.map;
+                ObjMap *lb = b.map;
+                ObjMap *result = obj_map_new();
+                if (!result) {
+                    value_free(&a);
+                    value_free(&b);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                /* Copy all entries from left map. */
+                for (size_t i = 0; i < la->count; i++) {
+                    obj_map_set(result, &la->entries[i].key, &la->entries[i].value);
+                }
+                /* Insert/overwrite with entries from right map. */
+                for (size_t i = 0; i < lb->count; i++) {
+                    obj_map_set(result, &lb->entries[i].key, &lb->entries[i].value);
+                }
+                value_free(&a);
+                value_free(&b);
+                if (!vm_push(vm, make_map(result))) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* Mixed array/map/non-collection is an error. */
+            if (a.type == VAL_ARRAY || b.type == VAL_ARRAY || a.type == VAL_MAP ||
+                b.type == VAL_MAP) {
                 const char *ta = value_type_name(a.type);
                 const char *tb = value_type_name(b.type);
                 value_free(&a);
@@ -1439,12 +1519,66 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_MAP: {
+            /* Build a map from the top 2*count values on the stack.
+             * Stack layout (bottom to top): key0, val0, key1, val1, ...
+             * The first key was pushed first (deepest on stack). */
+            uint8_t pair_count = read_byte(frame);
+            int total = pair_count * 2;
+
+            /* Pop all key-value pairs into a temporary buffer. */
+            Value temp[512]; /* max 255 pairs = 510 values */
+            for (int i = total - 1; i >= 0; i--) {
+                if (!vm_pop(vm, &temp[i])) {
+                    for (int j = i + 1; j < total; j++)
+                        value_free(&temp[j]);
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+            }
+
+            ObjMap *map = obj_map_new();
+            if (!map) {
+                for (int i = 0; i < total; i++)
+                    value_free(&temp[i]);
+                return vm_runtime_error(vm, "out of memory");
+            }
+
+            /* Insert pairs in order. Validate key types. */
+            for (int i = 0; i < total; i += 2) {
+                Value *key = &temp[i];
+                Value *val = &temp[i + 1];
+
+                /* Only strings, numbers, booleans, and nothing are valid keys. */
+                if (key->type != VAL_STRING && key->type != VAL_NUMBER && key->type != VAL_BOOL &&
+                    key->type != VAL_NOTHING) {
+                    const char *kt = value_type_name(key->type);
+                    /* Free remaining temp values and the partially built map. */
+                    for (int j = 0; j < total; j++)
+                        value_free(&temp[j]);
+                    Value map_val = make_map(map);
+                    value_free(&map_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+
+                obj_map_set(map, key, val);
+                /* obj_map_set clones key and value, so free the originals. */
+                value_free(key);
+                value_free(val);
+            }
+
+            if (!vm_push(vm, make_map(map))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_INDEX_GET: {
-            /* Read array[index]: pop index, pop array, push element.
-             * Supports two index types:
-             *   - Number: scalar index (negative wraps from end).
-             *   - Array of booleans: mask index — returns a new array
-             *     containing elements where the mask is true.
+            /* Read container[index]: pop index, pop container, push element.
+             * Supports arrays and maps:
+             *   Array + Number: scalar index (negative wraps from end).
+             *   Array + Array of booleans: mask index — returns filtered array.
+             *   Map + Array: projection — returns sub-map for given keys.
+             *   Map + scalar: key lookup — returns value or nothing.
              * Non-integer or out-of-bounds indices produce runtime errors. */
             Value idx_val, arr_val;
             if (!vm_pop(vm, &idx_val)) {
@@ -1454,6 +1588,69 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+
+            /* ---- Map indexing ---- */
+            if (arr_val.type == VAL_MAP) {
+                ObjMap *map = arr_val.map;
+
+                /* Map + Array => projection (sub-map for given keys). */
+                if (idx_val.type == VAL_ARRAY) {
+                    ObjArray *key_arr = idx_val.array;
+                    ObjMap *result = obj_map_new();
+                    if (!result) {
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "out of memory");
+                    }
+                    for (size_t i = 0; i < key_arr->count; i++) {
+                        Value *found = obj_map_get(map, &key_arr->data[i]);
+                        if (found) {
+                            obj_map_set(result, &key_arr->data[i], found);
+                        }
+                        /* Missing keys are silently skipped. */
+                    }
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, make_map(result))) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                    break;
+                }
+
+                /* Map + scalar key => key lookup. */
+                /* Validate key type: only strings, numbers, booleans, nothing. */
+                if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
+                    idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
+                    const char *kt = value_type_name(idx_val.type);
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+
+                Value *found = obj_map_get(map, &idx_val);
+                if (found) {
+                    Value result;
+                    if (!value_clone(&result, found)) {
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "memory allocation failed");
+                    }
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, result)) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                } else {
+                    /* Missing key returns nothing. */
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, make_nothing())) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                }
+                break;
+            }
+
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
@@ -1549,16 +1746,17 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_INDEX_SET: {
-            /* Write array[index] = value.
+            /* Write container[index] = value.
              *
-             * Stack in:  [..., value, array, index]   (TOS = index)
-             * Pop index, pop array. Peek value (now at TOS).
-             * COW the array if refcount > 1, set element, push modified array.
-             * Stack out: [..., value, modified_array]
+             * Stack in:  [..., value, container, index]   (TOS = index)
+             * Pop index, pop container. Peek value (now at TOS).
+             * COW the container if refcount > 1, set element, push modified container.
+             * Stack out: [..., value, modified_container]
              *
              * The compiler follows this with SET_GLOBAL/LOCAL to write the
-             * modified array back to the source variable, then OP_POP to
-             * discard the modified array, leaving value as the result. */
+             * modified container back to the source variable, then OP_POP to
+             * discard the modified container, leaving value as the result.
+             * Supports both arrays (by numeric index) and maps (by key). */
             Value idx_val, arr_val;
             if (!vm_pop(vm, &idx_val)) {
                 return vm_runtime_error(vm, "stack underflow");
@@ -1567,13 +1765,36 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
-            /* Peek at the value (now at TOS after popping index and array). */
+            /* Peek at the value (now at TOS after popping index and container). */
             Value val;
             if (!vm_peek(vm, 0, &val)) {
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+
+            /* ---- Map index set ---- */
+            if (arr_val.type == VAL_MAP) {
+                /* Validate key type: only strings, numbers, booleans, nothing. */
+                if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
+                    idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
+                    const char *kt = value_type_name(idx_val.type);
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+                /* COW: ensure we own the backing store before mutating. */
+                obj_map_ensure_owned(&arr_val);
+                /* Insert or update the key-value pair. */
+                obj_map_set(arr_val.map, &idx_val, &val);
+                value_free(&idx_val);
+                /* Push the modified map on top of the value. */
+                if (!vm_push(vm, arr_val)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 value_free(&arr_val);
