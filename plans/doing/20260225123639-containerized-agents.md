@@ -2,29 +2,29 @@
 
 ## Objective
 
-Add Docker-based containerization so Claude Code agents can execute plans with `--dangerously-skip-permissions` in full isolation from the host machine. The container clones the host's local repo, works on a branch, and pushes the branch back when done.
+Add Docker-based containerization so Claude Code can run with `--dangerously-skip-permissions` in full isolation from the host machine. The user starts a container, gets dropped into a tmux session with Claude Code and a shell, and works interactively. The container clones the host's local repo onto a branch and pushes back when instructed.
 
 When done:
 
-- A Dockerfile builds an image with the full Cutlet build toolchain (C23, clang-format, clang-tidy, bear, python3, universal-ctags, cscope) plus Claude Code.
+- A Dockerfile builds an image with the full Cutlet build toolchain (C23, clang-format, clang-tidy, bear, python3, universal-ctags, cscope), tmux, and Claude Code.
 - `scripts/agent-build` builds the Docker image.
-- `scripts/agent-run <plan-slug>` starts a container that clones the host repo, checks out (or creates) a branch for the plan, runs Claude Code on the next incomplete step, commits, and pushes the branch back.
-- `scripts/agent-merge <branch>` merges a finished agent branch into main and deletes the branch.
-- `scripts/agent-list` shows running agent containers.
-- `scripts/agent-logs <plan-slug>` tails the logs of a running agent container.
-- `scripts/agent-stop <plan-slug>` stops a running agent container.
-- Running `scripts/agent-run` multiple times on a multi-step plan advances through each step, because each run picks up where the previous push left off.
+- `scripts/agent-start <branch>` starts a new container, clones the repo, creates the branch, and drops the user into a tmux session with two panes: Claude Code (with `--dangerously-skip-permissions`) and a shell.
+- `scripts/agent-list` shows all agent containers (running and paused).
+- `scripts/agent-pause <branch>` pauses a running container (freezes all processes, releases CPU).
+- `scripts/agent-connect <branch>` resumes a paused container and reattaches to its tmux session.
+- `scripts/agent-delete <branch>` permanently removes a container.
 
 ## Acceptance criteria
 
-- [ ] Dockerfile builds successfully and produces a working image with all build tools and Claude Code.
+- [ ] Dockerfile builds successfully and produces a working image with all build tools, tmux, and Claude Code.
 - [ ] `make test && make check` pass inside the container (verifying the toolchain works).
 - [ ] `scripts/agent-build` builds the image and tags it `cutlet-agent:latest`.
-- [ ] `scripts/agent-run <plan-slug>` starts a detached container that: clones the host repo, finds the plan file, creates/checks out the branch, runs Claude Code with `--dangerously-skip-permissions`, and pushes the branch on exit.
-- [ ] `scripts/agent-merge <branch>` merges a branch into main, runs `make test && make check`, and deletes the branch on success.
-- [ ] `scripts/agent-list` lists running cutlet-agent containers with their plan slug and uptime.
-- [ ] `scripts/agent-logs <plan-slug>` shows live output from a running agent.
-- [ ] `scripts/agent-stop <plan-slug>` stops a running agent container gracefully.
+- [ ] `scripts/agent-start <branch>` creates a container, clones the repo, creates the branch, and drops the user into a tmux session with Claude Code + shell panes.
+- [ ] Detaching from tmux (Ctrl+B, D) leaves the container running. Disconnecting the terminal also leaves the container running.
+- [ ] `scripts/agent-list` lists all cutlet-agent containers with their status (running/paused) and uptime.
+- [ ] `scripts/agent-pause <branch>` pauses a running container.
+- [ ] `scripts/agent-connect <branch>` resumes a paused container and reattaches to tmux.
+- [ ] `scripts/agent-delete <branch>` stops and removes a container.
 - [ ] All scripts are executable, have usage help (`-h` or no args), and handle errors with clear messages.
 - [ ] `.dockerignore` excludes `build/`, `build-sanitize/`, and `compile_commands.json`.
 
@@ -34,10 +34,9 @@ None. This is infrastructure, not a language feature.
 
 ## Constraints and non-goals
 
-- **No orchestration.** No Docker Compose, no auto-scheduling. The user manages parallelism manually by running `agent-run` multiple times.
-- **No remote push.** Containers push to the local host repo only (via mounted `.git` directory), not to GitHub.
-- **No persistent containers.** Each `agent-run` invocation creates a fresh, ephemeral container. State is preserved through git (branches pushed to host repo).
-- **Planning stays local.** These tools are for *executing* plans, not creating them.
+- **No orchestration.** No Docker Compose, no auto-scheduling. The user manages containers manually.
+- **No remote push.** Containers push to the local host repo only (via mounted `.git` directory), not to GitHub. The user pushes to GitHub from the host.
+- **General-purpose.** The container is a dev environment, not tied to any specific workflow. The user decides what to tell Claude.
 - **macOS host assumed.** The Docker host is macOS (Darwin). Linux host should also work but isn't the primary target.
 - **Claude Max/Pro OAuth only.** Authentication is via `~/.claude/` mounted into the container. API key users would need a small tweak (pass `ANTHROPIC_API_KEY` env var instead).
 - **Not source code.** These are developer tooling scripts. `make test && make check` do not need to run on the host after changes to these files. The Dockerfile should verify the toolchain works by running `make test && make check` during the image build.
@@ -67,16 +66,26 @@ Host machine                          Docker container
 
 **Why mount `~/.claude/` read-only?** The container needs OAuth tokens to authenticate with the Anthropic API. Read-only prevents the container from modifying credentials.
 
-### Branch lifecycle
+### Container lifecycle
 
-1. First `agent-run maps` → container creates branch `maps`, works on step 1, pushes `maps`.
-2. Second `agent-run maps` → container clones, checks out `origin/maps`, works on step 2, pushes `maps`.
-3. Repeat until all steps are complete.
-4. `agent-merge maps` → merges `maps` into `main`, deletes the branch.
+1. `agent-start foo` → creates container `cutlet-agent-foo`, clones repo, creates branch `foo`, starts tmux with Claude Code + shell panes, user is attached.
+2. User detaches from tmux (Ctrl+B, D) → container keeps running in the background.
+3. `agent-pause foo` → freezes the container (saves memory/CPU).
+4. `agent-connect foo` → resumes the container and reattaches to tmux.
+5. `agent-delete foo` → permanently removes the container.
 
 ### Container naming
 
-Containers are named `cutlet-agent-<plan-slug>` (e.g., `cutlet-agent-maps`). This makes `agent-list`, `agent-logs`, and `agent-stop` straightforward. If a container with the same name already exists (from a previous run), the old container is removed before starting a new one.
+Containers are named `cutlet-agent-<branch>` (e.g., `cutlet-agent-foo`). This makes all lifecycle scripts straightforward — they just need the branch name to find the container.
+
+### tmux layout
+
+The tmux session is named `main` and has two panes in a vertical split (side by side):
+
+- **Left pane**: `claude --dangerously-skip-permissions` running in `/workspace`.
+- **Right pane**: A shell (`bash`) in `/workspace`.
+
+The user can resize, rearrange, or create additional panes as needed.
 
 ---
 
@@ -98,6 +107,7 @@ Create `Dockerfile` at the repo root.
 - `git` — version control
 - `curl`, `ca-certificates` — for downloading Node.js
 - `nodejs`, `npm` — for Claude Code (install via NodeSource or apt)
+- `tmux` — terminal multiplexer
 
 **Symlinks** for tool names the Makefile expects:
 - `gcc-14` → `cc` (or set `CC=gcc-14`)
@@ -113,7 +123,7 @@ Create `Dockerfile` at the repo root.
 
 **Working directory**: `/workspace`
 
-**No ENTRYPOINT or CMD** — the `agent-run` script provides the command.
+**No ENTRYPOINT or CMD** — the `agent-start` script provides the command.
 
 Create `.dockerignore` at the repo root:
 ```
@@ -141,36 +151,38 @@ Behavior:
 
 **File to create**: `scripts/agent-build`
 
-### Step 3: `scripts/agent-run`
+### Step 3: `scripts/agent-start`
 
-The core script. Starts a detached container to execute one plan step.
+The core script. Creates a new container and drops the user into tmux.
 
 ```
-Usage: scripts/agent-run <plan-slug> [--max-turns N]
+Usage: scripts/agent-start <branch-name>
 ```
 
-Where `<plan-slug>` is the plan identifier (e.g., `maps`, `in-operator`). The optional `--max-turns` defaults to 200 (a safety cap).
+Where `<branch-name>` is any valid git branch name (e.g., `foo`, `fix-parser-bug`, `refactor-vm`).
 
 Behavior:
 
-1. **Find the plan file**: glob for `plans/doing/*-<slug>.md`. Error if not found or ambiguous.
-2. **Derive names**: container name is `cutlet-agent-<slug>`, branch name is `<slug>`.
-3. **Clean up previous container**: if a container with the same name exists (stopped), remove it with `docker rm`.
-4. **Resolve host paths**:
+1. **Validate**: error if a container named `cutlet-agent-<branch>` already exists (running or paused). The user must `agent-delete` it first or `agent-connect` to it.
+2. **Resolve host paths and git identity**:
    - `REPO_GIT_DIR`: the absolute path to the repo's `.git` directory.
    - `CLAUDE_DIR`: `$HOME/.claude` (the user's Claude credentials directory).
-5. **Start the container** (detached):
+   - `GIT_USER_NAME`: from `git config user.name` in the host repo.
+   - `GIT_USER_EMAIL`: from `git config user.email` in the host repo.
+3. **Start the container** (detached):
 
    ```bash
    docker run -d \
-     --name cutlet-agent-$SLUG \
+     --name cutlet-agent-$BRANCH \
+     -e GIT_USER_NAME="$GIT_USER_NAME" \
+     -e GIT_USER_EMAIL="$GIT_USER_EMAIL" \
      -v "$REPO_GIT_DIR":/host-repo.git \
      -v "$CLAUDE_DIR":/root/.claude:ro \
      cutlet-agent:latest \
      /bin/bash -c "$ENTRYPOINT_SCRIPT"
    ```
 
-6. **Entrypoint script** (passed as a string to bash -c):
+4. **Entrypoint script** (passed as a string to bash -c):
 
    ```bash
    set -euo pipefail
@@ -179,9 +191,6 @@ Behavior:
    git clone /host-repo.git /workspace
    cd /workspace
 
-   # Find the plan file
-   PLAN_FILE=$(ls plans/doing/*-SLUG.md 2>/dev/null | head -1)
-
    # Create or check out the branch
    if git branch -r | grep -q "origin/BRANCH"; then
      git checkout -b BRANCH origin/BRANCH
@@ -189,126 +198,99 @@ Behavior:
      git checkout -b BRANCH
    fi
 
-   # Configure git for commits
-   git config user.name "Cutlet Agent"
-   git config user.email "agent@cutlet.dev"
+   # Configure git for commits (identity passed in from host via env vars)
+   git config user.name "$GIT_USER_NAME"
+   git config user.email "$GIT_USER_EMAIL"
 
-   # Run Claude Code
-   claude -p "PROMPT_TEXT" \
-     --dangerously-skip-permissions \
-     --max-turns MAX_TURNS \
-     --verbose
+   # Start a tmux session with two panes:
+   #   Left: claude --dangerously-skip-permissions
+   #   Right: bash shell
+   tmux new-session -d -s main -c /workspace \
+     'claude --dangerously-skip-permissions'
+   tmux split-window -h -t main -c /workspace
 
-   # Push the branch back (even if Claude Code exits non-zero, try to push any commits)
-   git push origin BRANCH 2>/dev/null || true
+   # Keep the container alive (tmux server runs in background)
+   sleep infinity
    ```
 
-   The script substitutes `SLUG`, `BRANCH`, `PLAN_FILE`, `MAX_TURNS`, and `PROMPT_TEXT` before passing to the container.
+5. **Wait for setup**: poll briefly (e.g., `docker exec ... tmux has-session -t main`) until the tmux session is ready.
 
-7. **Prompt text** for Claude Code (embedded in the entrypoint):
+6. **Attach**: `docker exec -it cutlet-agent-$BRANCH tmux attach -t main`.
 
-   ```
-   Read AGENTS.md for project conventions — follow them exactly.
+When the user detaches from tmux (Ctrl+B, D), the `docker exec` ends but the container stays running because `sleep infinity` is PID 1.
 
-   Read the plan file at <PLAN_FILE> and execute it.
+**File to create**: `scripts/agent-start`
 
-   If the plan has multiple implementation steps:
-   1. Check the ## Progress section at the bottom of the plan to see what's done.
-   2. Work on the next incomplete step.
-   3. After completing the step, update the ## Progress section and commit.
-   4. Stop after completing one step.
+### Step 4: `scripts/agent-list`
 
-   If the plan has no steps or a single step, complete the entire plan.
-
-   After all work is done, commit your changes.
-   ```
-
-8. **Output**: print the container name and how to follow along:
-   ```
-   Started cutlet-agent-maps
-   Logs: scripts/agent-logs maps
-   Stop: scripts/agent-stop maps
-   ```
-
-**File to create**: `scripts/agent-run`
-
-### Step 4: `scripts/agent-merge`
-
-Merges a finished agent branch into main and cleans up.
-
-```
-Usage: scripts/agent-merge <branch-name>
-```
-
-Behavior:
-
-1. Verify current branch is `main`. If not, error.
-2. Verify `<branch-name>` exists as a local branch. If not, error.
-3. Check for uncommitted changes in main. If dirty, error.
-4. Run `git merge <branch> --no-edit`.
-5. If conflicts, print them and exit non-zero (user resolves manually).
-6. Run `make test && make check`. If either fails, print the error and exit non-zero (user fixes manually).
-7. Delete the branch: `git branch -d <branch>`.
-8. Print summary: merge commit hash, branch deleted.
-
-This is intentionally simpler than the `cutlet-merge-worktree` command because there are no worktree directories to clean up, and the user should handle conflicts themselves rather than having an agent resolve them.
-
-**File to create**: `scripts/agent-merge`
-
-### Step 5: `scripts/agent-list`
-
-Lists running cutlet-agent containers.
+Lists all cutlet-agent containers (running and paused).
 
 ```
 Usage: scripts/agent-list
 ```
 
 Behavior:
-- Run `docker ps --filter "name=cutlet-agent-" --format "table {{.Names}}\t{{.Status}}\t{{.RunningFor}}"`.
-- If no containers are running, print "No running agents."
+- Run `docker ps -a --filter "name=cutlet-agent-" --format "table {{.Names}}\t{{.Status}}"`.
+- If no containers exist, print "No agent containers."
 
 **File to create**: `scripts/agent-list`
 
-### Step 6: `scripts/agent-logs`
+### Step 5: `scripts/agent-pause`
 
-Shows live output from a running agent container.
-
-```
-Usage: scripts/agent-logs <plan-slug>
-```
-
-Behavior:
-- Run `docker logs -f cutlet-agent-<slug>`.
-- If the container doesn't exist, print an error.
-
-**File to create**: `scripts/agent-logs`
-
-### Step 7: `scripts/agent-stop`
-
-Stops a running agent container.
+Pauses a running container (freezes all processes).
 
 ```
-Usage: scripts/agent-stop <plan-slug>
+Usage: scripts/agent-pause <branch-name>
 ```
 
 Behavior:
-- Run `docker stop cutlet-agent-<slug>`.
-- Run `docker rm cutlet-agent-<slug>`.
+- Verify container `cutlet-agent-<branch>` exists and is running.
+- Run `docker pause cutlet-agent-<branch>`.
 - Print confirmation.
 
-**File to create**: `scripts/agent-stop`
+**File to create**: `scripts/agent-pause`
+
+### Step 6: `scripts/agent-connect`
+
+Resumes a paused container and reattaches to its tmux session. Also works for running containers that the user simply disconnected from.
+
+```
+Usage: scripts/agent-connect <branch-name>
+```
+
+Behavior:
+- Verify container `cutlet-agent-<branch>` exists.
+- If paused, run `docker unpause cutlet-agent-<branch>`.
+- Run `docker exec -it cutlet-agent-<branch> tmux attach -t main`.
+- If the tmux session is gone (e.g., user killed it), print an error suggesting `agent-delete` and `agent-start`.
+
+**File to create**: `scripts/agent-connect`
+
+### Step 7: `scripts/agent-delete`
+
+Permanently removes a container.
+
+```
+Usage: scripts/agent-delete <branch-name>
+```
+
+Behavior:
+- Run `docker rm -f cutlet-agent-<branch>`.
+- Print confirmation.
+
+**File to create**: `scripts/agent-delete`
 
 ### Step 8: Manual verification
 
 Since this is infrastructure (not language source code), verification is manual rather than automated:
 
 1. Run `scripts/agent-build` — verify the image builds and `make test && make check` pass during the build.
-2. Run `scripts/agent-run` with a simple test plan — verify the container starts, clones the repo, and Claude Code connects to the API.
-3. Run `scripts/agent-list` — verify the running container shows up.
-4. Run `scripts/agent-logs` — verify live output is visible.
-5. Run `scripts/agent-stop` — verify the container stops and is removed.
-6. After a successful agent run, verify the branch was pushed to the host repo (`git branch` on the host should show the new branch).
-7. Run `scripts/agent-merge` — verify the branch is merged and deleted.
+2. Run `scripts/agent-start test-branch` — verify the container starts, tmux appears with Claude Code in the left pane and a shell in the right pane.
+3. In the shell pane, verify `git branch` shows `test-branch` and the repo is cloned correctly.
+4. Detach from tmux (Ctrl+B, D) — verify the container is still running (`agent-list`).
+5. Run `scripts/agent-pause test-branch` — verify the container is paused (`agent-list` shows paused status).
+6. Run `scripts/agent-connect test-branch` — verify it resumes and reattaches to the same tmux session.
+7. Run `scripts/agent-delete test-branch` — verify the container is removed (`agent-list` shows nothing).
 
 ---
 
@@ -318,7 +300,7 @@ Since this is infrastructure (not language source code), verification is manual 
 - All scripts should print usage when called with no arguments or `-h`.
 - Prefer `printf` over `echo` for portable output.
 - The Dockerfile should pin versions where possible (e.g., `gcc-14`, `clang-format-18`) to avoid surprises.
-- The git config inside the container (`user.name`, `user.email`) is for commit metadata only — these don't need to match the host user's identity.
+- The git config inside the container (`user.name`, `user.email`) is read from the host repo's git config at runtime and passed in as environment variables, so commits are attributed to the real user.
 
 ---
 End of plan.
