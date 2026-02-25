@@ -1999,9 +1999,19 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_VECTORIZE: {
-            /* Element-wise operation on arrays with scalar broadcasting.
+            /* Element-wise operation on arrays/maps with scalar broadcasting.
              * Operand: 1-byte inner op (same encoding as OP_REDUCE).
-             * Pop right, pop left, push result array. */
+             * Pop right, pop left, push result (array or map).
+             *
+             * Supported operand combinations:
+             *   array @op array   — element-wise (equal lengths)
+             *   array @op scalar  — broadcast scalar to each element
+             *   scalar @op array  — broadcast scalar to each element
+             *   map @op map       — key intersection, apply op to matching values
+             *   map @op scalar    — broadcast scalar to each map value
+             *   scalar @op map    — broadcast scalar to each map value
+             *   map @op array     — error
+             *   array @op map     — error */
             uint8_t inner_op = read_byte(frame);
             Value right_val, left_val;
             if (!vm_pop(vm, &right_val)) {
@@ -2014,6 +2024,172 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             bool left_is_array = (left_val.type == VAL_ARRAY);
             bool right_is_array = (right_val.type == VAL_ARRAY);
+            bool left_is_map = (left_val.type == VAL_MAP);
+            bool right_is_map = (right_val.type == VAL_MAP);
+
+            /* Map + array or array + map — not allowed. */
+            if ((left_is_map && right_is_array) || (left_is_array && right_is_map)) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "cannot vectorize %s with %s",
+                                        left_is_map ? "map" : "array",
+                                        right_is_map ? "map" : "array");
+            }
+
+            /* ---- MAP PATHS ---- */
+            if (left_is_map || right_is_map) {
+                /* At least one operand is a map (and the other is not an
+                 * array, since that case was rejected above). */
+                ObjMap *result_map = obj_map_new();
+                if (!result_map) {
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+
+                if (left_is_map && right_is_map) {
+                    /* Map × map: iterate left map entries, apply op for
+                     * keys that also exist in the right map. Result
+                     * preserves left-map insertion order for shared keys. */
+                    ObjMap *lm = left_val.map;
+                    ObjMap *rm = right_val.map;
+                    for (size_t i = 0; i < lm->count; i++) {
+                        Value *rv = obj_map_get(rm, &lm->entries[i].key);
+                        if (!rv)
+                            continue; /* Key not in right map — skip. */
+
+                        const Value *a = &lm->entries[i].value;
+                        const Value *b = rv;
+                        Value elem_result;
+                        if ((OpCode)inner_op == OP_AND) {
+                            if (!is_truthy(a)) {
+                                if (!value_clone(&elem_result, a)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            } else {
+                                if (!value_clone(&elem_result, b)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            }
+                        } else if ((OpCode)inner_op == OP_OR) {
+                            if (is_truthy(a)) {
+                                if (!value_clone(&elem_result, a)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            } else {
+                                if (!value_clone(&elem_result, b)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            }
+                        } else {
+                            elem_result = reduce_apply_op((OpCode)inner_op, a, b);
+                            if (elem_result.type == VAL_ERROR) {
+                                Value tmp = make_map(result_map);
+                                value_free(&tmp);
+                                value_free(&left_val);
+                                value_free(&right_val);
+                                Value err =
+                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.string);
+                                value_free(&elem_result);
+                                return err;
+                            }
+                        }
+                        obj_map_set(result_map, &lm->entries[i].key, &elem_result);
+                        value_free(&elem_result);
+                    }
+                } else {
+                    /* Map × scalar or scalar × map: broadcast the scalar
+                     * across every value in the map. Preserve the map's
+                     * key set and insertion order. */
+                    ObjMap *m = left_is_map ? left_val.map : right_val.map;
+                    const Value *scalar = left_is_map ? &right_val : &left_val;
+                    for (size_t i = 0; i < m->count; i++) {
+                        /* Preserve operand order: if left is the map,
+                         * a = map value, b = scalar. If left is the
+                         * scalar, a = scalar, b = map value. */
+                        const Value *a = left_is_map ? &m->entries[i].value : scalar;
+                        const Value *b = left_is_map ? scalar : &m->entries[i].value;
+                        Value elem_result;
+                        if ((OpCode)inner_op == OP_AND) {
+                            if (!is_truthy(a)) {
+                                if (!value_clone(&elem_result, a)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            } else {
+                                if (!value_clone(&elem_result, b)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            }
+                        } else if ((OpCode)inner_op == OP_OR) {
+                            if (is_truthy(a)) {
+                                if (!value_clone(&elem_result, a)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            } else {
+                                if (!value_clone(&elem_result, b)) {
+                                    Value tmp = make_map(result_map);
+                                    value_free(&tmp);
+                                    value_free(&left_val);
+                                    value_free(&right_val);
+                                    return vm_runtime_error(vm, "memory allocation failed");
+                                }
+                            }
+                        } else {
+                            elem_result = reduce_apply_op((OpCode)inner_op, a, b);
+                            if (elem_result.type == VAL_ERROR) {
+                                Value tmp = make_map(result_map);
+                                value_free(&tmp);
+                                value_free(&left_val);
+                                value_free(&right_val);
+                                Value err =
+                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.string);
+                                value_free(&elem_result);
+                                return err;
+                            }
+                        }
+                        obj_map_set(result_map, &m->entries[i].key, &elem_result);
+                        value_free(&elem_result);
+                    }
+                }
+
+                value_free(&left_val);
+                value_free(&right_val);
+                Value result = make_map(result_map);
+                if (!vm_push(vm, result)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* ---- ARRAY PATHS (original logic, unchanged) ---- */
 
             /* Both scalars — not allowed. */
             if (!left_is_array && !right_is_array) {

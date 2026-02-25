@@ -193,5 +193,10 @@ Existing array behavior unchanged:
 5. Run `make test` and `make check` after every code change.
 6. Do not remove or modify existing tests without user confirmation.
 
+## Progress
+
+- [x] Step 1: Extend `OP_REDUCE` for maps — added map-to-values extraction in `OP_REDUCE` handler; maps fold over values in insertion order with distinct "cannot reduce empty map" error; 8 tests added
+- [x] Step 2: Extend `OP_VECTORIZE` for maps — added map-map (key intersection), map-scalar broadcast, scalar-map broadcast, and map-array error handling; 14 tests added
+
 ---
 End of plan.

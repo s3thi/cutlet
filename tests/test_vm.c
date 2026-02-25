@@ -2827,6 +2827,77 @@ TEST(test_vectorize_precedence) {
 }
 
 /* ============================================================
+ * Map vectorize (@op infix with maps)
+ * ============================================================ */
+
+/* Map × map: {a: 1, b: 2} @+ {a: 10, b: 20} → {a: 11, b: 22} */
+TEST(test_vectorize_map_map_add) {
+    assert_vm_formatted("{a: 1, b: 2} @+ {a: 10, b: 20}", "{a: 11, b: 22}", "@+ map-map");
+}
+
+/* Map × map key intersection: only shared keys */
+TEST(test_vectorize_map_map_intersection) {
+    assert_vm_formatted("{a: 1, b: 2, c: 3} @+ {b: 10, c: 20, d: 30}", "{b: 12, c: 23}",
+                        "@+ map-map intersection");
+}
+
+/* Map × map no shared keys → empty map */
+TEST(test_vectorize_map_map_no_shared) {
+    assert_vm_formatted("{a: 1} @+ {b: 2}", "{}", "@+ map-map no shared");
+}
+
+/* Map × map subtraction: {a: 5, b: 10} @- {a: 1, b: 3} → {a: 4, b: 7} */
+TEST(test_vectorize_map_map_subtract) {
+    assert_vm_formatted("{a: 5, b: 10} @- {a: 1, b: 3}", "{a: 4, b: 7}", "@- map-map");
+}
+
+/* Map × map comparison: {a: 1, b: 2} @> {a: 0, b: 3} → {a: true, b: false} */
+TEST(test_vectorize_map_map_greater) {
+    assert_vm_formatted("{a: 1, b: 2} @> {a: 0, b: 3}", "{a: true, b: false}", "@> map-map");
+}
+
+/* Map × scalar: {a: 1, b: 2} @* 10 → {a: 10, b: 20} */
+TEST(test_vectorize_map_scalar_mul) {
+    assert_vm_formatted("{a: 1, b: 2} @* 10", "{a: 10, b: 20}", "@* map-scalar");
+}
+
+/* Map × scalar comparison: {a: 85, b: 90} @>= 88 → {a: false, b: true} */
+TEST(test_vectorize_map_scalar_gte) {
+    assert_vm_formatted("{a: 85, b: 90} @>= 88", "{a: false, b: true}", "@>= map-scalar");
+}
+
+/* Map × scalar power: {a: 2, b: 3} @** 2 → {a: 4, b: 9} */
+TEST(test_vectorize_map_scalar_power) {
+    assert_vm_formatted("{a: 2, b: 3} @** 2", "{a: 4, b: 9}", "@** map-scalar");
+}
+
+/* Scalar × map: 100 @- {a: 10, b: 20} → {a: 90, b: 80} */
+TEST(test_vectorize_scalar_map_sub) {
+    assert_vm_formatted("100 @- {a: 10, b: 20}", "{a: 90, b: 80}", "@- scalar-map");
+}
+
+/* Scalar × map: 10 @* {a: 2, b: 3} → {a: 20, b: 30} */
+TEST(test_vectorize_scalar_map_mul) {
+    assert_vm_formatted("10 @* {a: 2, b: 3}", "{a: 20, b: 30}", "@* scalar-map");
+}
+
+/* Error: map + array → "cannot vectorize map with array" */
+TEST(test_vectorize_map_array_error) { assert_vm_error("{a: 1} @+ [1, 2]", "@+ map-array error"); }
+
+/* Error: array + map → "cannot vectorize array with map" */
+TEST(test_vectorize_array_map_error) { assert_vm_error("[1, 2] @+ {a: 1}", "@+ array-map error"); }
+
+/* Existing array behavior unchanged: [1, 2, 3] @+ [4, 5, 6] → [5, 7, 9] */
+TEST(test_vectorize_array_still_works) {
+    assert_vm_formatted("[1, 2, 3] @+ [4, 5, 6]", "[5, 7, 9]", "@+ array unchanged");
+}
+
+/* Existing array scalar broadcast unchanged: [1, 2, 3] @* 10 → [10, 20, 30] */
+TEST(test_vectorize_array_scalar_still_works) {
+    assert_vm_formatted("[1, 2, 3] @* 10", "[10, 20, 30]", "@* array scalar unchanged");
+}
+
+/* ============================================================
  * Custom function reduction (@fn prefix)
  * ============================================================ */
 
@@ -3631,6 +3702,23 @@ int main(void) {
     RUN_TEST(test_vectorize_concat);
     RUN_TEST(test_vectorize_and);
     RUN_TEST(test_vectorize_precedence);
+
+    /* ---- Map vectorize (@op with maps) ---- */
+    printf("\nMap vectorize (@op infix with maps):\n");
+    RUN_TEST(test_vectorize_map_map_add);
+    RUN_TEST(test_vectorize_map_map_intersection);
+    RUN_TEST(test_vectorize_map_map_no_shared);
+    RUN_TEST(test_vectorize_map_map_subtract);
+    RUN_TEST(test_vectorize_map_map_greater);
+    RUN_TEST(test_vectorize_map_scalar_mul);
+    RUN_TEST(test_vectorize_map_scalar_gte);
+    RUN_TEST(test_vectorize_map_scalar_power);
+    RUN_TEST(test_vectorize_scalar_map_sub);
+    RUN_TEST(test_vectorize_scalar_map_mul);
+    RUN_TEST(test_vectorize_map_array_error);
+    RUN_TEST(test_vectorize_array_map_error);
+    RUN_TEST(test_vectorize_array_still_works);
+    RUN_TEST(test_vectorize_array_scalar_still_works);
 
     /* ---- @fn prefix — custom function reduce ---- */
     printf("\nCustom function reduce (@fn prefix):\n");
