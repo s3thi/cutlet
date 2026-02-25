@@ -2482,6 +2482,71 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_ZIP_MAP: {
+            /* Zip two arrays into a map: keys @: values.
+             * Pop right (values array), pop left (keys array).
+             * Validate both are arrays with equal length and valid key types.
+             * Produce a map where keys[i] → values[i]. Duplicate keys: last wins. */
+            Value right_val, left_val;
+            vm_pop(vm, &right_val);
+            vm_pop(vm, &left_val);
+
+            /* Both operands must be arrays. */
+            if (left_val.type != VAL_ARRAY || right_val.type != VAL_ARRAY) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "@: requires two arrays");
+            }
+
+            ObjArray *keys_arr = left_val.array;
+            ObjArray *vals_arr = right_val.array;
+
+            /* Arrays must have the same length. */
+            if (keys_arr->count != vals_arr->count) {
+                size_t lc = keys_arr->count;
+                size_t rc = vals_arr->count;
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "array length mismatch in @: (left=%zu, right=%zu)", lc,
+                                        rc);
+            }
+
+            ObjMap *map = obj_map_new();
+            if (!map) {
+                value_free(&left_val);
+                value_free(&right_val);
+                return vm_runtime_error(vm, "out of memory");
+            }
+
+            /* Iterate and build the map. Validate key types along the way. */
+            for (size_t i = 0; i < keys_arr->count; i++) {
+                Value *key = &keys_arr->data[i];
+                Value *val = &vals_arr->data[i];
+
+                /* Only strings, numbers, booleans, and nothing are valid keys. */
+                if (key->type != VAL_STRING && key->type != VAL_NUMBER && key->type != VAL_BOOL &&
+                    key->type != VAL_NOTHING) {
+                    const char *kt = value_type_name(key->type);
+                    Value map_val = make_map(map);
+                    value_free(&map_val);
+                    value_free(&left_val);
+                    value_free(&right_val);
+                    return vm_runtime_error(vm, "invalid map key type: %s", kt);
+                }
+
+                /* obj_map_set clones key and value internally. */
+                obj_map_set(map, key, val);
+            }
+
+            value_free(&left_val);
+            value_free(&right_val);
+
+            if (!vm_push(vm, make_map(map))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
         /* OP_AND / OP_OR are not standalone VM opcodes — they are used
          * only as op-byte arguments to OP_REDUCE/OP_VECTORIZE. If they
          * somehow appear in the instruction stream, treat as an error. */

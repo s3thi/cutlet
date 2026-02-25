@@ -3190,6 +3190,55 @@ TEST(test_map_neq_true) { assert_vm_bool("{a: 1} != {a: 2}", true, "map != true"
 TEST(test_map_neq_false) { assert_vm_bool("{a: 1} != {a: 1}", false, "map != false"); }
 
 /* ============================================================
+ * Zip-map (@:) operator
+ * ============================================================ */
+
+/* ["a", "b", "c"] @: [1, 2, 3] => {a: 1, b: 2, c: 3} */
+TEST(test_zip_map_basic) {
+    assert_vm_formatted("[\"a\", \"b\", \"c\"] @: [1, 2, 3]", "{a: 1, b: 2, c: 3}",
+                        "@: basic string keys");
+}
+
+/* [] @: [] => {} */
+TEST(test_zip_map_empty) { assert_vm_formatted("[] @: []", "{}", "@: empty arrays"); }
+
+/* ["x"] @: [42] => {x: 42} */
+TEST(test_zip_map_single) {
+    assert_vm_formatted("[\"x\"] @: [42]", "{x: 42}", "@: single element");
+}
+
+/* [1, 2] @: ["one", "two"] => {1: one, 2: two} (number keys) */
+TEST(test_zip_map_number_keys) {
+    assert_vm_formatted("[1, 2] @: [\"one\", \"two\"]", "{1: one, 2: two}", "@: number keys");
+}
+
+/* [true, false] @: ["yes", "no"] => {true: yes, false: no} (boolean keys) */
+TEST(test_zip_map_bool_keys) {
+    assert_vm_formatted("[true, false] @: [\"yes\", \"no\"]", "{true: yes, false: no}",
+                        "@: boolean keys");
+}
+
+/* Duplicate keys: ["a", "b", "a"] @: [1, 2, 3] => {a: 3, b: 2} (last wins) */
+TEST(test_zip_map_duplicate_keys) {
+    assert_vm_formatted("[\"a\", \"b\", \"a\"] @: [1, 2, 3]", "{a: 3, b: 2}",
+                        "@: duplicate keys last wins");
+}
+
+/* Mismatched lengths: ["a"] @: [1, 2] => runtime error */
+TEST(test_zip_map_length_mismatch) { assert_vm_error("[\"a\"] @: [1, 2]", "@: length mismatch"); }
+
+/* Non-array left operand: "a" @: [1] => runtime error */
+TEST(test_zip_map_non_array_left) { assert_vm_error("\"a\" @: [1]", "@: non-array left"); }
+
+/* Non-array right operand: [1] @: "a" => runtime error */
+TEST(test_zip_map_non_array_right) { assert_vm_error("[1] @: \"a\"", "@: non-array right"); }
+
+/* Invalid key type: [fn(x) is x end] @: [1] => runtime error */
+TEST(test_zip_map_invalid_key_type) {
+    assert_vm_error("[fn(x) is x end] @: [1]", "@: invalid key type");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3832,6 +3881,18 @@ int main(void) {
     RUN_TEST(test_map_eq_empty);
     RUN_TEST(test_map_neq_true);
     RUN_TEST(test_map_neq_false);
+
+    printf("\nZip-map (@:) operator:\n");
+    RUN_TEST(test_zip_map_basic);
+    RUN_TEST(test_zip_map_empty);
+    RUN_TEST(test_zip_map_single);
+    RUN_TEST(test_zip_map_number_keys);
+    RUN_TEST(test_zip_map_bool_keys);
+    RUN_TEST(test_zip_map_duplicate_keys);
+    RUN_TEST(test_zip_map_length_mismatch);
+    RUN_TEST(test_zip_map_non_array_left);
+    RUN_TEST(test_zip_map_non_array_right);
+    RUN_TEST(test_zip_map_invalid_key_type);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
