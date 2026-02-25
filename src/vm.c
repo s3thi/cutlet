@@ -223,7 +223,11 @@ static Value native_len(int argc, Value *args, EvalContext *ctx) {
     if (args[0].type == VAL_STRING) {
         return make_number((double)strlen(args[0].string ? args[0].string : ""));
     }
-    return make_error("len() requires an array or string, got %s", value_type_name(args[0].type));
+    if (args[0].type == VAL_MAP) {
+        return make_number((double)args[0].map->count);
+    }
+    return make_error("len() requires an array, string, or map, got %s",
+                      value_type_name(args[0].type));
 }
 
 /*
@@ -285,6 +289,72 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
+ * keys(map) — return an array of the map's keys in insertion order.
+ */
+static Value native_keys(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("keys() requires a map, got %s", value_type_name(args[0].type));
+    }
+
+    ObjMap *m = args[0].map;
+    ObjArray *arr = obj_array_new();
+    if (!arr)
+        return make_error("memory allocation failed");
+
+    for (size_t i = 0; i < m->count; i++) {
+        Value key;
+        value_clone(&key, &m->entries[i].key);
+        obj_array_push(arr, key);
+    }
+
+    return make_array(arr);
+}
+
+/*
+ * values(map) — return an array of the map's values in insertion order.
+ */
+static Value native_values(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("values() requires a map, got %s", value_type_name(args[0].type));
+    }
+
+    ObjMap *m = args[0].map;
+    ObjArray *arr = obj_array_new();
+    if (!arr)
+        return make_error("memory allocation failed");
+
+    for (size_t i = 0; i < m->count; i++) {
+        Value val;
+        value_clone(&val, &m->entries[i].value);
+        obj_array_push(arr, val);
+    }
+
+    return make_array(arr);
+}
+
+/*
+ * has_key(map, key) — return true if the key exists in the map.
+ * Distinguishes "key absent" from "key present with value nothing".
+ */
+static Value native_has_key(int argc, Value *args, EvalContext *ctx) {
+    (void)argc;
+    (void)ctx;
+
+    if (args[0].type != VAL_MAP) {
+        return make_error("has_key() requires a map as first argument, got %s",
+                          value_type_name(args[0].type));
+    }
+
+    return make_bool(obj_map_has(args[0].map, &args[1]));
+}
+
+/*
  * Register built-in functions as native VAL_FUNCTION values in the
  * global variable environment. Called at the start of each vm_execute()
  * to ensure builtins are always available (even if a previous eval
@@ -310,6 +380,18 @@ static void register_builtins(void) {
     Value pop_fn = make_native("pop", 1, native_pop);
     runtime_var_define("pop", &pop_fn);
     value_free(&pop_fn);
+
+    Value keys_fn = make_native("keys", 1, native_keys);
+    runtime_var_define("keys", &keys_fn);
+    value_free(&keys_fn);
+
+    Value values_fn = make_native("values", 1, native_values);
+    runtime_var_define("values", &values_fn);
+    value_free(&values_fn);
+
+    Value has_key_fn = make_native("has_key", 2, native_has_key);
+    runtime_var_define("has_key", &has_key_fn);
+    value_free(&has_key_fn);
 }
 
 /* ---- Type name helper ---- */

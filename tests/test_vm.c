@@ -2993,6 +2993,46 @@ TEST(test_map_merge_strings_unchanged) {
     assert_vm_string("\"a\" ++ \"b\"", "ab", "string concat still works after map merge");
 }
 
+/* --- Map builtin functions: keys(), values(), has_key(), len() --- */
+
+TEST(test_map_keys_basic) {
+    assert_vm_formatted("keys({name: \"alice\", age: 30})", "[name, age]", "keys() basic");
+}
+
+TEST(test_map_keys_empty) { assert_vm_formatted("keys({})", "[]", "keys() empty map"); }
+
+TEST(test_map_keys_non_map_error) { assert_vm_error("keys(42)", "keys() non-map error"); }
+
+TEST(test_map_values_basic) {
+    assert_vm_formatted("values({name: \"alice\", age: 30})", "[alice, 30]", "values() basic");
+}
+
+TEST(test_map_values_empty) { assert_vm_formatted("values({})", "[]", "values() empty map"); }
+
+TEST(test_map_values_non_map_error) { assert_vm_error("values(42)", "values() non-map error"); }
+
+TEST(test_map_has_key_true) { assert_vm_bool("has_key({a: 1}, \"a\")", true, "has_key() found"); }
+
+TEST(test_map_has_key_false) {
+    assert_vm_bool("has_key({a: 1}, \"b\")", false, "has_key() not found");
+}
+
+TEST(test_map_has_key_nothing_value) {
+    assert_vm_bool("has_key({a: nothing}, \"a\")", true, "has_key() key with nothing value");
+}
+
+TEST(test_map_has_key_empty_map) {
+    assert_vm_bool("has_key({}, \"a\")", false, "has_key() empty map");
+}
+
+TEST(test_map_has_key_non_map_error) {
+    assert_vm_error("has_key(\"str\", \"a\")", "has_key() non-map error");
+}
+
+TEST(test_map_len_basic) { assert_vm_number("len({a: 1, b: 2})", 2, "len() map basic"); }
+
+TEST(test_map_len_empty) { assert_vm_number("len({})", 0, "len() empty map"); }
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -3576,6 +3616,21 @@ int main(void) {
     RUN_TEST(test_map_merge_string_map_error);
     RUN_TEST(test_map_merge_array_map_error);
     RUN_TEST(test_map_merge_strings_unchanged);
+
+    printf("\nMap builtin functions (keys, values, has_key, len):\n");
+    RUN_TEST(test_map_keys_basic);
+    RUN_TEST(test_map_keys_empty);
+    RUN_TEST(test_map_keys_non_map_error);
+    RUN_TEST(test_map_values_basic);
+    RUN_TEST(test_map_values_empty);
+    RUN_TEST(test_map_values_non_map_error);
+    RUN_TEST(test_map_has_key_true);
+    RUN_TEST(test_map_has_key_false);
+    RUN_TEST(test_map_has_key_nothing_value);
+    RUN_TEST(test_map_has_key_empty_map);
+    RUN_TEST(test_map_has_key_non_map_error);
+    RUN_TEST(test_map_len_basic);
+    RUN_TEST(test_map_len_empty);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
