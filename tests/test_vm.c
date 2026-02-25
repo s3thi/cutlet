@@ -2743,6 +2743,40 @@ TEST(test_reduce_equal_fold) {
 TEST(test_reduce_non_array_error) { assert_vm_error("@+ 42", "@+ non-array error"); }
 
 /* ============================================================
+ * Map reduce (@op prefix on maps) tests
+ * ============================================================ */
+
+/* @+ {a: 1, b: 2, c: 3} → 6 */
+TEST(test_reduce_map_add) { assert_vm_number("@+ {a: 1, b: 2, c: 3}", 6.0, "@+ map reduce"); }
+
+/* @* {x: 2, y: 3, z: 4} → 24 */
+TEST(test_reduce_map_multiply) { assert_vm_number("@* {x: 2, y: 3, z: 4}", 24.0, "@* map reduce"); }
+
+/* @- {a: 10, b: 3, c: 2} → 5 (left fold: (10-3)-2) */
+TEST(test_reduce_map_subtract) { assert_vm_number("@- {a: 10, b: 3, c: 2}", 5.0, "@- map reduce"); }
+
+/* @++ {first: "hello", second: " world"} → "hello world" */
+TEST(test_reduce_map_concat) {
+    assert_vm_string("@++ {first: \"hello\", second: \" world\"}", "hello world", "@++ map reduce");
+}
+
+/* @+ {x: 42} → 42 (single entry) */
+TEST(test_reduce_map_single) { assert_vm_number("@+ {x: 42}", 42.0, "@+ map single"); }
+
+/* @+ {} → error "cannot reduce empty map" */
+TEST(test_reduce_map_empty_error) { assert_vm_error("@+ {}", "@+ empty map error"); }
+
+/* @and {a: true, b: true, c: false} → false (short-circuit) */
+TEST(test_reduce_map_and) {
+    assert_vm_bool("@and {a: true, b: true, c: false}", false, "@and map short-circuit");
+}
+
+/* @or {a: false, b: 0, c: "hi"} → "hi" (first truthy) */
+TEST(test_reduce_map_or) {
+    assert_vm_string("@or {a: false, b: 0, c: \"hi\"}", "hi", "@or map first truthy");
+}
+
+/* ============================================================
  * Vectorize (@op infix) tests
  * ============================================================ */
 
@@ -3573,6 +3607,17 @@ int main(void) {
     RUN_TEST(test_reduce_or_all_falsy);
     RUN_TEST(test_reduce_equal_fold);
     RUN_TEST(test_reduce_non_array_error);
+
+    /* ---- @op prefix on maps — map reduction ---- */
+    printf("\nMap reduce (@op prefix on maps):\n");
+    RUN_TEST(test_reduce_map_add);
+    RUN_TEST(test_reduce_map_multiply);
+    RUN_TEST(test_reduce_map_subtract);
+    RUN_TEST(test_reduce_map_concat);
+    RUN_TEST(test_reduce_map_single);
+    RUN_TEST(test_reduce_map_empty_error);
+    RUN_TEST(test_reduce_map_and);
+    RUN_TEST(test_reduce_map_or);
 
     /* ---- @op infix — vectorize ---- */
     printf("\nVectorize (@op infix):\n");

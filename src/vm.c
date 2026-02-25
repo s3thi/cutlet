@@ -1841,17 +1841,44 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_REDUCE: {
-            /* Fold an array with a built-in operator.
+            /* Fold an array or map with a built-in operator.
              * Operand: 1-byte inner op (OP_ADD, OP_AND, OP_OR, etc.).
-             * Pop 1 array, push 1 result. */
+             * Pop 1 (array or map), push 1 result.
+             * For maps, values are extracted in insertion order. */
             uint8_t inner_op = read_byte(frame);
             Value arr_val;
             if (!vm_pop(vm, &arr_val)) {
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Map operand: extract values in insertion order into a
+             * temporary array, then fall through to the array handler. */
+            if (arr_val.type == VAL_MAP) {
+                ObjMap *map = arr_val.map;
+                if (map->count == 0) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(vm, "cannot reduce empty map");
+                }
+                ObjArray *vals = obj_array_new();
+                if (!vals) {
+                    value_free(&arr_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                for (size_t i = 0; i < map->count; i++) {
+                    Value v;
+                    if (!value_clone(&v, &map->entries[i].value)) {
+                        Value tmp = make_array(vals);
+                        value_free(&tmp);
+                        value_free(&arr_val);
+                        return vm_runtime_error(vm, "memory allocation failed");
+                    }
+                    obj_array_push(vals, v);
+                }
+                value_free(&arr_val);
+                arr_val = make_array(vals);
+            }
             if (arr_val.type != VAL_ARRAY) {
                 value_free(&arr_val);
-                return vm_runtime_error(vm, "@ requires an array operand");
+                return vm_runtime_error(vm, "@ requires an array or map operand");
             }
             ObjArray *arr = arr_val.array;
             if (arr->count == 0) {
