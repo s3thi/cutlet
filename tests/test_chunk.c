@@ -707,6 +707,30 @@ TEST(test_function_refcount_clone) {
 }
 
 /* ============================================================
+ * OP_ZIP_MAP tests
+ * ============================================================ */
+
+TEST(test_opcode_name_zip_map) {
+    /* Verify opcode_name returns correct string for OP_ZIP_MAP. */
+    ASSERT(strcmp(opcode_name(OP_ZIP_MAP), "OP_ZIP_MAP") == 0, "OP_ZIP_MAP name");
+    PASS();
+}
+
+TEST(test_disassemble_zip_map) {
+    /* OP_ZIP_MAP is a simple (no-operand) instruction. */
+    Chunk c;
+    chunk_init(&c);
+    chunk_write(&c, OP_ZIP_MAP, 1);
+    chunk_write(&c, OP_RETURN, 1);
+    char *s = chunk_disassemble_to_string(&c, "test");
+    ASSERT(s != NULL, "should return non-NULL string");
+    ASSERT(strstr(s, "OP_ZIP_MAP") != NULL, "should contain OP_ZIP_MAP");
+    free(s);
+    chunk_free(&c);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -765,6 +789,10 @@ int main(void) {
     RUN_TEST(test_closure_clone_refcount);
     RUN_TEST(test_closure_is_truthy);
     RUN_TEST(test_function_refcount_clone);
+
+    printf("\nOP_ZIP_MAP:\n");
+    RUN_TEST(test_opcode_name_zip_map);
+    RUN_TEST(test_disassemble_zip_map);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

@@ -105,6 +105,11 @@ typedef enum {
                         * Calls fn(left[i], right[i]) for each element.
                         * Supports array-array, array-scalar, scalar-array. */
 
+    /* Zip two arrays into a map: keys @: values */
+    OP_ZIP_MAP, /* Pop 2 (keys array, values array), push 1 map.
+                 * Validates both operands are arrays with equal length
+                 * and that all keys are valid map key types. */
+
     /* Logical op-byte constants used as OP_REDUCE/OP_VECTORIZE operands only.
      * These are not standalone VM opcodes — they encode @and / @or
      * reduction semantics with short-circuit behavior. */

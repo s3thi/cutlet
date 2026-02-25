@@ -183,6 +183,8 @@ const char *opcode_name(OpCode op) {
         return "OP_REDUCE_CALL";
     case OP_VECTORIZE_CALL:
         return "OP_VECTORIZE_CALL";
+    case OP_ZIP_MAP:
+        return "OP_ZIP_MAP";
     case OP_AND:
         return "OP_AND";
     case OP_OR:
@@ -297,6 +299,7 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_CLOSE_UPVALUE:
     case OP_INDEX_GET:
     case OP_INDEX_SET:
+    case OP_ZIP_MAP:
     case OP_RETURN:
         dynbuf_printf(b, "%s\n", opcode_name((OpCode)instruction));
         return offset + 1;
