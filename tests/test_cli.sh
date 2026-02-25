@@ -1307,6 +1307,49 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Zip-map @: (integration)
+# ============================================================
+echo
+echo "Zip-map @: (integration):"
+
+# Basic @: via local REPL pipe
+test_local_repl "@: basic via pipe" '["a", "b"] @: [1, 2]' "{a: 1, b: 2}"
+
+# @: composability via cutlet run
+test_run_file "@: with variables" 'my names = ["a", "b"]
+my scores = [10, 20]
+say(names @: scores)' "{a: 10, b: 20}"
+
+# @: compose with @* via cutlet run
+test_run_file "@: compose with @*" 'say(["a", "b"] @: ([10, 20] @* 2))' "{a: 20, b: 40}"
+
+# @: map inversion via cutlet run
+test_run_file "@: map inversion" 'my m = {x: 1, y: 2}
+say(values(m) @: keys(m))' "{1: x, 2: y}"
+
+# --bytecode shows OP_ZIP_MAP for @: expression
+bc_zip_result=$(printf '["a"] @: [1]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_zip_result" | grep -q "OP_ZIP_MAP"; then
+    echo "  PASS: --bytecode shows OP_ZIP_MAP"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_ZIP_MAP"
+    echo "    Got: $bc_zip_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --ast shows VECTORIZE node for @: expression (parser produces AST_VECTORIZE)
+ast_zip_result=$(printf '["a"] @: [1]' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_zip_result" | grep -q "VECTORIZE"; then
+    echo "  PASS: --ast shows VECTORIZE node for @:"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows VECTORIZE node for @:"
+    echo "    Got: $ast_zip_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

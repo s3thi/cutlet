@@ -3239,6 +3239,38 @@ TEST(test_zip_map_invalid_key_type) {
 }
 
 /* ============================================================
+ * Zip-map (@:) composability
+ * ============================================================ */
+
+/* Variables: my names = ["a", "b"]; my scores = [10, 20]; names @: scores */
+TEST(test_zip_map_with_variables) {
+    assert_vm_formatted("my names = [\"a\", \"b\"]\n"
+                        "my scores = [10, 20]\n"
+                        "names @: scores",
+                        "{a: 10, b: 20}", "@: with variables");
+}
+
+/* Compose with @*: ["a", "b"] @: ([10, 20] @* 2) => {a: 20, b: 40} */
+TEST(test_zip_map_compose_vectorize) {
+    assert_vm_formatted("[\"a\", \"b\"] @: ([10, 20] @* 2)", "{a: 20, b: 40}",
+                        "@: compose with @*");
+}
+
+/* Map inversion: values(m) @: keys(m) */
+TEST(test_zip_map_inversion) {
+    assert_vm_formatted("my m = {x: 1, y: 2}\n"
+                        "values(m) @: keys(m)",
+                        "{1: x, 2: y}", "@: map inversion");
+}
+
+/* Round-trip: keys(m) @: values(m) => original map */
+TEST(test_zip_map_round_trip) {
+    assert_vm_formatted("my m = {a: 1, b: 2}\n"
+                        "keys(m) @: values(m)",
+                        "{a: 1, b: 2}", "@: round-trip");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3893,6 +3925,12 @@ int main(void) {
     RUN_TEST(test_zip_map_non_array_left);
     RUN_TEST(test_zip_map_non_array_right);
     RUN_TEST(test_zip_map_invalid_key_type);
+
+    printf("\nZip-map (@:) composability:\n");
+    RUN_TEST(test_zip_map_with_variables);
+    RUN_TEST(test_zip_map_compose_vectorize);
+    RUN_TEST(test_zip_map_inversion);
+    RUN_TEST(test_zip_map_round_trip);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
