@@ -1260,6 +1260,53 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Map meta-operators (integration)
+# ============================================================
+echo
+echo "Map meta-operators (integration):"
+
+# Map reduce via local REPL pipe
+test_local_repl "map @+ reduce" "@+ {a: 1, b: 2, c: 3}" "6"
+
+# Map vectorize via local REPL pipe
+test_local_repl "map @+ vectorize" "{a: 1, b: 2} @+ {a: 10, b: 20}" "{a: 11, b: 22}"
+
+# Map scalar broadcast via local REPL pipe
+test_local_repl "map @* scalar broadcast" "{a: 1, b: 2} @* 10" "{a: 10, b: 20}"
+
+# Map meta-operators end-to-end via cutlet run
+test_run_file "map meta-ops e2e" 'my scores = {math: 92, english: 87, science: 95}
+say(@+ scores)
+say(scores @>= 90)' "274
+{math: true, english: false, science: true}"
+
+# Composability: reduce values() of a map
+test_run_file "reduce values(map)" 'my m = {a: 10, b: 20, c: 30}
+say(@+ values(m))' "60"
+
+# --bytecode shows OP_REDUCE for map reduce expression
+bc_map_reduce_result=$(printf '@+ {a: 1, b: 2}' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_map_reduce_result" | grep -q "OP_REDUCE" && echo "$bc_map_reduce_result" | grep -q "OP_ADD"; then
+    echo "  PASS: --bytecode shows OP_REDUCE OP_ADD for map"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_REDUCE OP_ADD for map"
+    echo "    Got: $bc_map_reduce_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode shows OP_VECTORIZE for map vectorize expression
+bc_map_vec_result=$(printf '{a: 1} @+ {a: 2}' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_map_vec_result" | grep -q "OP_VECTORIZE" && echo "$bc_map_vec_result" | grep -q "OP_ADD"; then
+    echo "  PASS: --bytecode shows OP_VECTORIZE OP_ADD for map"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_VECTORIZE OP_ADD for map"
+    echo "    Got: $bc_map_vec_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

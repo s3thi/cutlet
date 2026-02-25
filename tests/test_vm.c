@@ -2898,6 +2898,31 @@ TEST(test_vectorize_array_scalar_still_works) {
 }
 
 /* ============================================================
+ * Map meta-operator composability tests
+ * ============================================================ */
+
+/* @+ values({a: 10, b: 20, c: 30}) → 60 (reduce array from values()) */
+TEST(test_map_compose_reduce_values) {
+    assert_vm_number("@+ values({a: 10, b: 20, c: 30})", 60.0, "@+ values() composability");
+}
+
+/* {a: 85, b: 92} @>= 90 → {a: false, b: true} (broadcast then inspect) */
+TEST(test_map_compose_broadcast_comparison) {
+    assert_vm_formatted("{a: 85, b: 92} @>= 90", "{a: false, b: true}",
+                        "@>= map broadcast comparison");
+}
+
+/* Chain: reduce a broadcast result — @+ ({a: 1, b: 2} @* 10) → 30 */
+TEST(test_map_compose_reduce_broadcast) {
+    assert_vm_number("@+ ({a: 1, b: 2} @* 10)", 30.0, "@+ reduce after broadcast");
+}
+
+/* Chain: vectorize two maps then reduce — @+ ({a: 1, b: 2} @+ {a: 10, b: 20}) → 33 */
+TEST(test_map_compose_reduce_vectorize) {
+    assert_vm_number("@+ ({a: 1, b: 2} @+ {a: 10, b: 20})", 33.0, "@+ reduce after vectorize");
+}
+
+/* ============================================================
  * Custom function reduction (@fn prefix)
  * ============================================================ */
 
@@ -3719,6 +3744,13 @@ int main(void) {
     RUN_TEST(test_vectorize_array_map_error);
     RUN_TEST(test_vectorize_array_still_works);
     RUN_TEST(test_vectorize_array_scalar_still_works);
+
+    /* ---- Map meta-operator composability ---- */
+    printf("\nMap meta-operator composability:\n");
+    RUN_TEST(test_map_compose_reduce_values);
+    RUN_TEST(test_map_compose_broadcast_comparison);
+    RUN_TEST(test_map_compose_reduce_broadcast);
+    RUN_TEST(test_map_compose_reduce_vectorize);
 
     /* ---- @fn prefix — custom function reduce ---- */
     printf("\nCustom function reduce (@fn prefix):\n");
