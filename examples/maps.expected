@@ -1,0 +1,26 @@
+{name: alice, age: 30, role: admin}
+{}
+{1: 1, 2: 4, 3: 9}
+{true: yes, false: no}
+{a: 2}
+alice
+30
+nothing
+{x: 10}
+{x: 99}
+{x: 99, y: 20}
+{name: alice, role: admin}
+{name: alice}
+{color: blue, size: 20, bold: true}
+[name, age, role]
+[alice, 30, admin]
+true
+false
+3
+0
+true
+false
+true
+true
+false
+{1: 1, 2: 4, 3: 9, 4: 16, 5: 25}

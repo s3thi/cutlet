@@ -761,7 +761,118 @@ end
 squares                 # => [1, 4, 9, 16, 25]
 
 # ============================================================
-# 13. The @ meta-operator
+# 13. Maps (dictionaries)
+# ============================================================
+
+# Maps are key-value collections. They use value semantics with
+# copy-on-write, just like arrays.
+
+# Map literals use curly braces. Bare identifiers become string keys.
+{name: "alice", age: 30}   # => {name: alice, age: 30}
+{}                          # => {} (empty map)
+
+# Trailing commas are allowed.
+{a: 1, b: 2,}             # => {a: 1, b: 2}
+
+# Multiline maps work — newlines inside braces are ignored.
+my person = {
+  name: "alice",
+  age: 30,
+  role: "admin",
+}
+person                      # => {name: alice, age: 30, role: admin}
+
+# Values can be any expression.
+{x: 1 + 2, y: 3 * 4}      # => {x: 3, y: 12}
+
+# Computed keys: use [expr] to use any expression as a key.
+{[1 + 2]: "three"}         # => {3: three}
+{[true]: "yes", [false]: "no"}  # => {true: yes, false: no}
+
+# To use a variable as a key, you must use computed syntax:
+my key = "color"
+{[key]: "blue"}             # => {color: blue}
+# Without brackets, `key` is treated as the string "key":
+{key: "blue"}               # => {key: blue}
+
+# Duplicate keys: last value wins.
+{a: 1, a: 2}               # => {a: 2}
+
+# Valid key types: strings, numbers, booleans, nothing.
+# Functions are not valid keys (runtime error).
+
+# Indexing with square brackets.
+my m = {name: "alice", age: 30}
+m["name"]                   # => alice
+m["age"]                    # => 30
+
+# Missing keys return nothing (not an error).
+m["email"]                  # => nothing
+
+# Use has_key() to distinguish "key absent" from "key present with
+# value nothing":
+my m2 = {a: nothing}
+m2["a"]                     # => nothing
+has_key(m2, "a")            # => true  (key exists)
+has_key(m2, "b")            # => false (key absent)
+
+# Index assignment. COW: the original is never changed.
+my m3 = {x: 10}
+my m4 = m3
+m4["x"] = 99
+m4["y"] = 20
+m4                          # => {x: 99, y: 20}
+m3                          # => {x: 10} (unchanged)
+
+# Map projection: index with an array of keys to select a sub-map.
+my data = {name: "alice", age: 30, email: "a@b.com", role: "admin"}
+data[["name", "email"]]     # => {name: alice, email: a@b.com}
+
+# Missing projection keys are silently skipped.
+data[["name", "zzz"]]       # => {name: alice}
+
+# Empty projection.
+data[[]]                     # => {}
+
+# Merge with ++ (right side wins on key conflicts).
+{a: 1, b: 2} ++ {b: 3, c: 4}   # => {a: 1, b: 3, c: 4}
+{} ++ {a: 1}                    # => {a: 1}
+{a: 1} ++ {}                    # => {a: 1}
+
+# Mixing maps with non-maps in ++ is an error.
+# {a: 1} ++ 2            # => ERR cannot concatenate map with number
+
+# Built-in functions.
+keys({name: "alice", age: 30})     # => [name, age]  (insertion order)
+values({name: "alice", age: 30})   # => [alice, 30]   (insertion order)
+has_key({a: 1}, "a")               # => true
+has_key({a: 1}, "b")               # => false
+len({a: 1, b: 2})                  # => 2
+len({})                             # => 0
+
+# keys() and values() return arrays, so you can use them in loops.
+
+# Equality is structural. Key order does not matter.
+{a: 1, b: 2} == {b: 2, a: 1}  # => true
+{a: 1} == {a: 1, b: 2}        # => false
+{} == {}                        # => true
+{a: 1} == "hello"               # => false (different types)
+
+# Truthiness: non-empty maps are truthy, empty maps are falsy.
+not {}                     # => true
+not {a: 1}                 # => false
+
+# Building a map in a loop.
+my squares = {}
+my i = 1
+while i <= 5 do
+  squares[str(i)] = i ** 2
+  i = i + 1
+end
+squares                     # => {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
+
+# ============================================================
+# 14. The @ meta-operator
 # ============================================================
 
 # The @ meta-operator lifts operators and functions to work across
@@ -859,7 +970,7 @@ my data = [1, 2, 3, 4, 5, 6, 7, 8]
 data[data @> 3]                      # => [4, 5, 6, 7, 8]
 
 # ============================================================
-# 14. say() for output
+# 15. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -874,7 +985,7 @@ say(nothing)    # prints: nothing
 say("result: " ++ str(42))   # prints: result: 42
 
 # ============================================================
-# 15. Running Cutlet programs
+# 16. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -895,7 +1006,7 @@ say("result: " ++ str(42))   # prints: result: 42
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 16. The REPL
+# 17. The REPL
 # ============================================================
 
 # Start an interactive REPL:
