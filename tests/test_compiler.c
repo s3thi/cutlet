@@ -995,6 +995,43 @@ TEST(test_compile_upvalue_call) {
 }
 
 /* ============================================================
+ * Zip map (@:) compilation
+ * ============================================================ */
+
+/* ["a"] @: [1] → OP_ZIP_MAP (no operand byte, unlike OP_VECTORIZE) */
+TEST(test_compile_zip_map) {
+    CompileError err;
+    Chunk *chunk = compile_input("[\"a\"] @: [1]", &err);
+    ASSERT(chunk != NULL, "should compile @:");
+    /* Bytecode: array construction for left, array construction for right,
+     * OP_ZIP_MAP, OP_RETURN. Find OP_ZIP_MAP in the bytecode. */
+    bool found = false;
+    for (size_t i = 0; i < chunk->count; i++) {
+        if (chunk->code[i] == OP_ZIP_MAP) {
+            found = true;
+            break;
+        }
+    }
+    ASSERT(found, "should emit OP_ZIP_MAP");
+    /* Verify OP_VECTORIZE is NOT emitted — @: uses its own opcode. */
+    for (size_t i = 0; i < chunk->count; i++) {
+        ASSERT(chunk->code[i] != OP_VECTORIZE, "should not emit OP_VECTORIZE for @:");
+    }
+    free_chunk(chunk);
+    PASS();
+}
+
+/* @: in prefix position (reduce) should be a compile error. */
+TEST(test_compile_zip_map_prefix_error) {
+    CompileError err;
+    Chunk *chunk = compile_input("@: [1, 2, 3]", &err);
+    ASSERT(chunk == NULL, "@: in prefix should fail to compile");
+    ASSERT(strstr(err.message, "cannot be used as a reduction") != NULL,
+           "error message should mention reduction");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1078,6 +1115,10 @@ int main(void) {
     RUN_TEST(test_compile_upvalue_chained_capture);
     RUN_TEST(test_compile_upvalue_set);
     RUN_TEST(test_compile_upvalue_call);
+
+    printf("\nZip map (@:) compilation:\n");
+    RUN_TEST(test_compile_zip_map);
+    RUN_TEST(test_compile_zip_map_prefix_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

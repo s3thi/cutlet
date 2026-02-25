@@ -2611,6 +2611,25 @@ TEST(test_vectorize_precedence) {
     PASS();
 }
 
+/* ["a"] @: [1] → AST_VECTORIZE with op ":" (zip into map) */
+TEST(test_vectorize_zip_map) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(parser_parse("[\"a\"] @: [1]", &node, &err), "should parse @: vectorize");
+    ASSERT(node->type == AST_VECTORIZE, "type should be VECTORIZE");
+    ASSERT_STR_EQ(node->value, ":", "op should be :");
+    ASSERT(node->left != NULL, "should have left operand");
+    ASSERT(node->left->type == AST_ARRAY, "left should be ARRAY");
+    ASSERT(node->right != NULL, "should have right operand");
+    ASSERT(node->right->type == AST_ARRAY, "right should be ARRAY");
+    char *s = ast_format(node);
+    ASSERT_STR_EQ(s, "AST [VECTORIZE : [ARRAY [STRING a]] [ARRAY [NUMBER 1]]]",
+                  "@: vectorize AST format");
+    free(s);
+    ast_free(node);
+    PASS();
+}
+
 /* ============================================================
  * Map literal parsing
  * ============================================================ */
@@ -3100,6 +3119,7 @@ int main(void) {
     RUN_TEST(test_vectorize_scalar_broadcast);
     RUN_TEST(test_vectorize_custom_func);
     RUN_TEST(test_vectorize_precedence);
+    RUN_TEST(test_vectorize_zip_map);
 
     printf("\nMap literal parsing:\n");
     RUN_TEST(test_map_empty);

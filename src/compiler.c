@@ -1199,7 +1199,14 @@ static void emit_load_callable(Compiler *c, const char *name, int line) {
  */
 static void compile_reduce(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
+    (void)line;
     const char *op = node->value;
+
+    /* @: (zip into map) is not valid as a prefix reduction operator. */
+    if (strcmp(op, ":") == 0) {
+        compiler_error(c, "':' cannot be used as a reduction operator");
+        return;
+    }
 
     int inner_op = meta_op_to_opcode(op);
     if (inner_op >= 0) {
@@ -1224,6 +1231,15 @@ static void compile_reduce(Compiler *c, const AstNode *node) {
 static void compile_vectorize(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
     const char *op = node->value;
+
+    /* @: (zip into map): compile both operands, emit OP_ZIP_MAP.
+     * This is a special case — not a vectorized binary op. */
+    if (strcmp(op, ":") == 0) {
+        compile_node(c, node->left);
+        compile_node(c, node->right);
+        emit_byte(c, OP_ZIP_MAP, line);
+        return;
+    }
 
     int inner_op = meta_op_to_opcode(op);
     if (inner_op >= 0) {
