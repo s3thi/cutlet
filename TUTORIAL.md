@@ -969,6 +969,49 @@ scores[scores @>= 70]               # => [85, 92, 74, 95]
 my data = [1, 2, 3, 4, 5, 6, 7, 8]
 data[data @> 3]                      # => [4, 5, 6, 7, 8]
 
+# --- @ on maps ---
+
+# The @ meta-operator works on maps too. Prefix @op reduces (folds)
+# over the map's values in insertion order.
+@+ {math: 92, english: 87, science: 95}   # => 274
+@* {a: 2, b: 3, c: 4}                      # => 24
+@++ {first: "hello", second: " world"}     # => hello world
+
+# Single-entry maps return that value. Empty maps are a runtime error.
+@+ {x: 42}                # => 42
+# @+ {}                   # => ERR cannot reduce empty map
+
+# @and and @or short-circuit over map values, same as arrays.
+@and {a: true, b: true, c: false}   # => false
+@or {a: false, b: 0, c: "hi"}       # => hi
+
+# Infix @op on two maps: vectorizes by key intersection.
+# Only shared keys appear in the result. Non-shared keys are dropped.
+{a: 1, b: 2} @+ {a: 10, b: 20}     # => {a: 11, b: 22}
+{a: 1, b: 2, c: 3} @+ {b: 10, c: 20, d: 30}  # => {b: 12, c: 23}
+{a: 1} @+ {b: 2}                    # => {} (no shared keys)
+
+# Scalar broadcast: when one operand is a scalar, it applies to
+# every value in the map.
+{a: 1, b: 2} @* 10                  # => {a: 10, b: 20}
+100 @- {a: 10, b: 20}               # => {a: 90, b: 80}
+{math: 85, english: 90} @>= 88      # => {math: false, english: true}
+
+# Maps and arrays cannot be mixed in vectorized operations.
+# {a: 1} @+ [1, 2]       # => ERR cannot vectorize map with array
+# [1, 2] @+ {a: 1}       # => ERR cannot vectorize array with map
+# Use values() or keys() to convert first.
+
+# --- Composability ---
+
+# Since keys(), values() return arrays and @ works on both arrays
+# and maps, you can mix freely.
+my scores = {math: 92, english: 87, science: 95}
+@+ values(scores)                    # => 274 (reduce the values array)
+
+# Vectorize then reduce: total of element-wise product.
+@+ ({a: 2, b: 3} @* {a: 10, b: 20}) # => 80
+
 # ============================================================
 # 15. say() for output
 # ============================================================
