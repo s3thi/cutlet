@@ -197,6 +197,13 @@ Existing array behavior unchanged:
 
 - [x] Step 1: Extend `OP_REDUCE` for maps — added map-to-values extraction in `OP_REDUCE` handler; maps fold over values in insertion order with distinct "cannot reduce empty map" error; 8 tests added
 - [x] Step 2: Extend `OP_VECTORIZE` for maps — added map-map (key intersection), map-scalar broadcast, scalar-map broadcast, and map-array error handling; 14 tests added
+- [x] Step 3: Integration tests + end-to-end — added 4 composability VM tests (reduce values(), broadcast comparison, chained reduce-after-broadcast/vectorize) and 7 CLI integration tests (REPL pipe, cutlet run script, bytecode disassembly verification)
+
+## Summary
+
+Extended the `@` meta-operator to work on maps. Maps support reduction (`@+ map` folds over values), vectorization (`map @op map` by key intersection), and scalar broadcast (`map @op scalar`). Map-array combinations are rejected with a clear error.
+
+**Files touched**: `src/vm.c`, `tests/test_vm.c`, `tests/test_cli.sh`
 
 ---
 End of plan.
