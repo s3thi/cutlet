@@ -6,103 +6,135 @@ one-liners, combining the expressiveness of Python, Ruby, Lua, and JavaScript
 with first-class support for running subprocesses, building pipelines, and
 scripting your system.
 
+Comments start with `#` and go to the end of the line.
+
+## 1. Numbers and arithmetic
+
+Numbers are 64-bit floating point (doubles).
+
 ```cutlet
-# This is a comment. Comments start with # and go to end of line.
-
-# ============================================================
-# 1. Numbers and arithmetic
-# ============================================================
-
-# Numbers are 64-bit floating point (doubles).
 42          # => 42
 0           # => 0
 3.14        # => 3.14
 0.5         # => 0.5
+```
 
-# Decimal literals need at least one digit before the dot.
-# .5 is NOT a valid number (the dot starts an operator).
-# 5. is NOT a decimal — it's the integer 5 followed by a dot operator.
+Decimal literals need at least one digit before the dot. `.5` is NOT a valid number (the dot starts an operator). `5.` is NOT a decimal — it's the integer 5 followed by a dot operator.
 
-# Arithmetic works how you'd expect.
+Arithmetic works how you'd expect.
+
+```cutlet
 1 + 2       # => 3
 10 - 3      # => 7
 2 * 3       # => 6
 7 / 2       # => 3.5
 0.5 + 0.5   # => 1
 3.14 * 2    # => 6.28
+```
 
-# Modulo with % (Python-style: result has the sign of the divisor).
+Modulo with `%` uses Python-style semantics: the result has the sign of the divisor.
+
+```cutlet
 10 % 3      # => 1
 -7 % 3      # => 2   (not -1 like C)
 7 % -3      # => -2  (not 1 like C)
+```
 
-# Exponentiation with ** (right-associative).
+Exponentiation with `**` is right-associative.
+
+```cutlet
 2 ** 10     # => 1024
 2 ** 3 ** 2 # => 512 (2 ** (3 ** 2) = 2 ** 9)
+```
 
-# Unary minus.
+Unary minus.
+
+```cutlet
 -3          # => -3
 -(-3)       # => 3
+```
 
-# Standard precedence: ** > unary - > * / % > + -
+Standard precedence: `**` > unary `-` > `*` `/` `%` > `+` `-`.
+
+```cutlet
 1 + 2 * 3   # => 7    (not 9)
 (1 + 2) * 3 # => 9    (parentheses override)
 -2 ** 2     # => -4   (-(2 ** 2), not (-2) ** 2)
+```
 
-# Division and modulo by zero are runtime errors.
+Division and modulo by zero are runtime errors.
+
+```cutlet
 # 1 / 0     # => ERR division by zero
 # 1 % 0     # => ERR modulo by zero
+```
 
-# ============================================================
-# 2. Strings
-# ============================================================
+## 2. Strings
 
-# Strings are double-quoted.
+Strings are double-quoted. No escape sequences yet — what you type is what you get. Strings can contain any characters except newlines and double quotes.
+
+```cutlet
 "hello"         # => hello
 "hello world"   # => hello world
 ""              # => (empty string)
+```
 
-# No escape sequences yet. What you type is what you get.
-# Strings can contain any characters except newlines and double quotes.
+Concatenation with `++` (two plusses). Both sides must be strings.
 
-# Concatenation with ++ (two plusses). Both sides must be strings.
+```cutlet
 "hello" ++ " world"     # => hello world
 "a" ++ "b" ++ "c"       # => abc
+```
 
-# ++ is strict — non-string operands are a runtime error.
+`++` is strict — non-string operands are a runtime error.
+
+```cutlet
 # "score: " ++ 42       # => ERR ++ requires strings, got string and number
+```
 
-# Use str() to explicitly convert any value to a string.
+Use `str()` to explicitly convert any value to a string.
+
+```cutlet
 "score: " ++ str(42)         # => score: 42
 "alive: " ++ str(true)       # => alive: true
 "value: " ++ str(nothing)    # => value: nothing
 str(3.14)                    # => 3.14
 str("hi")                    # => hi (identity — already a string)
+```
 
-# + does NOT work on strings — it's only for numbers.
+`+` does NOT work on strings — it's only for numbers.
+
+```cutlet
 # "a" + "b"             # => ERR arithmetic requires numbers
+```
 
-# ++ binds looser than + but tighter than comparison.
+`++` binds looser than `+` but tighter than comparison.
+
+```cutlet
 str(1 + 2) ++ str(3 + 4)    # => 37 (+ binds tighter than ++)
+```
 
-# ++ is right-associative (like Lua).
+`++` is right-associative (like Lua).
+
+```cutlet
 "a" ++ "b" ++ "c"       # => abc (same as "a" ++ ("b" ++ "c"))
+```
 
-# ============================================================
-# 3. Booleans and nothing
-# ============================================================
+## 3. Booleans and nothing
 
+```cutlet
 true        # => true
 false       # => false
 nothing     # => nothing
+```
 
-# `nothing` is Cutlet's null/nil value.
+`nothing` is Cutlet's null/nil value.
 
-# ============================================================
-# 4. Comparison operators
-# ============================================================
+## 4. Comparison operators
 
-# Equality works across all types.
+Equality works across all types.
+
+```cutlet
 1 == 1          # => true
 1 == 2          # => false
 "a" == "a"      # => true
@@ -110,92 +142,122 @@ nothing     # => nothing
 nothing == nothing  # => true
 
 1 != 2          # => true
+```
 
-# Ordering works for numbers and strings (but not across types).
+Ordering works for numbers and strings (but not across types).
+
+```cutlet
 1 < 2           # => true
 "a" < "b"       # => true
 2 > 1           # => true
 1 <= 1          # => true
 2 >= 1          # => true
+```
 
-# Comparisons are non-associative: 1 < 2 < 3 is a syntax error.
-# Use `and` to chain: 1 < 2 and 2 < 3
+Comparisons are non-associative: `1 < 2 < 3` is a syntax error. Use `and` to chain: `1 < 2 and 2 < 3`.
 
-# ============================================================
-# 5. Logical operators
-# ============================================================
+## 5. Logical operators
 
-# `and`, `or`, `not` — keywords, not symbols.
+`and`, `or`, `not` are keywords, not symbols.
+
+```cutlet
 true and true       # => true
 true and false      # => false
 false or true       # => true
 not true            # => false
 not false           # => true
+```
 
-# Truthiness: false, nothing, 0, and "" are falsy.
-# Everything else is truthy.
+Truthiness: `false`, `nothing`, `0`, and `""` are falsy. Everything else is truthy.
+
+```cutlet
 not 0               # => true
 not ""              # => true
 not nothing         # => true
 not 1               # => false
 not "hi"            # => false
+```
 
-# Short-circuit evaluation (Python semantics):
-# `and` returns the first falsy operand, or the last operand.
-# `or` returns the first truthy operand, or the last operand.
+Short-circuit evaluation uses Python semantics: `and` returns the first falsy operand (or the last operand), `or` returns the first truthy operand (or the last operand).
+
+```cutlet
 1 and 2             # => 2
 0 and 2             # => 0
 0 or 2              # => 2
 false or 0          # => 0
+```
 
-# Precedence: not > and > or
+Precedence: `not` > `and` > `or`.
+
+```cutlet
 true or true and false  # => true  (true or (true and false))
 not true and false      # => false ((not true) and false)
+```
 
-# `not` binds looser than comparisons (like Python).
+`not` binds looser than comparisons (like Python).
+
+```cutlet
 not 1 < 2           # => false (not (1 < 2))
+```
 
-# ============================================================
-# 6. Variables
-# ============================================================
+## 6. Variables
 
-# Declare with `my`, assign with `=`.
+Declare with `my`, assign with `=`.
+
+```cutlet
 my x = 10
 x               # => 10
+```
 
-# Reassign:
+Reassign:
+
+```cutlet
 x = 20
 x               # => 20
+```
 
-# Declarations can chain (right-associative).
+Declarations can chain (right-associative).
+
+```cutlet
 my a = my b = 5
 a               # => 5
 b               # => 5
+```
 
-# Kebab-case identifiers — dashes are allowed inside names.
-# A dash is part of the name when it's immediately followed by a letter.
+Kebab-case identifiers — dashes are allowed inside names. A dash is part of the name when it's immediately followed by a letter.
+
+```cutlet
 my my-var = 42
 my-var          # => 42
 
 my compute-sum = 100
 compute-sum     # => 100
+```
 
-# Kebab and underscore names are distinct variables.
+Kebab and underscore names are distinct variables.
+
+```cutlet
 my x-y = 10
 my x_y = 20
 x-y             # => 10
 x_y             # => 20
+```
 
-# Subtraction still works — just add spaces around the minus sign.
+Subtraction still works — just add spaces around the minus sign.
+
+```cutlet
 my foo-bar = 10
 foo-bar - 3     # => 7 (foo-bar is one variable, `- 3` is subtraction)
+```
 
-# These are NOT kebab identifiers (dash not followed by a letter):
-# foo-3     => variable `foo`, minus, number 3
-# foo--bar  => variable `foo`, minus, minus, variable `bar`
-# foo - bar => variable `foo`, minus, variable `bar`
+These are NOT kebab identifiers (dash not followed by a letter):
+- `foo-3` — variable `foo`, minus, number 3
+- `foo--bar` — variable `foo`, minus, minus, variable `bar`
+- `foo - bar` — variable `foo`, minus, variable `bar`
 
-# Kebab-case works for function names and parameters too.
+Kebab-case works for function names and parameters too.
+
+```cutlet
 fn add-one(n) is n + 1
 say(add-one(5))         # prints: 6
 
@@ -203,41 +265,59 @@ fn greet-user(user-name) is
   "hello " ++ user-name
 end
 say(greet-user("alice")) # prints: hello alice
+```
 
-# Using an undeclared variable is a runtime error.
+Using an undeclared variable is a runtime error.
+
+```cutlet
 # y              # => ERR undefined variable 'y'
+```
 
-# ============================================================
-# 7. If/else expressions
-# ============================================================
+## 7. If/else expressions
 
-# if/else is an expression — it returns a value.
+`if`/`else` is an expression — it returns a value.
+
+```cutlet
 if true then 1 else 2 end    # => 1
 if false then 1 else 2 end   # => 2
+```
 
-# The else branch is optional. Without it, false returns nothing.
+The else branch is optional. Without it, a false condition returns `nothing`.
+
+```cutlet
 if false then 1 end           # => nothing
 if true then 42 end           # => 42
+```
 
-# Single-line forms: when the body is on the same line as `then`,
-# you can omit `end`.
+Single-line forms: when the body is on the same line as `then`, you can omit `end`.
+
+```cutlet
 if true then 42               # => 42
 if true then 1 else 2         # => 1
 if false then 1               # => nothing
+```
 
-# Single-line else-if chains:
+Single-line else-if chains:
+
+```cutlet
 my x = 5
 if x > 0 then "pos" else if x < 0 then "neg" else "zero"  # => pos
+```
 
-# Multi-line bodies (with newline after `then`) still require `end`:
+Multi-line bodies (with newline after `then`) require `end`:
+
+```cutlet
 if 1 < 2 then
   my x = 10
   x + 5        # last expression is the return value
 else
   0
 end             # => 15
+```
 
-# else if (no extra `end` needed):
+Else-if (no extra `end` needed):
+
+```cutlet
 my score = 85
 if score >= 90 then
   "A"
@@ -246,30 +326,42 @@ else if score >= 80 then
 else
   "C"
 end             # => "B"
+```
 
-# Use if/else in assignments:
+Use if/else in assignments:
+
+```cutlet
 my result = if 1 < 2 then "yes" else "no"
 result          # => yes
+```
 
-# ============================================================
-# 8. While loops
-# ============================================================
+## 8. While loops
 
-# while...do...end is a loop expression.
+`while`...`do`...`end` is a loop expression.
+
+```cutlet
 my i = 0
 while i < 5 do
   i = i + 1
 end                 # => 5 (last body value)
+```
 
-# A loop that never runs returns nothing.
+A loop that never runs returns `nothing`.
+
+```cutlet
 while false do 42 end   # => nothing
+```
 
-# Single-line form: when the body is on the same line as `do`,
-# you can omit `end`.
+Single-line form: when the body is on the same line as `do`, you can omit `end`.
+
+```cutlet
 my j = 10
 while j > 0 do j = j - 1       # => 0
+```
 
-# Multi-expression body:
+Multi-expression body:
+
+```cutlet
 my k = 0
 while k < 3 do
   say(k)
@@ -277,15 +369,21 @@ while k < 3 do
 end
 # prints: 0, 1, 2
 # => 3
+```
 
-# while is an expression — you can use it in assignments.
+`while` is an expression — you can use it in assignments.
+
+```cutlet
 my n = 0
 my total = while n < 4 do
   n = n + 1
 end
 total               # => 4
+```
 
-# Nested loops work as expected.
+Nested loops work as expected.
+
+```cutlet
 my outer = 0
 my count = 0
 while outer < 3 do
@@ -297,25 +395,37 @@ while outer < 3 do
   outer = outer + 1
 end
 count               # => 6
+```
 
-# `break` exits the loop immediately.
+`break` exits the loop immediately.
+
+```cutlet
 my m = 0
 while m < 100 do
   m = m + 1
   if m == 5 then break
 end
 m                   # => 5
+```
 
-# `break` with a value — the loop evaluates to that value.
+`break` with a value — the loop evaluates to that value.
+
+```cutlet
 my found = while true do
   break "done"
 end
 found               # => done
+```
 
-# Bare `break` (no value) — the loop evaluates to nothing.
+Bare `break` (no value) — the loop evaluates to `nothing`.
+
+```cutlet
 while true do break         # => nothing
+```
 
-# `continue` skips the rest of the current iteration.
+`continue` skips the rest of the current iteration.
+
+```cutlet
 my p = 0
 while p < 6 do
   p = p + 1
@@ -323,8 +433,11 @@ while p < 6 do
   say(p)
 end
 # prints: 1, 3, 5
+```
 
-# In nested loops, break and continue affect the innermost loop only.
+In nested loops, `break` and `continue` affect the innermost loop only.
+
+```cutlet
 my q = 0
 while q < 3 do
   q = q + 1
@@ -336,11 +449,16 @@ while q < 3 do
   end
 end
 # prints: 1-1, 1-3, 2-1, 2-3, 3-1, 3-3
+```
 
-# break and continue outside a loop are compile errors.
+`break` and `continue` outside a loop are compile errors.
+
+```cutlet
 # break        # => ERR 'break' outside of loop
 # continue     # => ERR 'continue' outside of loop
+```
 
+```cutlet
 # ============================================================
 # 9. User-defined functions
 # ============================================================

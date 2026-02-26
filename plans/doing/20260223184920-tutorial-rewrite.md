@@ -55,3 +55,8 @@ None. No tasks in `plans/doing/` need to complete first.
    - Verify fenced code blocks use the `cutlet` language tag (or `sh` for shell commands).
 
 6. Run `make test && make check` once to confirm nothing was accidentally broken.
+
+## Progress
+
+- [x] Step 1: Read current TUTORIAL.md — read all 1182 lines, 18 sections
+- [x] Step 2: Rewrite sections 1-8 (Numbers through While loops) — converted banners to ## headings, extracted comments into prose, split into separate fenced code blocks
