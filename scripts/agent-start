@@ -38,7 +38,11 @@ fi
 
 # Resolve host paths.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-REPO_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --absolute-git-dir)"
+# Use --git-common-dir to get the shared object database. This works for
+# both regular repos (.git/) and worktree setups (bare repo shared by
+# all worktrees). --absolute-git-dir would return the worktree-specific
+# metadata dir, which git clone can't use.
+REPO_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --path-format=absolute --git-common-dir)"
 CLAUDE_DIR="$HOME/.claude"
 
 if [ ! -d "$CLAUDE_DIR" ]; then
