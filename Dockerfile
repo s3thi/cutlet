@@ -35,7 +35,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     software-properties-common \
     tmux \
+    locales \
     && rm -rf /var/lib/apt/lists/*
+
+# Generate a UTF-8 locale so terminal UI (Claude Code) renders correctly.
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 TERM=xterm-256color
 
 # Install latest stable git from the git-core PPA. Ubuntu 24.04 ships
 # git 2.43, which doesn't support the relativeWorktrees extension
