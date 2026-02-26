@@ -135,6 +135,8 @@ const char *opcode_name(OpCode op) {
         return "OP_LESS_EQUAL";
     case OP_GREATER_EQUAL:
         return "OP_GREATER_EQUAL";
+    case OP_IN:
+        return "OP_IN";
     case OP_NOT:
         return "OP_NOT";
     case OP_DEFINE_GLOBAL:
@@ -294,6 +296,7 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_GREATER:
     case OP_LESS_EQUAL:
     case OP_GREATER_EQUAL:
+    case OP_IN:
     case OP_NOT:
     case OP_POP:
     case OP_CLOSE_UPVALUE:

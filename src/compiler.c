@@ -399,6 +399,9 @@ static void compile_binop(Compiler *c, const AstNode *node) {
         emit_byte(c, OP_LESS_EQUAL, line);
     } else if (strcmp(op, ">=") == 0) {
         emit_byte(c, OP_GREATER_EQUAL, line);
+    } else if (strcmp(op, "in") == 0) {
+        /* Membership test: needle (left) in haystack (right). */
+        emit_byte(c, OP_IN, line);
     } else {
         compiler_error(c, "unknown operator '%s'", op);
     }

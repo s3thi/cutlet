@@ -51,6 +51,9 @@ typedef enum {
     OP_LESS_EQUAL,
     OP_GREATER_EQUAL,
 
+    /* Membership test: pop needle and haystack, push bool */
+    OP_IN,
+
     /* Logical */
     OP_NOT, /* Pop 1, push bool */
 

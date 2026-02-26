@@ -1166,6 +1166,54 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        /* OP_IN: membership test.
+         * Pop haystack (right) and needle (left).
+         * Supports map key lookup, array element search, and string substring search. */
+        case OP_IN: {
+            Value haystack, needle;
+            if (!vm_pop(vm, &haystack)) {
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            if (!vm_pop(vm, &needle)) {
+                value_free(&haystack);
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            bool found = false;
+            switch (haystack.type) {
+            case VAL_MAP:
+                found = obj_map_has(haystack.map, &needle);
+                break;
+            case VAL_ARRAY:
+                for (size_t i = 0; i < haystack.array->count; i++) {
+                    if (value_equal(&needle, &haystack.array->data[i])) {
+                        found = true;
+                        break;
+                    }
+                }
+                break;
+            case VAL_STRING:
+                if (needle.type != VAL_STRING) {
+                    value_free(&needle);
+                    value_free(&haystack);
+                    return vm_runtime_error(vm,
+                                            "in requires a string left operand for string search");
+                }
+                found = strstr(haystack.string, needle.string) != NULL;
+                break;
+            default:
+                value_free(&needle);
+                value_free(&haystack);
+                return vm_runtime_error(vm, "cannot use 'in' with %s",
+                                        value_type_name(haystack.type));
+            }
+            value_free(&needle);
+            value_free(&haystack);
+            if (!vm_push(vm, make_bool(found))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_NOT: {
             Value a;
             if (!vm_pop(vm, &a)) {
