@@ -4,7 +4,7 @@
 # Tested on: Linux, macOS, Windows (with appropriate toolchain)
 
 CC ?= cc
-CFLAGS = -std=c23 -Wall -Wextra -Wpedantic -g
+CFLAGS = -std=c23 -D_GNU_SOURCE -Wall -Wextra -Wpedantic -g
 LDFLAGS =
 
 # Directories
@@ -257,7 +257,7 @@ lint: compile_commands.json
 
 # Separate build directory so sanitizer flags don't mix with regular objects.
 SANITIZE_BUILD_DIR = build-sanitize
-SANITIZE_CFLAGS = -std=c23 -Wall -Wextra -Wpedantic -g -O1 \
+SANITIZE_CFLAGS = -std=c23 -D_GNU_SOURCE -Wall -Wextra -Wpedantic -g -O1 \
 	-fno-omit-frame-pointer \
 	-fsanitize=address,undefined \
 	-fno-sanitize-recover=all
