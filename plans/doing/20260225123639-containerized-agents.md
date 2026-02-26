@@ -306,13 +306,29 @@ Since this is infrastructure (not language source code), verification is manual 
 
 ## Progress
 
-- [x] Step 1: Dockerfile and .dockerignore — created Dockerfile (Ubuntu 24.04, gcc-14, clang-format-18, clang-tidy-18, bear, python3, ctags, cscope, Node.js 20, Claude Code, build-time `make test` verification) and .dockerignore (excludes build/, build-sanitize/, compile_commands.json, .git/)
+- [x] Step 1: Dockerfile and .dockerignore — created Dockerfile (Ubuntu 24.04, gcc-14, clang-format-18, clang-tidy-18, bear, python3, ctags, cscope, Claude Code native installer, build-time `make test` verification) and .dockerignore (excludes build/, build-sanitize/, compile_commands.json, .git/)
 - [x] Step 2: `scripts/agent-build` — created build script that runs `docker build -t cutlet-agent:latest --progress=plain` from repo root, with `-h` usage help
 - [x] Step 3: `scripts/agent-start` — created start script that creates a container, clones repo from mounted .git, creates/checks out branch, configures git identity, starts tmux with Claude Code + shell panes, waits for tmux ready, and attaches
 - [x] Step 4: `scripts/agent-list` — created list script that shows all cutlet-agent containers with status/uptime, or prints "No agent containers." when none exist
 - [x] Step 5: `scripts/agent-pause` — created pause script that verifies container exists and is running, then freezes it with `docker pause`
 - [x] Step 6: `scripts/agent-connect` — created connect script that unpauses paused containers, verifies tmux session exists, and reattaches to it
 - [x] Step 7: `scripts/agent-delete` — created delete script that verifies container exists, then force-removes it with `docker rm -f`
+- [x] Step 8: Manual verification — all acceptance criteria verified interactively
+
+## Summary
+
+All containerized agent infrastructure is complete. Files changed:
+
+- `Dockerfile` — Ubuntu 24.04 image with full Cutlet toolchain, Claude Code (native installer), non-root `agent` user, UTF-8 locale, build-time `make test` verification
+- `.dockerignore` — excludes build/, build-sanitize/, compile_commands.json, .git/
+- `scripts/agent-build` — builds and tags the Docker image
+- `scripts/agent-start` — creates container, clones repo, starts tmux with Claude Code + shell
+- `scripts/agent-list` — lists all agent containers with status
+- `scripts/agent-pause` — freezes a running container
+- `scripts/agent-connect` — resumes and reattaches to a container
+- `scripts/agent-delete` — permanently removes a container
+- `Makefile` — added `-D_GNU_SOURCE` to CFLAGS for Linux compatibility, guarded Clang-only warning flags
+- `src/repl_server.c` — fixed `accept_loop` hang on Linux by using `poll()` with timeout
 
 ---
 End of plan.
