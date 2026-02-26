@@ -44,6 +44,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # metadata dir, which git clone can't use.
 REPO_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --path-format=absolute --git-common-dir)"
 CLAUDE_DIR="$HOME/.claude"
+CLAUDE_JSON="$HOME/.claude.json"
 
 if [ ! -d "$CLAUDE_DIR" ]; then
     printf "Error: Claude credentials directory not found at %s\n" "$CLAUDE_DIR" >&2
@@ -62,14 +63,24 @@ fi
 # The entrypoint script runs inside the container as PID 1.
 # It clones the repo, creates the branch, configures git, starts tmux,
 # then sleeps forever to keep the container alive.
+AGENT_HOME="/home/agent"
+
+# The entrypoint script runs inside the container as PID 1 (root).
+# It sets up credentials for the non-root 'agent' user, clones the repo,
+# then drops to the agent user for tmux + Claude Code.
 ENTRYPOINT_SCRIPT=$(cat <<'ENTRYPOINT'
 set -euo pipefail
 
-# Copy Claude credentials from the read-only mount into a writable
-# location. Claude Code needs to write session state, so a direct
-# read-only mount of ~/.claude doesn't work. Copying preserves the
-# host's credentials while giving the container a writable copy.
-cp -a /host-claude /root/.claude
+AGENT_HOME="/home/agent"
+
+# Copy Claude credentials from the read-only mounts into the agent
+# user's home. Claude Code needs to write session state, so a direct
+# read-only mount doesn't work. Copying gives the container a writable
+# copy without risking host credential modification.
+cp -a /host-claude "$AGENT_HOME/.claude"
+if [ -f /host-claude.json ]; then
+    cp /host-claude.json "$AGENT_HOME/.claude.json"
+fi
 
 # Clone from the mounted host repo .git directory.
 git clone /host-repo.git /workspace
@@ -86,14 +97,20 @@ fi
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
-# Start a tmux session with two panes:
+# Hand ownership of workspace and credentials to the agent user.
+chown -R agent:agent /workspace "$AGENT_HOME/.claude"
+if [ -f "$AGENT_HOME/.claude.json" ]; then
+    chown agent:agent "$AGENT_HOME/.claude.json"
+fi
+
+# Start tmux as the agent user with two panes:
 #   Left:  Claude Code with --dangerously-skip-permissions
 #   Right: bash shell in /workspace
 # The left pane falls back to bash if Claude exits (e.g., auth failure),
 # so the pane stays alive and the user can re-run claude manually.
-tmux new-session -d -s main -c /workspace \
-    'claude --dangerously-skip-permissions; exec bash'
-tmux split-window -h -t main -c /workspace
+su -l agent -c "cd /workspace && tmux new-session -d -s main -c /workspace \
+    'claude --dangerously-skip-permissions; exec bash'"
+su -l agent -c "tmux split-window -h -t main -c /workspace"
 
 # Keep the container alive. tmux server runs in the background;
 # sleep infinity keeps PID 1 alive so the container doesn't exit.
@@ -103,21 +120,30 @@ ENTRYPOINT
 
 printf "Starting container '%s' ...\n" "$CONTAINER"
 
+# Build volume mount arguments. Always mount the git dir and claude dir.
+# Optionally mount .claude.json if it exists on the host.
+VOLUME_ARGS=(
+    -v "$REPO_GIT_DIR":/host-repo.git
+    -v "$CLAUDE_DIR":/host-claude:ro
+)
+if [ -f "$CLAUDE_JSON" ]; then
+    VOLUME_ARGS+=(-v "$CLAUDE_JSON":/host-claude.json:ro)
+fi
+
 # Start the container detached with host repo .git and Claude credentials mounted.
 docker run -d \
     --name "$CONTAINER" \
     -e BRANCH="$BRANCH" \
     -e GIT_USER_NAME="$GIT_USER_NAME" \
     -e GIT_USER_EMAIL="$GIT_USER_EMAIL" \
-    -v "$REPO_GIT_DIR":/host-repo.git \
-    -v "$CLAUDE_DIR":/host-claude:ro \
+    "${VOLUME_ARGS[@]}" \
     cutlet-agent:latest \
     /bin/bash -c "$ENTRYPOINT_SCRIPT"
 
 # Wait for the tmux session to be ready (up to 30 seconds).
 printf "Waiting for tmux session ...\n"
 for i in $(seq 1 30); do
-    if docker exec "$CONTAINER" tmux has-session -t main 2>/dev/null; then
+    if docker exec -u agent "$CONTAINER" tmux has-session -t main 2>/dev/null; then
         break
     fi
     if [ "$i" -eq 30 ]; then
@@ -131,4 +157,4 @@ done
 printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
 
 # Attach to the tmux session inside the container.
-docker exec -it "$CONTAINER" tmux attach -t main
+docker exec -it -u agent "$CONTAINER" tmux attach -t main

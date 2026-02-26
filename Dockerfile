@@ -67,4 +67,8 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY . /tmp/cutlet-verify
 RUN cd /tmp/cutlet-verify && make test && rm -rf /tmp/cutlet-verify
 
+# Create a non-root user. Claude Code refuses --dangerously-skip-permissions
+# when running as root for security reasons.
+RUN useradd -m -s /bin/bash agent
+
 WORKDIR /workspace
