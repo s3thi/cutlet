@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# agent-build — Build the cutlet-agent Docker image.
+#
+# Usage: scripts/agent-build
+#
+# Builds the Docker image from the repo root Dockerfile and tags it
+# cutlet-agent:latest. Build output is shown in plain text.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-build\n" >&2
+    printf "  Builds the cutlet-agent Docker image.\n" >&2
+    exit 1
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+# Find repo root (so the script works from any directory).
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+printf "Building cutlet-agent:latest from %s ...\n" "$REPO_ROOT"
+
+docker build -t cutlet-agent:latest --progress=plain "$REPO_ROOT"
+
+printf "\nDone. Image cutlet-agent:latest built successfully.\n"
