@@ -18,8 +18,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   bear             — compile_commands.json generator
 #   python3          — analysis scripts
 #   universal-ctags, cscope — codebase understanding tools
-#   git              — version control
-#   curl, ca-certificates — for downloading Node.js
+#   curl, ca-certificates — for downloading Node.js and adding PPAs
+#   software-properties-common — for add-apt-repository
 #   tmux             — terminal multiplexer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-14 \
@@ -31,11 +31,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     universal-ctags \
     cscope \
-    git \
     curl \
     ca-certificates \
+    software-properties-common \
     tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Install latest stable git from the git-core PPA. Ubuntu 24.04 ships
+# git 2.43, which doesn't support the relativeWorktrees extension
+# (added in git 2.46). Hosts with newer git may use this extension in
+# worktree-based repos, so the container needs a matching version.
+RUN add-apt-repository -y ppa:git-core/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create symlinks so tool names match what the Makefile expects:
 #   gcc-14           -> cc     (Makefile uses CC ?= cc)
