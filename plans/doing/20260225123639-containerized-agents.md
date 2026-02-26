@@ -310,6 +310,7 @@ Since this is infrastructure (not language source code), verification is manual 
 - [x] Step 2: `scripts/agent-build` — created build script that runs `docker build -t cutlet-agent:latest --progress=plain` from repo root, with `-h` usage help
 - [x] Step 3: `scripts/agent-start` — created start script that creates a container, clones repo from mounted .git, creates/checks out branch, configures git identity, starts tmux with Claude Code + shell panes, waits for tmux ready, and attaches
 - [x] Step 4: `scripts/agent-list` — created list script that shows all cutlet-agent containers with status/uptime, or prints "No agent containers." when none exist
+- [x] Step 5: `scripts/agent-pause` — created pause script that verifies container exists and is running, then freezes it with `docker pause`
 
 ---
 End of plan.

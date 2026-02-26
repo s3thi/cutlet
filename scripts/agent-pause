@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# agent-pause — Pause a running cutlet-agent container.
+#
+# Usage: scripts/agent-pause <branch-name>
+#
+# Freezes all processes in the container (releases CPU but preserves state).
+# Use agent-connect to resume and reattach.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-pause <branch-name>\n" >&2
+    printf "  Pauses the container for the given branch.\n" >&2
+    exit 1
+}
+
+if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+BRANCH="$1"
+CONTAINER="cutlet-agent-${BRANCH}"
+
+# Check that the container exists.
+if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    printf "Error: container '%s' does not exist.\n" "$CONTAINER" >&2
+    printf "  Use 'scripts/agent-list' to see available containers.\n" >&2
+    exit 1
+fi
+
+# Check that the container is running (not already paused or stopped).
+STATUS="$(docker inspect -f '{{.State.Status}}' "$CONTAINER")"
+if [ "$STATUS" = "paused" ]; then
+    printf "Container '%s' is already paused.\n" "$CONTAINER" >&2
+    exit 1
+fi
+if [ "$STATUS" != "running" ]; then
+    printf "Error: container '%s' is %s, not running.\n" "$CONTAINER" "$STATUS" >&2
+    exit 1
+fi
+
+docker pause "$CONTAINER" > /dev/null
+
+printf "Paused '%s'. Use 'scripts/agent-connect %s' to resume.\n" "$CONTAINER" "$BRANCH"
