@@ -7,7 +7,7 @@
  *   1. or (left-associative, keyword infix)
  *   2. and (left-associative, keyword infix)
  *   3. not (prefix, keyword)
- *   4. ==, !=, <, >, <=, >= (comparison, non-associative)
+ *   4. ==, !=, <, >, <=, >=, in (comparison, non-associative)
  *   5. ++ (concatenation, right-associative)
  *   6. +, - (binary, left-associative)
  *   7. *, /, % (left-associative)
@@ -299,6 +299,8 @@ static int infix_precedence(const char *op, size_t len) {
         if ((op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
             (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '='))
             return 4;
+        if (op[0] == 'i' && op[1] == 'n')
+            return 4; /* "in" is at comparison level (non-associative) */
         if (op[0] == '+' && op[1] == '+')
             return 5; /* ++ (concatenation) */
         if (op[0] == '*' && op[1] == '*')
@@ -316,7 +318,7 @@ static int infix_precedence(const char *op, size_t len) {
  * These tokenize as TOK_IDENT but act as infix operators in the parser.
  */
 static bool is_keyword_infix(const Token *t) {
-    return token_is_keyword(t, "and") || token_is_keyword(t, "or");
+    return token_is_keyword(t, "and") || token_is_keyword(t, "or") || token_is_keyword(t, "in");
 }
 
 /*
@@ -327,7 +329,8 @@ static bool is_comparison_op(const char *op, size_t len) {
         return op[0] == '<' || op[0] == '>';
     if (len == 2)
         return (op[0] == '=' && op[1] == '=') || (op[0] == '!' && op[1] == '=') ||
-               (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '=');
+               (op[0] == '<' && op[1] == '=') || (op[0] == '>' && op[1] == '=') ||
+               (op[0] == 'i' && op[1] == 'n'); /* "in" is non-associative */
     return false;
 }
 
@@ -346,12 +349,12 @@ static bool is_right_assoc(const char *op, size_t len) {
 static bool is_reserved_keyword(const Token *t) {
     return token_is_keyword(t, "true") || token_is_keyword(t, "false") ||
            token_is_keyword(t, "nothing") || token_is_keyword(t, "and") ||
-           token_is_keyword(t, "or") || token_is_keyword(t, "not") || token_is_keyword(t, "if") ||
-           token_is_keyword(t, "then") || token_is_keyword(t, "else") ||
-           token_is_keyword(t, "end") || token_is_keyword(t, "while") ||
-           token_is_keyword(t, "do") || token_is_keyword(t, "break") ||
-           token_is_keyword(t, "continue") || token_is_keyword(t, "return") ||
-           token_is_keyword(t, "fn") || token_is_keyword(t, "is");
+           token_is_keyword(t, "or") || token_is_keyword(t, "not") || token_is_keyword(t, "in") ||
+           token_is_keyword(t, "if") || token_is_keyword(t, "then") ||
+           token_is_keyword(t, "else") || token_is_keyword(t, "end") ||
+           token_is_keyword(t, "while") || token_is_keyword(t, "do") ||
+           token_is_keyword(t, "break") || token_is_keyword(t, "continue") ||
+           token_is_keyword(t, "return") || token_is_keyword(t, "fn") || token_is_keyword(t, "is");
 }
 
 /* ============================================================
@@ -517,12 +520,14 @@ static AstNode *parse_atom(Parser *p) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
             /* Identifiers that start expressions: non-keyword idents,
-             * plus keywords that are expression starters. */
+             * plus keywords that are expression starters.
+             * "in" is excluded because "break in" should not parse the
+             * "in" as the start of a value expression. */
             has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
                         !token_is_keyword(&next, "then") && !token_is_keyword(&next, "do") &&
                         !token_is_keyword(&next, "and") && !token_is_keyword(&next, "or") &&
-                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue") &&
-                        !token_is_keyword(&next, "return");
+                        !token_is_keyword(&next, "in") && !token_is_keyword(&next, "break") &&
+                        !token_is_keyword(&next, "continue") && !token_is_keyword(&next, "return");
         }
 
         if (has_value) {
@@ -591,11 +596,12 @@ static AstNode *parse_atom(Parser *p) {
               next.value[0] == '{'))) {
             has_value = true;
         } else if (next.type == TOK_IDENT) {
+            /* "in" excluded: "return in" should not parse "in" as value. */
             has_value = !token_is_keyword(&next, "end") && !token_is_keyword(&next, "else") &&
                         !token_is_keyword(&next, "then") && !token_is_keyword(&next, "do") &&
                         !token_is_keyword(&next, "and") && !token_is_keyword(&next, "or") &&
-                        !token_is_keyword(&next, "break") && !token_is_keyword(&next, "continue") &&
-                        !token_is_keyword(&next, "return");
+                        !token_is_keyword(&next, "in") && !token_is_keyword(&next, "break") &&
+                        !token_is_keyword(&next, "continue") && !token_is_keyword(&next, "return");
         }
 
         if (has_value) {
@@ -1241,10 +1247,76 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
 
     /* Loop: consume infix operators with sufficient precedence.
      * Handles symbol operators (TOK_OPERATOR), keyword operators
-     * like "and"/"or" (TOK_IDENT), meta-operators @op (TOK_META),
-     * and postfix '[' for array indexing (precedence 10). */
+     * like "and"/"or"/"in" (TOK_IDENT), meta-operators @op (TOK_META),
+     * postfix '[' for array indexing (precedence 10), and the compound
+     * "not in" infix operator (desugars to [UNARY not [BINOP in ...]]). */
     while (!p->has_error && (p->current.type == TOK_OPERATOR || is_keyword_infix(&p->current) ||
-                             p->current.type == TOK_META)) {
+                             p->current.type == TOK_META || token_is_keyword(&p->current, "not"))) {
+
+        /* "not in" compound infix operator: expr not in expr.
+         * Desugars to [UNARY not [BINOP in left right]].
+         * We enter this path when p->current is "not"; we advance past
+         * "not" and check that the next token is "in". If it is, parse
+         * the right operand at precedence 5 (one above "in"'s level 4)
+         * and build the desugared AST. If "not" is NOT followed by "in",
+         * this is an error — "not" alone is not a valid infix operator. */
+        if (token_is_keyword(&p->current, "not")) {
+            /* "in" has precedence 4; check that min_prec allows it. */
+            if (4 < min_prec)
+                break;
+
+            size_t not_line = p->current.line;
+            size_t not_col = p->current.col;
+            advance(p); /* consume "not" */
+
+            /* The only valid token after infix "not" is "in". */
+            if (!token_is_keyword(&p->current, "in")) {
+                parser_error(p, not_line, not_col, "expected 'in' after 'not'");
+                ast_free(left);
+                return NULL;
+            }
+            advance(p); /* consume "in" */
+
+            /* Parse right operand at precedence 5 (left-assoc: prec + 1). */
+            AstNode *right = parse_expr(p, 5);
+            if (!right) {
+                ast_free(left);
+                return NULL;
+            }
+
+            /* Build [BINOP in left right]. */
+            AstNode *in_node = make_binop("in", 2, left, right, not_line);
+            if (!in_node) {
+                ast_free(left);
+                ast_free(right);
+                parser_error(p, not_line, not_col, "memory allocation failed");
+                return NULL;
+            }
+
+            /* Wrap in [UNARY not [BINOP in ...]]. */
+            AstNode *not_node = make_unary("not", 3, in_node, not_line);
+            if (!not_node) {
+                ast_free(in_node);
+                parser_error(p, not_line, not_col, "memory allocation failed");
+                return NULL;
+            }
+
+            left = not_node;
+
+            /* Non-associativity: "in" is a comparison op, so chaining
+             * like "x not in y in z" is a parse error. Check whether the
+             * next token is another comparison operator. */
+            if ((p->current.type == TOK_OPERATOR &&
+                 is_comparison_op(p->current.value, p->current.value_len)) ||
+                (is_keyword_infix(&p->current) &&
+                 is_comparison_op(p->current.value, p->current.value_len))) {
+                parser_error(p, p->current.line, p->current.col,
+                             "comparison operators cannot be chained");
+                ast_free(left);
+                return NULL;
+            }
+            continue;
+        }
 
         /* Postfix '[' — array indexing: expr[expr].
          * Precedence 10 (highest, above **). Left-associative so
@@ -1399,9 +1471,14 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
         }
         left = binop;
 
-        /* Non-associative check: reject chained comparisons like 1 < 2 < 3 */
-        if (is_comparison_op(op_buf, op_len) && p->current.type == TOK_OPERATOR &&
-            is_comparison_op(p->current.value, p->current.value_len)) {
+        /* Non-associative check: reject chained comparisons like 1 < 2 < 3
+         * or 1 in [1] in [2]. Check both symbol operators (TOK_OPERATOR)
+         * and keyword infix operators like "in" (TOK_IDENT). */
+        if (is_comparison_op(op_buf, op_len) &&
+            ((p->current.type == TOK_OPERATOR &&
+              is_comparison_op(p->current.value, p->current.value_len)) ||
+             (is_keyword_infix(&p->current) &&
+              is_comparison_op(p->current.value, p->current.value_len)))) {
             parser_error(p, p->current.line, p->current.col,
                          "comparison operators cannot be chained");
             ast_free(left);

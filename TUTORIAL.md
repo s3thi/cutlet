@@ -872,7 +872,77 @@ end
 squares                     # => {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
 
 # ============================================================
-# 14. The @ meta-operator
+# 14. Membership testing with `in`
+# ============================================================
+
+# `in` tests whether a value is a member of a collection.
+# It works with maps (key lookup), arrays (element search),
+# and strings (substring search).
+
+# Map: checks if a key exists.
+"name" in {name: "alice", age: 30}    # => true
+"email" in {name: "alice"}             # => false
+
+# Works with any key type (computed keys).
+1 in {[1]: "one", [2]: "two"}         # => true
+true in {[true]: "yes"}               # => true
+
+# Key exists even when the value is nothing.
+"a" in {a: nothing}                    # => true
+
+# Array: checks if an element is present (linear scan, equality-based).
+42 in [1, 2, 42]                       # => true
+99 in [1, 2, 3]                        # => false
+"b" in ["a", "b", "c"]                # => true
+1 in []                                # => false
+
+# String: checks for a substring.
+"lo" in "hello"                        # => true
+"xyz" in "hello"                       # => false
+"" in "hello"                          # => true  (empty string is always found)
+"hello" in "hello"                     # => true  (string contains itself)
+
+# For strings, the left operand must also be a string.
+# 42 in "hello"                       # => ERR in requires a string left operand
+
+# `not in` — syntactic sugar for `not (x in y)`.
+10 not in [1, 2, 3]                    # => true
+1 not in [1, 2, 3]                     # => false
+"z" not in {a: 1}                      # => true
+"xyz" not in "hello"                   # => true
+
+# `not in` is identical to writing `not ... in ...` explicitly:
+not 10 in [1, 2, 3]                    # => true (same as `10 not in [1, 2, 3]`)
+
+# Precedence: `in` is at comparison level (like ==, <, >).
+# Arithmetic binds tighter, logical operators bind looser.
+1 + 1 in [2, 3]                        # => true  ((1+1) in [2,3])
+true and 1 in [1, 2]                   # => true  (true and (1 in [1,2]))
+not 5 in [1, 2, 3]                     # => true  (not (5 in [1,2,3]))
+
+# `in` is non-associative (like other comparisons).
+# 1 in [1] in [[1]]                   # => ERR parse error
+
+# Composability: `in` works with any expression that produces
+# a map, array, or string.
+"a" in keys({a: 1, b: 2})             # => true
+
+# Combining with `and`/`or`:
+my xs = [1, 2, 3]
+5 not in xs and 1 in xs                # => true
+
+# Using `in` with `has_key()`:
+# `in` is the idiomatic way for membership testing.
+# `has_key()` is still useful in higher-order contexts
+# (e.g., passing as a callback), but `in` is preferred for
+# direct checks.
+
+# Invalid right operand types are runtime errors.
+# 1 in 42                             # => ERR cannot use 'in' with number
+# 1 in true                           # => ERR cannot use 'in' with boolean
+
+# ============================================================
+# 15. The @ meta-operator
 # ============================================================
 
 # The @ meta-operator lifts operators and functions to work across
@@ -1050,7 +1120,7 @@ my scores = {math: 92, english: 87, science: 95}
 @+ ({a: 2, b: 3} @* {a: 10, b: 20}) # => 80
 
 # ============================================================
-# 15. say() for output
+# 16. say() for output
 # ============================================================
 
 # say() prints a value followed by a newline. Returns nothing.
@@ -1065,7 +1135,7 @@ say(nothing)    # prints: nothing
 say("result: " ++ str(42))   # prints: result: 42
 
 # ============================================================
-# 16. Running Cutlet programs
+# 17. Running Cutlet programs
 # ============================================================
 
 # Save code to a file (e.g., hello.cutlet):
@@ -1086,7 +1156,7 @@ say("result: " ++ str(42))   # prints: result: 42
 # The final expression value is NOT printed (unlike the REPL).
 
 # ============================================================
-# 17. The REPL
+# 18. The REPL
 # ============================================================
 
 # Start an interactive REPL:

@@ -1,0 +1,45 @@
+# Membership testing with `in` and `not in`
+
+# Map key membership
+my person = {name: "alice", age: 30, role: "admin"}
+say("name" in person)            # true
+say("email" in person)           # false
+
+# Any key type works with computed keys
+my lookup = {[1]: "one", [true]: "yes"}
+say(1 in lookup)                 # true
+say(true in lookup)              # true
+say(2 in lookup)                 # false
+
+# Key exists even if value is nothing
+say("a" in {a: nothing})         # true
+
+# Array element membership
+say(42 in [1, 2, 42])            # true
+say(99 in [1, 2, 3])             # false
+say("b" in ["a", "b", "c"])      # true
+say(1 in [])                     # false
+
+# String substring search
+say("lo" in "hello")             # true
+say("xyz" in "hello")            # false
+say("" in "hello")               # true
+say("hello" in "hello")          # true
+
+# `not in` — syntactic sugar for `not (x in y)`
+say(10 not in [1, 2, 3])         # true
+say(1 not in [1, 2, 3])          # false
+say("z" not in {a: 1, b: 2})     # true
+say("xyz" not in "hello")        # true
+
+# Precedence: arithmetic binds tighter, `and`/`or` bind looser
+say(1 + 1 in [2, 3])             # true  ((1+1) in [2,3])
+say(true and 1 in [1, 2])        # true  (true and (1 in [1,2]))
+say(not 5 in [1, 2, 3])          # true  (not (5 in [1,2,3]))
+
+# Composability with other builtins
+say("a" in keys({a: 1, b: 2}))   # true
+
+# Combining `in` and `not in` with `and`
+my xs = [1, 2, 3]
+say(5 not in xs and 1 in xs)     # true

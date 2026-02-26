@@ -2708,6 +2708,57 @@ TEST(test_is_complete_map) {
 }
 
 /* ============================================================
+ * `in` operator parsing
+ * ============================================================ */
+
+/* 1 in [1, 2] → [BINOP in [NUMBER 1] [ARRAY [NUMBER 1] [NUMBER 2]]] */
+TEST(test_in_basic_array) {
+    ASSERT(ast_matches("1 in [1, 2]", "AST [BINOP in [NUMBER 1] [ARRAY [NUMBER 1] [NUMBER 2]]]"),
+           "in with array");
+    PASS();
+}
+
+/* "a" in m → [BINOP in [STRING a] [IDENT m]] */
+TEST(test_in_string_ident) {
+    ASSERT(ast_matches("\"a\" in m", "AST [BINOP in [STRING a] [IDENT m]]"), "in with ident");
+    PASS();
+}
+
+/* `1 not in [1, 2]` desugars to [UNARY not [BINOP in ...]] */
+TEST(test_not_in_sugar) {
+    ASSERT(ast_matches("1 not in [1, 2]",
+                       "AST [UNARY not [BINOP in [NUMBER 1] [ARRAY [NUMBER 1] [NUMBER 2]]]]"),
+           "not in sugar");
+    PASS();
+}
+
+/* `not 1 in [1, 2]` produces the same AST as `1 not in [1, 2]` */
+TEST(test_not_prefix_in) {
+    ASSERT(ast_matches("not 1 in [1, 2]",
+                       "AST [UNARY not [BINOP in [NUMBER 1] [ARRAY [NUMBER 1] [NUMBER 2]]]]"),
+           "not prefix with in");
+    PASS();
+}
+
+/* `1 in [1] in [2]` → parse error (non-associative, cannot chain) */
+TEST(test_in_chained_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("1 in [1] in [2]", &node, &err), "chained in should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* `my in = 5` → parse error (`in` is reserved) */
+TEST(test_in_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my in = 5", &node, &err), "in as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3131,6 +3182,14 @@ int main(void) {
     printf("\nparser_is_complete() - map literals:\n");
     RUN_TEST(test_is_incomplete_map_unclosed);
     RUN_TEST(test_is_complete_map);
+
+    printf("\n`in` operator:\n");
+    RUN_TEST(test_in_basic_array);
+    RUN_TEST(test_in_string_ident);
+    RUN_TEST(test_not_in_sugar);
+    RUN_TEST(test_not_prefix_in);
+    RUN_TEST(test_in_chained_error);
+    RUN_TEST(test_in_keyword_reserved);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
