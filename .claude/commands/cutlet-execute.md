@@ -38,3 +38,13 @@ Plans may contain multiple **implementation steps** (e.g. "Step 1: …", "Step 2
 3. Implement the step, following the required process in `AGENTS.md` (tests first, confirm failures, then implement, `make test && make check` after every change)
 4. When the step's criteria are met and `make test && make check` pass, commit
 5. Update the plan's progress section as described above
+
+## Push when done
+
+After completing a step (or all steps), offer to push the branch to the host repo:
+
+```
+git push origin <branch>
+```
+
+This ensures work is available on the host for merging. If the user declines, remind them to push manually before merging.
