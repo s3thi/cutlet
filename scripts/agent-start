@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # agent-start — Create a new containerized agent and attach to its tmux session.
 #
-# Usage: scripts/agent-start <branch-name>
+# Usage: scripts/agent-start [-i] <branch-name>
 #
 # Creates a Docker container named cutlet-agent-<branch>, clones the repo from
 # the host's .git directory, creates/checks out <branch>, and drops the user
@@ -9,19 +9,35 @@
 #   Left:  claude --dangerously-skip-permissions
 #   Right: bash shell
 #
+# Options:
+#   -i    iTerm2 integration mode. tmux panes appear as native iTerm splits.
+#         Detach with Cmd+Shift+B (bury) or by closing the tab.
+#
 # The container stays running after tmux detach (Ctrl+B, D). Use agent-connect
 # to reattach, agent-pause to freeze, or agent-delete to remove.
 
 set -euo pipefail
 
 usage() {
-    printf "Usage: scripts/agent-start <branch-name>\n" >&2
+    printf "Usage: scripts/agent-start [-i] <branch-name>\n" >&2
     printf "  Creates a containerized agent on the given branch.\n" >&2
     printf "  The branch is created if it doesn't exist.\n" >&2
+    printf "\nOptions:\n" >&2
+    printf "  -i    iTerm2 integration mode (native splits/tabs)\n" >&2
     exit 1
 }
 
-if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+ITERM_MODE=false
+while getopts ":ih" opt; do
+    case "$opt" in
+        i) ITERM_MODE=true ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# -eq 0 ]; then
     usage
 fi
 
@@ -124,7 +140,11 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
-
-# Attach to the tmux session inside the container.
-docker exec -it -u agent "$CONTAINER" tmux attach -t main
+if [ "$ITERM_MODE" = true ]; then
+    printf "Attaching to tmux session (iTerm2 mode).\n"
+    printf "Detach: Cmd+Shift+B (bury) or close the tab.\n"
+    docker exec -it -u agent "$CONTAINER" tmux -CC attach -t main
+else
+    printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
+    docker exec -it -u agent "$CONTAINER" tmux attach -t main
+fi

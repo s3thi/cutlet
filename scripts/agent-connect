@@ -1,22 +1,38 @@
 #!/usr/bin/env bash
 # agent-connect — Resume and reattach to a cutlet-agent container.
 #
-# Usage: scripts/agent-connect <branch-name>
+# Usage: scripts/agent-connect [-i] <branch-name>
 #
 # If the container is paused, it is unpaused first. Then attaches to the
 # existing tmux session inside the container. Also works for running
 # containers the user simply disconnected from.
+#
+# Options:
+#   -i    iTerm2 integration mode. tmux panes appear as native iTerm splits.
+#         Detach with Cmd+Shift+B (bury) or by closing the tab.
 
 set -euo pipefail
 
 usage() {
-    printf "Usage: scripts/agent-connect <branch-name>\n" >&2
+    printf "Usage: scripts/agent-connect [-i] <branch-name>\n" >&2
     printf "  Resumes a paused container and reattaches to its tmux session.\n" >&2
     printf "  Also works for running containers you disconnected from.\n" >&2
+    printf "\nOptions:\n" >&2
+    printf "  -i    iTerm2 integration mode (native splits/tabs)\n" >&2
     exit 1
 }
 
-if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+ITERM_MODE=false
+while getopts ":ih" opt; do
+    case "$opt" in
+        i) ITERM_MODE=true ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# -eq 0 ]; then
     usage
 fi
 
@@ -51,7 +67,11 @@ if ! docker exec -u agent "$CONTAINER" tmux has-session -t main 2>/dev/null; the
     exit 1
 fi
 
-printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
-
-# Attach to the tmux session inside the container.
-docker exec -it -u agent "$CONTAINER" tmux attach -t main
+if [ "$ITERM_MODE" = true ]; then
+    printf "Attaching to tmux session (iTerm2 mode).\n"
+    printf "Detach: Cmd+Shift+B (bury) or close the tab.\n"
+    docker exec -it -u agent "$CONTAINER" tmux -CC attach -t main
+else
+    printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
+    docker exec -it -u agent "$CONTAINER" tmux attach -t main
+fi
