@@ -458,43 +458,55 @@ end
 # continue     # => ERR 'continue' outside of loop
 ```
 
-```cutlet
-# ============================================================
-# 9. User-defined functions
-# ============================================================
+## 9. User-defined functions
 
-# Define a function with `fn name(params) is body end`.
+Define a function with `fn name(params) is body end`.
+
+```cutlet
 fn greet(name) is
   say("hello " ++ name)
 end
 
 greet("world")      # prints: hello world
+```
 
-# Functions are expressions — they return a value.
-# The last expression in the body is the return value.
+Functions are expressions — the last expression in the body is the return value.
+
+```cutlet
 fn double(x) is
   x * 2
 end
 say(double(21))     # prints: 42
+```
 
-# Single-line form: when the body is on the same line as `is`,
-# you can omit `end`.
+Single-line form: when the body is on the same line as `is`, you can omit `end`.
+
+```cutlet
 fn triple(x) is x * 3
 say(triple(7))      # prints: 21
+```
 
-# Zero-parameter functions:
+Zero-parameter functions:
+
+```cutlet
 fn meaning_of_life() is 42
 say(meaning_of_life())  # prints: 42
+```
 
-# Multi-line body with local variables:
+Multi-line body with local variables:
+
+```cutlet
 fn sum_of_squares(a, b) is
   my a2 = a ** 2
   my b2 = b ** 2
   a2 + b2
 end
 say(sum_of_squares(3, 4))  # prints: 25
+```
 
-# Recursion works — functions are bound globally before the body runs.
+Recursion works — functions are bound globally before the body runs.
+
+```cutlet
 fn factorial(n) is
   if n <= 1 then 1 else n * factorial(n - 1)
 end
@@ -504,65 +516,86 @@ fn fib(n) is
   if n <= 1 then n else fib(n - 1) + fib(n - 2)
 end
 say(fib(10))            # prints: 55
+```
 
-# Functions are first-class values.
+Functions are first-class values.
+
+```cutlet
 my f = fn square(x) is x ** 2
 say(f)                  # prints: <fn square>
 say(f(7))               # prints: 49
+```
 
-# `fn ... is ...` is an expression, so the function definition itself
-# returns the function value. In the REPL:
-#   fn add(a, b) is a + b   # => <fn add>
+`fn ... is ...` is an expression, so the function definition itself returns the function value. In the REPL: `fn add(a, b) is a + b` evaluates to `<fn add>`.
 
-# Calling with wrong arity is a runtime error.
+Calling with wrong arity is a runtime error.
+
+```cutlet
 # greet()             # => ERR 'greet' expects 1 argument, got 0
 # greet("a", "b")     # => ERR 'greet' expects 1 argument, got 2
+```
 
-# Calling a non-function is a runtime error.
+Calling a non-function is a runtime error.
+
+```cutlet
 # my x = 42
 # x()                 # => ERR cannot call value of type number
+```
 
-# ============================================================
-# 9b. Anonymous functions
-# ============================================================
+## 9b. Anonymous functions
 
-# Anonymous functions have no name — just `fn(params) is body end`.
-# Single-line form works here too (omit `end`):
+Anonymous functions have no name — just `fn(params) is body end`. Single-line form works here too (omit `end`).
+
+```cutlet
 my double = fn(x) is x * 2
 say(double(21))         # prints: 42
+```
 
-# They work exactly like named functions, but don't bind a global.
+They work exactly like named functions, but don't bind a global.
+
+```cutlet
 my add = fn(a, b) is a + b
 say(add(3, 4))          # prints: 7
+```
 
-# Zero-parameter anonymous function:
+Zero-parameter anonymous function:
+
+```cutlet
 my greeting = fn() is "hello world"
 say(greeting())         # prints: hello world
+```
 
-# Multi-line body works the same way:
+Multi-line body works the same way:
+
+```cutlet
 my sum_sq = fn(a, b) is
   my a2 = a ** 2
   my b2 = b ** 2
   a2 + b2
 end
 say(sum_sq(3, 4))       # prints: 25
+```
 
-# Anonymous functions are expressions — they evaluate to a function value.
+Anonymous functions are expressions — they evaluate to a function value.
+
+```cutlet
 fn(x) is x + 1         # => <fn>
+```
 
-# You can reassign a variable to different anonymous functions.
+You can reassign a variable to different anonymous functions.
+
+```cutlet
 my op = fn(x) is x + 10
 say(op(5))              # prints: 15
 op = fn(x) is x * 10
 say(op(5))              # prints: 50
+```
 
-# ============================================================
-# 9c. Block scoping
-# ============================================================
+## 9c. Block scoping
 
-# Inside a function, `my` inside an if or while body is scoped
-# to that block. It's not visible after the `end`.
+Inside a function, `my` inside an `if` or `while` body is scoped to that block — it's not visible after the `end`.
 
+```cutlet
 fn scoping_demo() is
   my x = 1
   if true then
@@ -572,8 +605,11 @@ fn scoping_demo() is
   x                  # => 1 (outer x is unchanged)
 end
 say(scoping_demo())  # prints: 1
+```
 
-# Variables declared in a while body are cleaned up each iteration.
+Variables declared in a while body are cleaned up each iteration.
+
+```cutlet
 fn loop_scoping() is
   my total = 0
   my i = 0
@@ -585,8 +621,11 @@ fn loop_scoping() is
   total               # => 6 (1 + 2 + 3)
 end
 say(loop_scoping())   # prints: 6
+```
 
-# Else branches have their own scope too.
+Else branches have their own scope too.
+
+```cutlet
 fn else_scope() is
   if false then
     my a = 1
@@ -596,8 +635,11 @@ fn else_scope() is
   end
   # a and b are both out of scope here
 end
+```
 
-# break and continue properly clean up block-scoped variables.
+`break` and `continue` properly clean up block-scoped variables.
+
+```cutlet
 fn break_cleanup() is
   while true do
     my x = 42
@@ -605,8 +647,11 @@ fn break_cleanup() is
   end                 # => 42
 end
 say(break_cleanup())  # prints: 42
+```
 
-# Nested blocks work as expected — inner scopes can see outer locals.
+Nested blocks work as expected — inner scopes can see outer locals.
+
+```cutlet
 fn nested_scopes() is
   if true then
     my a = 10
@@ -617,34 +662,39 @@ fn nested_scopes() is
   end
 end
 say(nested_scopes())  # prints: 30
+```
 
-# Note: at the top level (outside functions), `my` always creates
-# a global variable. Block scoping only applies inside functions.
+At the top level (outside functions), `my` always creates a global variable. Block scoping only applies inside functions.
 
-# ============================================================
-# 9d. Early return
-# ============================================================
+## 9d. Early return
 
-# By default, a function returns the value of its last expression.
-# Use `return` when you need to exit a function early.
+By default, a function returns the value of its last expression. Use `return` when you need to exit a function early.
 
-# Guard clause — return early for special cases:
+Guard clause — return early for special cases:
+
+```cutlet
 fn abs(x) is
   if x < 0 then return -x end
   x
 end
 say(abs(-7))            # prints: 7
 say(abs(3))             # prints: 3
+```
 
-# Bare `return` (no expression) returns nothing:
+Bare `return` (no expression) returns `nothing`.
+
+```cutlet
 fn maybe_greet(name) is
   if name == "" then return end
   say("hello " ++ name)
 end
 maybe_greet("")         # does nothing, returns nothing
 maybe_greet("world")    # prints: hello world
+```
 
-# Return from inside a loop — exits the function, not just the loop:
+Return from inside a loop exits the function, not just the loop.
+
+```cutlet
 fn find_first_multiple(factor, limit) is
   my i = 1
   while i <= limit do
@@ -654,13 +704,16 @@ fn find_first_multiple(factor, limit) is
   nothing
 end
 say(find_first_multiple(3, 10))  # prints: 3
+```
 
-# `return` outside a function is a compile error.
+`return` outside a function is a compile error. `return` is a reserved keyword — you can't use it as a variable name.
+
+```cutlet
 # return 42             # => ERR 'return' outside of function
-
-# `return` is a reserved keyword — you can't use it as a variable name.
 # my return = 5         # => ERR parse error
+```
 
+```cutlet
 # ============================================================
 # 10. Higher-order functions
 # ============================================================

@@ -60,3 +60,4 @@ None. No tasks in `plans/doing/` need to complete first.
 
 - [x] Step 1: Read current TUTORIAL.md — read all 1182 lines, 18 sections
 - [x] Step 2: Rewrite sections 1-8 (Numbers through While loops) — converted banners to ## headings, extracted comments into prose, split into separate fenced code blocks
+- [x] Step 3: Rewrite sections 9-11 (Functions, Anonymous functions, Block scoping, Early return) — converted sections 9, 9b, 9c, 9d from monolithic code block to prose-with-code-blocks format
