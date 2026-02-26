@@ -3271,6 +3271,93 @@ TEST(test_zip_map_round_trip) {
 }
 
 /* ============================================================
+ * `in` membership operator
+ * ============================================================ */
+
+/* --- Map membership --- */
+
+TEST(test_in_map_key_found) { assert_vm_bool("\"a\" in {a: 1, b: 2}", true, "in map found"); }
+
+TEST(test_in_map_key_missing) { assert_vm_bool("\"c\" in {a: 1, b: 2}", false, "in map missing"); }
+
+TEST(test_in_map_empty) { assert_vm_bool("\"a\" in {}", false, "in empty map"); }
+
+TEST(test_in_map_number_key) { assert_vm_bool("1 in {[1]: \"one\"}", true, "in map number key"); }
+
+TEST(test_in_map_bool_key) { assert_vm_bool("true in {[true]: \"yes\"}", true, "in map bool key"); }
+
+TEST(test_in_map_nothing_value) {
+    assert_vm_bool("\"a\" in {a: nothing}", true, "in map key with nothing value");
+}
+
+/* --- Array membership --- */
+
+TEST(test_in_array_found) { assert_vm_bool("42 in [1, 2, 42]", true, "in array found"); }
+
+TEST(test_in_array_missing) { assert_vm_bool("99 in [1, 2, 3]", false, "in array missing"); }
+
+TEST(test_in_array_string) {
+    assert_vm_bool("\"b\" in [\"a\", \"b\", \"c\"]", true, "in array string");
+}
+
+TEST(test_in_array_bool) { assert_vm_bool("true in [1, true, \"hi\"]", true, "in array bool"); }
+
+TEST(test_in_array_empty) { assert_vm_bool("1 in []", false, "in empty array"); }
+
+/* --- String membership (substring search) --- */
+
+TEST(test_in_string_found) { assert_vm_bool("\"lo\" in \"hello\"", true, "in string found"); }
+
+TEST(test_in_string_missing) { assert_vm_bool("\"xyz\" in \"hello\"", false, "in string missing"); }
+
+TEST(test_in_string_empty_needle) {
+    assert_vm_bool("\"\" in \"hello\"", true, "in string empty needle");
+}
+
+TEST(test_in_string_full_match) {
+    assert_vm_bool("\"hello\" in \"hello\"", true, "in string full match");
+}
+
+TEST(test_in_string_non_string_lhs) {
+    assert_vm_error("42 in \"hello\"", "in string non-string lhs");
+}
+
+/* --- `not in` sugar --- */
+
+TEST(test_not_in_array_true) { assert_vm_bool("10 not in [1, 2, 3]", true, "not in array true"); }
+
+TEST(test_not_in_array_false) { assert_vm_bool("1 not in [1, 2, 3]", false, "not in array false"); }
+
+TEST(test_not_in_map_true) { assert_vm_bool("\"z\" not in {a: 1}", true, "not in map true"); }
+
+TEST(test_not_in_map_false) { assert_vm_bool("\"a\" not in {a: 1}", false, "not in map false"); }
+
+TEST(test_not_in_string_true) {
+    assert_vm_bool("\"xyz\" not in \"hello\"", true, "not in string true");
+}
+
+/* --- Error cases --- */
+
+TEST(test_in_number_error) { assert_vm_error("1 in 42", "in with number"); }
+
+TEST(test_in_bool_error) { assert_vm_error("1 in true", "in with boolean"); }
+
+TEST(test_in_nothing_error) { assert_vm_error("1 in nothing", "in with nothing"); }
+
+/* --- Precedence --- */
+
+/* Arithmetic binds tighter than `in`: (1+1) in [2,3] → true */
+TEST(test_in_precedence_arithmetic) {
+    assert_vm_bool("1 + 1 in [2, 3]", true, "arithmetic before in");
+}
+
+/* `and` binds looser than `in`: true and (1 in [1,2]) → true */
+TEST(test_in_precedence_and) { assert_vm_bool("true and 1 in [1, 2]", true, "in before and"); }
+
+/* `not` binds looser than `in`: not (5 in [1,2,3]) → true */
+TEST(test_in_precedence_not) { assert_vm_bool("not 5 in [1, 2, 3]", true, "not after in"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3931,6 +4018,46 @@ int main(void) {
     RUN_TEST(test_zip_map_compose_vectorize);
     RUN_TEST(test_zip_map_inversion);
     RUN_TEST(test_zip_map_round_trip);
+
+    /* ---- `in` membership operator ---- */
+    printf("\n`in` operator — map membership:\n");
+    RUN_TEST(test_in_map_key_found);
+    RUN_TEST(test_in_map_key_missing);
+    RUN_TEST(test_in_map_empty);
+    RUN_TEST(test_in_map_number_key);
+    RUN_TEST(test_in_map_bool_key);
+    RUN_TEST(test_in_map_nothing_value);
+
+    printf("\n`in` operator — array membership:\n");
+    RUN_TEST(test_in_array_found);
+    RUN_TEST(test_in_array_missing);
+    RUN_TEST(test_in_array_string);
+    RUN_TEST(test_in_array_bool);
+    RUN_TEST(test_in_array_empty);
+
+    printf("\n`in` operator — string membership:\n");
+    RUN_TEST(test_in_string_found);
+    RUN_TEST(test_in_string_missing);
+    RUN_TEST(test_in_string_empty_needle);
+    RUN_TEST(test_in_string_full_match);
+    RUN_TEST(test_in_string_non_string_lhs);
+
+    printf("\n`in` operator — not in:\n");
+    RUN_TEST(test_not_in_array_true);
+    RUN_TEST(test_not_in_array_false);
+    RUN_TEST(test_not_in_map_true);
+    RUN_TEST(test_not_in_map_false);
+    RUN_TEST(test_not_in_string_true);
+
+    printf("\n`in` operator — error cases:\n");
+    RUN_TEST(test_in_number_error);
+    RUN_TEST(test_in_bool_error);
+    RUN_TEST(test_in_nothing_error);
+
+    printf("\n`in` operator — precedence:\n");
+    RUN_TEST(test_in_precedence_arithmetic);
+    RUN_TEST(test_in_precedence_and);
+    RUN_TEST(test_in_precedence_not);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
