@@ -312,6 +312,7 @@ Since this is infrastructure (not language source code), verification is manual 
 - [x] Step 4: `scripts/agent-list` — created list script that shows all cutlet-agent containers with status/uptime, or prints "No agent containers." when none exist
 - [x] Step 5: `scripts/agent-pause` — created pause script that verifies container exists and is running, then freezes it with `docker pause`
 - [x] Step 6: `scripts/agent-connect` — created connect script that unpauses paused containers, verifies tmux session exists, and reattaches to it
+- [x] Step 7: `scripts/agent-delete` — created delete script that verifies container exists, then force-removes it with `docker rm -f`
 
 ---
 End of plan.

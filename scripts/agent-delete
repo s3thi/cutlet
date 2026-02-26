@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# agent-delete — Permanently remove a cutlet-agent container.
+#
+# Usage: scripts/agent-delete <branch-name>
+#
+# Stops (if running) and removes the container. This is irreversible —
+# any uncommitted work inside the container is lost.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-delete <branch-name>\n" >&2
+    printf "  Permanently removes the container for the given branch.\n" >&2
+    exit 1
+}
+
+if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+BRANCH="$1"
+CONTAINER="cutlet-agent-${BRANCH}"
+
+# Check that the container exists.
+if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    printf "Error: container '%s' does not exist.\n" "$CONTAINER" >&2
+    printf "  Use 'scripts/agent-list' to see available containers.\n" >&2
+    exit 1
+fi
+
+docker rm -f "$CONTAINER" > /dev/null
+
+printf "Removed '%s'.\n" "$CONTAINER"
