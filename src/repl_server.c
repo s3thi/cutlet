@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -200,6 +201,15 @@ static void *accept_loop(void *arg) {
     ReplServer *srv = arg;
 
     while (!srv->shutdown) {
+        /* Use poll() with a timeout so we periodically check the shutdown
+         * flag. On Linux, close() from another thread does NOT unblock a
+         * blocking accept() — unlike macOS where it does. Polling with a
+         * short timeout is the portable solution. */
+        struct pollfd pfd = {.fd = srv->listen_fd, .events = POLLIN};
+        int poll_rc = poll(&pfd, 1, 200); /* 200ms timeout */
+        if (poll_rc <= 0)
+            continue; /* Timeout or error — re-check shutdown flag. */
+
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
         int client_fd = accept(srv->listen_fd, (struct sockaddr *)&client_addr, &addr_len);
