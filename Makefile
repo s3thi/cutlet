@@ -21,13 +21,17 @@ ISOCLINE_INCLUDES = -I$(ISOCLINE_DIR)/include -I$(ISOCLINE_DIR)/src
 
 # Upstream-recommended build flags for isocline (C99, not C23).
 # Source: vendor/isocline/CMakeLists.txt lines 103-106 (AppleClang/Clang flags).
-# -Wno-shorten-64-to-32: upstream narrowing bug in term.c:1036 on 64-bit macOS.
+# Some flags are Clang-only (-Wimplicit-int-conversion, -Wno-shorten-64-to-32,
+# -Wno-padded). Detect compiler and include them only for Clang.
 ISOCLINE_BUILD_CFLAGS = -std=c99 -g \
 	-Wall -Wextra -Wpedantic \
-	-Wno-unknown-pragmas -Wno-unused-function -Wno-padded \
+	-Wno-unknown-pragmas -Wno-unused-function \
 	-Wno-missing-field-initializers \
-	-Wimplicit-int-conversion -Wsign-conversion \
-	-Wno-shorten-64-to-32
+	-Wsign-conversion
+IS_CLANG := $(shell $(CC) --version 2>/dev/null | grep -qi clang && echo 1)
+ifeq ($(IS_CLANG),1)
+ISOCLINE_BUILD_CFLAGS += -Wno-padded -Wimplicit-int-conversion -Wno-shorten-64-to-32
+endif
 
 # Sanitizer-instrumented build flags for isocline.
 ISOCLINE_SANITIZE_BUILD_CFLAGS = $(ISOCLINE_BUILD_CFLAGS) \
