@@ -29,6 +29,23 @@ Multiple agents may work on different tasks at the same time. To avoid stale ref
 - **Re-orient before each step.** Before starting a plan step, read the relevant files to discover the current state of the code. Another agent may have changed it since the plan was written.
 - **Check `make test && make check` after every source code change.** This catches conflicts early — if another agent's edits broke an assumption, tests will surface it. Skip this for non-source changes (documentation, plans, agent config, READMEs, etc.).
 
+## Implementing plans
+
+Plans are implemented inside Docker containers. Each container has the full Cutlet toolchain, Claude Code with `--dangerously-skip-permissions`, and a tmux session. Claude Code inside the container automatically loads `container-claude.md` (copied into the image as `~/.claude/CLAUDE.md` at build time) for container-specific context. Update that file if the container environment or workflow changes.
+
+```
+scripts/agent-build                    # build the image (once, or after Dockerfile changes)
+scripts/agent-start <branch>           # start a container, attach to tmux
+  # inside the container: /cutlet-execute <plan-name>
+  # detach with Ctrl+B, D — container keeps running
+scripts/agent-connect <branch>         # reattach to a running container
+scripts/agent-pause <branch>           # freeze a container when not in use
+scripts/agent-list                     # show all containers and their status
+  # when done: push the branch from inside the container
+scripts/agent-delete <branch>          # remove the container
+  # on the host: /cutlet-merge-agent <branch>
+```
+
 ## Important instructions
 
 - Always write tests first. Include a testing strategy in all plans. All code must be exhaustively tested.

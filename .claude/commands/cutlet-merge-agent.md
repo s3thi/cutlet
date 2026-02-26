@@ -1,24 +1,16 @@
-Merge a finished agent worktree into main, then clean up.
+Merge a finished agent container's branch into main, then clean up.
 
-The argument below is the worktree/branch name (e.g., `anonymous-functions`).
+The argument below is the branch name (e.g., `fix-parser-bug`).
 
 $ARGUMENTS
 
 Follow these steps in order. Stop and ask me only when explicitly noted below.
 
-## 0. Determine paths
-
-- Get the main worktree root: `git rev-parse --show-toplevel`
-- The parent directory of that root is where all worktrees live (they are sibling directories).
-- The target worktree is at `<parent>/<branch-name>`.
-- Use these derived paths throughout — never hardcode absolute paths.
-
 ## 1. Validate state
 
 - Confirm the current branch is `main` (`git symbolic-ref --short HEAD`). If not, refuse to proceed.
-- Confirm the target worktree directory exists and appears in `git worktree list`.
+- Confirm the target branch exists (`git branch --list <branch>`). If not, stop and tell me.
 - Check for uncommitted changes in main (`git status --porcelain`). If dirty, stop and tell me.
-- Check for uncommitted changes in the target worktree (`git -C <worktree-path> status --porcelain`). If dirty, warn me and list the uncommitted files. Ask whether to proceed — those changes will be lost.
 
 ## 2. Merge
 
@@ -44,6 +36,6 @@ Follow these steps in order. Stop and ask me only when explicitly noted below.
 
 ## 5. Clean up
 
-- Remove the worktree: `git worktree remove <worktree-path>`
 - Delete the branch: `git branch -d <branch>`
-- Show me the final `git worktree list` and `git log --oneline -5`.
+- Delete the container: `scripts/agent-delete <branch>`
+- Show me the final `git log --oneline -5`.
