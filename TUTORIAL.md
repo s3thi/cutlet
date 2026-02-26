@@ -713,38 +713,51 @@ say(find_first_multiple(3, 10))  # prints: 3
 # my return = 5         # => ERR parse error
 ```
 
+## 10. Higher-order functions
+
+Functions are first-class values, so you can pass them as arguments. This enables higher-order function patterns like apply, map, and compose.
+
+Pass a function as an argument:
+
 ```cutlet
-# ============================================================
-# 10. Higher-order functions
-# ============================================================
-
-# Functions are first-class values, so you can pass them as arguments.
-# This enables higher-order function patterns like apply, map, compose.
-
-# Pass a function as an argument:
 fn apply(f, x) is f(x)
 fn inc(x) is x + 1
 say(apply(inc, 5))      # prints: 6
+```
 
-# Works with built-in functions too:
+Works with built-in functions too:
+
+```cutlet
 apply(say, "hello")     # prints: hello
+```
 
-# Compose two functions:
+Compose two functions:
+
+```cutlet
 fn compose(f, g, x) is f(g(x))
 fn double(x) is x * 2
 say(compose(double, inc, 5))   # prints: 12 (double(inc(5)))
+```
 
-# Anonymous functions work as arguments (single-line, no `end`):
+Anonymous functions work as arguments (single-line, no `end`):
+
+```cutlet
 say(apply(fn(x) is x ** 2, 4))   # prints: 16
+```
 
-# Store a function in a local variable and call it:
+Store a function in a local variable and call it:
+
+```cutlet
 fn run_twice(f, x) is
   my result = f(x)
   f(result)
 end
 say(run_twice(inc, 5))   # prints: 7 (inc(inc(5)))
+```
 
-# A simple "each" pattern using a counter loop:
+A simple "each" pattern using a counter loop:
+
+```cutlet
 fn times(n, f) is
   my i = 0
   while i < n do
@@ -754,23 +767,25 @@ fn times(n, f) is
 end
 times(3, fn(i) is say("iteration " ++ str(i)))
 # prints: iteration 0, iteration 1, iteration 2
+```
 
-# ============================================================
-# 11. Closures
-# ============================================================
+## 11. Closures
 
-# A closure is a function that captures variables from its enclosing
-# scope. When an inner function references a variable from an outer
-# function, it "closes over" that variable.
+A closure is a function that captures variables from its enclosing scope. When an inner function references a variable from an outer function, it "closes over" that variable.
 
-# Basic capture — inner function reads from outer scope:
+Basic capture — inner function reads from outer scope:
+
+```cutlet
 fn make_greeter(name) is
   fn() is "hello " ++ name end
 end
 my greet = make_greeter("world")
 say(greet())            # prints: hello world
+```
 
-# Closures capture by reference — mutations are shared:
+Closures capture by reference — mutations are shared:
+
+```cutlet
 fn make_counter() is
   my count = 0
   fn() is
@@ -782,20 +797,24 @@ my counter = make_counter()
 say(counter())          # prints: 1
 say(counter())          # prints: 2
 say(counter())          # prints: 3
+```
 
-# Closures outlive their enclosing function. When make_counter()
-# returns, `count` is moved from the stack to the heap so the
-# closure can keep using it.
+Closures outlive their enclosing function. When `make_counter()` returns, `count` is moved from the stack to the heap so the closure can keep using it.
 
-# Factory pattern — each call creates independent state:
+Factory pattern — each call creates independent state:
+
+```cutlet
 my c1 = make_counter()
 my c2 = make_counter()
 c1()
 c1()
 say(c1())               # prints: 3
 say(c2())               # prints: 1 (c2 has its own count)
+```
 
-# Adder factory — capture a parameter:
+Adder factory — capture a parameter:
+
+```cutlet
 fn make_adder(x) is
   fn(y) is x + y end
 end
@@ -803,16 +822,21 @@ my add5 = make_adder(5)
 my add10 = make_adder(10)
 say(add5(3))            # prints: 8
 say(add10(3))           # prints: 13
+```
 
-# Two closures sharing the same captured variable:
+Two closures sharing the same captured variable:
+
+```cutlet
 fn make_cell() is
   my value = 0
   fn get() is value end
   fn set(v) is value = v end
 end
+```
 
-# Deep nesting — a closure can capture from any enclosing scope,
-# not just the immediately enclosing one:
+Deep nesting — a closure can capture from any enclosing scope, not just the immediately enclosing one:
+
+```cutlet
 fn outer() is
   my x = 100
   fn middle() is
@@ -822,107 +846,160 @@ fn outer() is
   middle()
 end
 say(outer())            # prints: 100
+```
 
-# Closures work with all the features you'd expect:
-# - Capture parameters (not just `my` locals)
-# - Use inside while loops
-# - Pass as arguments to higher-order functions
+Closures work with all the features you'd expect: capture parameters (not just `my` locals), use inside while loops, and pass as arguments to higher-order functions.
 
-# ============================================================
-# 12. Arrays
-# ============================================================
+## 12. Arrays
 
-# Arrays are ordered, indexable collections of values.
-# They use value semantics with copy-on-write for efficiency.
+Arrays are ordered, indexable collections of values. They use value semantics with copy-on-write for efficiency.
 
-# Array literals use square brackets.
+Array literals use square brackets:
+
+```cutlet
 [1, 2, 3]              # => [1, 2, 3]
 []                      # => [] (empty array)
 [1, "two", true]        # => [1, two, true] (mixed types)
 [[1, 2], [3, 4]]        # => [[1, 2], [3, 4]] (nested)
+```
 
-# Trailing commas are allowed.
+Trailing commas are allowed:
+
+```cutlet
 [1, 2, 3,]             # => [1, 2, 3]
+```
 
-# Multiline arrays work — newlines inside brackets are ignored.
+Multiline arrays work — newlines inside brackets are ignored:
+
+```cutlet
 my colors = [
   "red",
   "green",
   "blue",
 ]
 colors                  # => [red, green, blue]
+```
 
-# Elements can be any expression.
+Elements can be any expression:
+
+```cutlet
 [1 + 1, 2 * 3, 4 ** 2] # => [2, 6, 16]
+```
 
-# Indexing is zero-based with square brackets.
+Indexing is zero-based with square brackets:
+
+```cutlet
 my xs = [10, 20, 30, 40, 50]
 xs[0]                   # => 10
 xs[4]                   # => 50
+```
 
-# Negative indices wrap from the end.
+Negative indices wrap from the end:
+
+```cutlet
 xs[-1]                  # => 50
 xs[-2]                  # => 40
+```
 
-# Out-of-bounds is a runtime error.
+Out-of-bounds is a runtime error:
+
+```cutlet
 # xs[5]                # => ERR index out of bounds
 # xs[-6]               # => ERR index out of bounds
+```
 
-# Index assignment.
+Index assignment:
+
+```cutlet
 xs[0] = 99
 xs                      # => [99, 20, 30, 40, 50]
+```
 
-# Copy-on-write: assigning an array shares the backing store.
-# Mutation triggers a copy, so the original is never changed.
+Copy-on-write: assigning an array shares the backing store. Mutation triggers a copy, so the original is never changed.
+
+```cutlet
 my ys = xs
 ys[0] = 1
 ys                      # => [1, 20, 30, 40, 50]
 xs                      # => [99, 20, 30, 40, 50] (unchanged)
+```
 
-# Nested indexing chains.
+Nested indexing chains:
+
+```cutlet
 my grid = [[1, 2], [3, 4]]
 grid[1][0]              # => 3
+```
 
-# Concatenation with ++ (both sides must be arrays).
+Concatenation with `++` (both sides must be arrays):
+
+```cutlet
 [1, 2] ++ [3, 4]       # => [1, 2, 3, 4]
 [] ++ [1]               # => [1]
+```
 
-# ++ still works for strings when neither side is an array.
+`++` still works for strings when neither side is an array:
+
+```cutlet
 "a" ++ "b"              # => ab
+```
 
-# Mixing arrays with non-arrays in ++ is an error.
+Mixing arrays with non-arrays in `++` is an error:
+
+```cutlet
 # [1] ++ 2             # => ERR cannot concatenate array with number
+```
 
-# len() returns the number of elements (also works on strings).
+`len()` returns the number of elements (also works on strings):
+
+```cutlet
 len([1, 2, 3])          # => 3
 len([])                 # => 0
 len("hello")            # => 5
+```
 
-# push() returns a new array with an element appended.
+`push()` returns a new array with an element appended:
+
+```cutlet
 push([1, 2], 3)         # => [1, 2, 3]
 push([], "a")           # => [a]
+```
 
-# pop() returns a new array without the last element.
+`pop()` returns a new array without the last element:
+
+```cutlet
 pop([1, 2, 3])          # => [1, 2]
 pop([1])                # => []
 # pop([])              # => ERR pop() on empty array
+```
 
-# push() and pop() do NOT mutate — they return new arrays.
+`push()` and `pop()` do NOT mutate — they return new arrays:
+
+```cutlet
 my nums = [1, 2]
 push(nums, 3)
 nums                    # => [1, 2] (unchanged)
+```
 
-# Equality is structural and recursive.
+Equality is structural and recursive:
+
+```cutlet
 [1, 2, 3] == [1, 2, 3]     # => true
 [1, 2] == [1, 2, 3]        # => false
 [] == []                    # => true
 [[1]] == [[1]]              # => true
+```
 
-# Truthiness: non-empty arrays are truthy, empty arrays are falsy.
+Truthiness: non-empty arrays are truthy, empty arrays are falsy:
+
+```cutlet
 not []                  # => true
 not [1]                 # => false
+```
 
-# Building an array in a loop.
+Building an array in a loop:
+
+```cutlet
 my squares = []
 my i = 1
 while i <= 5 do
@@ -930,110 +1007,169 @@ while i <= 5 do
   i = i + 1
 end
 squares                 # => [1, 4, 9, 16, 25]
+```
 
-# ============================================================
-# 13. Maps (dictionaries)
-# ============================================================
+## 13. Maps (dictionaries)
 
-# Maps are key-value collections. They use value semantics with
-# copy-on-write, just like arrays.
+Maps are key-value collections. They use value semantics with copy-on-write, just like arrays.
 
-# Map literals use curly braces. Bare identifiers become string keys.
+Map literals use curly braces. Bare identifiers become string keys:
+
+```cutlet
 {name: "alice", age: 30}   # => {name: alice, age: 30}
 {}                          # => {} (empty map)
+```
 
-# Trailing commas are allowed.
+Trailing commas are allowed:
+
+```cutlet
 {a: 1, b: 2,}             # => {a: 1, b: 2}
+```
 
-# Multiline maps work — newlines inside braces are ignored.
+Multiline maps work — newlines inside braces are ignored:
+
+```cutlet
 my person = {
   name: "alice",
   age: 30,
   role: "admin",
 }
 person                      # => {name: alice, age: 30, role: admin}
+```
 
-# Values can be any expression.
+Values can be any expression:
+
+```cutlet
 {x: 1 + 2, y: 3 * 4}      # => {x: 3, y: 12}
+```
 
-# Computed keys: use [expr] to use any expression as a key.
+Computed keys: use `[expr]` to use any expression as a key:
+
+```cutlet
 {[1 + 2]: "three"}         # => {3: three}
 {[true]: "yes", [false]: "no"}  # => {true: yes, false: no}
+```
 
-# To use a variable as a key, you must use computed syntax:
+To use a variable as a key, you must use computed syntax:
+
+```cutlet
 my key = "color"
 {[key]: "blue"}             # => {color: blue}
-# Without brackets, `key` is treated as the string "key":
+```
+
+Without brackets, `key` is treated as the string `"key"`:
+
+```cutlet
 {key: "blue"}               # => {key: blue}
+```
 
-# Duplicate keys: last value wins.
+Duplicate keys: last value wins:
+
+```cutlet
 {a: 1, a: 2}               # => {a: 2}
+```
 
-# Valid key types: strings, numbers, booleans, nothing.
-# Functions are not valid keys (runtime error).
+Valid key types: strings, numbers, booleans, `nothing`. Functions are not valid keys (runtime error).
 
-# Indexing with square brackets.
+Indexing with square brackets:
+
+```cutlet
 my m = {name: "alice", age: 30}
 m["name"]                   # => alice
 m["age"]                    # => 30
+```
 
-# Missing keys return nothing (not an error).
+Missing keys return `nothing` (not an error):
+
+```cutlet
 m["email"]                  # => nothing
+```
 
-# Use has_key() to distinguish "key absent" from "key present with
-# value nothing":
+Use `has_key()` to distinguish "key absent" from "key present with value `nothing`":
+
+```cutlet
 my m2 = {a: nothing}
 m2["a"]                     # => nothing
 has_key(m2, "a")            # => true  (key exists)
 has_key(m2, "b")            # => false (key absent)
+```
 
-# Index assignment. COW: the original is never changed.
+Index assignment. COW: the original is never changed:
+
+```cutlet
 my m3 = {x: 10}
 my m4 = m3
 m4["x"] = 99
 m4["y"] = 20
 m4                          # => {x: 99, y: 20}
 m3                          # => {x: 10} (unchanged)
+```
 
-# Map projection: index with an array of keys to select a sub-map.
+Map projection: index with an array of keys to select a sub-map:
+
+```cutlet
 my data = {name: "alice", age: 30, email: "a@b.com", role: "admin"}
 data[["name", "email"]]     # => {name: alice, email: a@b.com}
+```
 
-# Missing projection keys are silently skipped.
+Missing projection keys are silently skipped:
+
+```cutlet
 data[["name", "zzz"]]       # => {name: alice}
+```
 
-# Empty projection.
+Empty projection:
+
+```cutlet
 data[[]]                     # => {}
+```
 
-# Merge with ++ (right side wins on key conflicts).
+Merge with `++` (right side wins on key conflicts):
+
+```cutlet
 {a: 1, b: 2} ++ {b: 3, c: 4}   # => {a: 1, b: 3, c: 4}
 {} ++ {a: 1}                    # => {a: 1}
 {a: 1} ++ {}                    # => {a: 1}
+```
 
-# Mixing maps with non-maps in ++ is an error.
+Mixing maps with non-maps in `++` is an error:
+
+```cutlet
 # {a: 1} ++ 2            # => ERR cannot concatenate map with number
+```
 
-# Built-in functions.
+Built-in functions:
+
+```cutlet
 keys({name: "alice", age: 30})     # => [name, age]  (insertion order)
 values({name: "alice", age: 30})   # => [alice, 30]   (insertion order)
 has_key({a: 1}, "a")               # => true
 has_key({a: 1}, "b")               # => false
 len({a: 1, b: 2})                  # => 2
 len({})                             # => 0
+```
 
-# keys() and values() return arrays, so you can use them in loops.
+`keys()` and `values()` return arrays, so you can use them in loops.
 
-# Equality is structural. Key order does not matter.
+Equality is structural. Key order does not matter:
+
+```cutlet
 {a: 1, b: 2} == {b: 2, a: 1}  # => true
 {a: 1} == {a: 1, b: 2}        # => false
 {} == {}                        # => true
 {a: 1} == "hello"               # => false (different types)
+```
 
-# Truthiness: non-empty maps are truthy, empty maps are falsy.
+Truthiness: non-empty maps are truthy, empty maps are falsy:
+
+```cutlet
 not {}                     # => true
 not {a: 1}                 # => false
+```
 
-# Building a map in a loop.
+Building a map in a loop:
+
+```cutlet
 my squares = {}
 my i = 1
 while i <= 5 do
@@ -1041,313 +1177,443 @@ while i <= 5 do
   i = i + 1
 end
 squares                     # => {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
+```
 
-# ============================================================
-# 14. Membership testing with `in`
-# ============================================================
+## 14. Membership testing with `in`
 
-# `in` tests whether a value is a member of a collection.
-# It works with maps (key lookup), arrays (element search),
-# and strings (substring search).
+`in` tests whether a value is a member of a collection. It works with maps (key lookup), arrays (element search), and strings (substring search).
 
-# Map: checks if a key exists.
+Map: checks if a key exists:
+
+```cutlet
 "name" in {name: "alice", age: 30}    # => true
 "email" in {name: "alice"}             # => false
+```
 
-# Works with any key type (computed keys).
+Works with any key type (computed keys):
+
+```cutlet
 1 in {[1]: "one", [2]: "two"}         # => true
 true in {[true]: "yes"}               # => true
+```
 
-# Key exists even when the value is nothing.
+Key exists even when the value is `nothing`:
+
+```cutlet
 "a" in {a: nothing}                    # => true
+```
 
-# Array: checks if an element is present (linear scan, equality-based).
+Array: checks if an element is present (linear scan, equality-based):
+
+```cutlet
 42 in [1, 2, 42]                       # => true
 99 in [1, 2, 3]                        # => false
 "b" in ["a", "b", "c"]                # => true
 1 in []                                # => false
+```
 
-# String: checks for a substring.
+String: checks for a substring:
+
+```cutlet
 "lo" in "hello"                        # => true
 "xyz" in "hello"                       # => false
 "" in "hello"                          # => true  (empty string is always found)
 "hello" in "hello"                     # => true  (string contains itself)
+```
 
-# For strings, the left operand must also be a string.
+For strings, the left operand must also be a string:
+
+```cutlet
 # 42 in "hello"                       # => ERR in requires a string left operand
+```
 
-# `not in` — syntactic sugar for `not (x in y)`.
+`not in` — syntactic sugar for `not (x in y)`:
+
+```cutlet
 10 not in [1, 2, 3]                    # => true
 1 not in [1, 2, 3]                     # => false
 "z" not in {a: 1}                      # => true
 "xyz" not in "hello"                   # => true
+```
 
-# `not in` is identical to writing `not ... in ...` explicitly:
+`not in` is identical to writing `not ... in ...` explicitly:
+
+```cutlet
 not 10 in [1, 2, 3]                    # => true (same as `10 not in [1, 2, 3]`)
+```
 
-# Precedence: `in` is at comparison level (like ==, <, >).
-# Arithmetic binds tighter, logical operators bind looser.
+Precedence: `in` is at comparison level (like `==`, `<`, `>`). Arithmetic binds tighter, logical operators bind looser.
+
+```cutlet
 1 + 1 in [2, 3]                        # => true  ((1+1) in [2,3])
 true and 1 in [1, 2]                   # => true  (true and (1 in [1,2]))
 not 5 in [1, 2, 3]                     # => true  (not (5 in [1,2,3]))
+```
 
-# `in` is non-associative (like other comparisons).
+`in` is non-associative (like other comparisons):
+
+```cutlet
 # 1 in [1] in [[1]]                   # => ERR parse error
+```
 
-# Composability: `in` works with any expression that produces
-# a map, array, or string.
+Composability: `in` works with any expression that produces a map, array, or string:
+
+```cutlet
 "a" in keys({a: 1, b: 2})             # => true
+```
 
-# Combining with `and`/`or`:
+Combining with `and`/`or`:
+
+```cutlet
 my xs = [1, 2, 3]
 5 not in xs and 1 in xs                # => true
+```
 
-# Using `in` with `has_key()`:
-# `in` is the idiomatic way for membership testing.
-# `has_key()` is still useful in higher-order contexts
-# (e.g., passing as a callback), but `in` is preferred for
-# direct checks.
+`in` is the idiomatic way for membership testing. `has_key()` is still useful in higher-order contexts (e.g., passing as a callback), but `in` is preferred for direct checks.
 
-# Invalid right operand types are runtime errors.
+Invalid right operand types are runtime errors:
+
+```cutlet
 # 1 in 42                             # => ERR cannot use 'in' with number
 # 1 in true                           # => ERR cannot use 'in' with boolean
+```
 
-# ============================================================
-# 15. The @ meta-operator
-# ============================================================
+## 15. The `@` meta-operator
 
-# The @ meta-operator lifts operators and functions to work across
-# arrays. It has two forms: prefix (reduction/fold) and infix
-# (element-wise vectorization).
+The `@` meta-operator lifts operators and functions to work across arrays. It has two forms: prefix (reduction/fold) and infix (element-wise vectorization).
 
-# --- Prefix @op: reduction (fold) ---
+### Prefix `@op`: reduction (fold)
 
-# @op array folds an operator across the array from left to right.
+`@op array` folds an operator across the array from left to right:
+
+```cutlet
 @+ [1, 2, 3, 4, 5]     # => 15   (1+2+3+4+5)
 @* [1, 2, 3, 4, 5]     # => 120  (1*2*3*4*5)
 @- [10, 3, 2]           # => 5    ((10-3)-2)
 @++ ["a", "b", "c"]     # => abc
+```
 
-# Single-element arrays return that element.
+Single-element arrays return that element:
+
+```cutlet
 @+ [42]                 # => 42
+```
 
-# Empty arrays are a runtime error.
+Empty arrays are a runtime error:
+
+```cutlet
 # @+ []                # => ERR cannot reduce empty array
+```
 
-# @and and @or fold with short-circuit semantics.
+`@and` and `@or` fold with short-circuit semantics:
+
+```cutlet
 @and [true, true, false]    # => false (stops at first falsy)
 @and [1, 2, 3]              # => 3     (all truthy, returns last)
 @or [false, 0, "hi"]        # => hi    (stops at first truthy)
 @or [false, 0, ""]          # => ""    (all falsy, returns last)
+```
 
-# --- Infix @op: vectorization (element-wise) ---
+### Infix `@op`: vectorization (element-wise)
 
-# expr @op expr applies the operator to matching elements.
+`expr @op expr` applies the operator to matching elements:
+
+```cutlet
 [1, 2, 3] @+ [4, 5, 6]     # => [5, 7, 9]
 [1, 2, 3] @* [4, 5, 6]     # => [4, 10, 18]
 ["a", "b"] @++ ["1", "2"]   # => [a1, b2]
+```
 
-# Scalar broadcast: when one operand is a scalar, it's used
-# for every element.
+Scalar broadcast: when one operand is a scalar, it's used for every element:
+
+```cutlet
 [1, 2, 3] @* 10             # => [10, 20, 30]
 10 @- [1, 2, 3]             # => [9, 8, 7]
 [1, 2, 3] @** 2             # => [1, 4, 9]
+```
 
-# Vectorized comparison produces boolean arrays.
+Vectorized comparison produces boolean arrays:
+
+```cutlet
 [1, 2, 3] @> 2              # => [false, false, true]
 [10, 20, 30] @>= 20         # => [false, true, true]
+```
 
-# Mismatched array lengths are a runtime error.
+Mismatched array lengths are a runtime error:
+
+```cutlet
 # [1, 2] @+ [1, 2, 3]     # => ERR array length mismatch
+```
 
-# Both scalars are also an error (use the regular operator instead).
+Both scalars are also an error (use the regular operator instead):
+
+```cutlet
 # 1 @+ 2                  # => ERR @ requires at least one array operand
+```
 
-# Precedence follows the inner operator: @* binds tighter than @+.
+Precedence follows the inner operator: `@*` binds tighter than `@+`:
+
+```cutlet
 [1, 2] @+ [3, 4] @* [5, 6]  # => [16, 26]  ([1,2] @+ [15,24])
+```
 
-# --- @fn: custom function reduction and vectorization ---
+### `@fn`: custom function reduction and vectorization
 
-# @identifier works with user-defined functions too.
-# For reduction, the function must take two arguments.
+`@identifier` works with user-defined functions too. For reduction, the function must take two arguments:
+
+```cutlet
 fn max(a, b) is if a > b then a else b end end
 @max [3, 1, 4, 1, 5]       # => 5
 
 fn add(a, b) is a + b end
 @add [1, 2, 3]              # => 6
+```
 
-# For vectorization, the function is called on matching pairs.
+For vectorization, the function is called on matching pairs:
+
+```cutlet
 fn mul(a, b) is a * b end
 [1, 2, 3] @mul [4, 5, 6]   # => [4, 10, 18]
+```
 
-# Scalar broadcast works with custom functions too.
+Scalar broadcast works with custom functions too:
+
+```cutlet
 fn add1(a, b) is a + b end
 [1, 2, 3] @add1 10          # => [11, 12, 13]
+```
 
-# --- Boolean mask indexing ---
+### Boolean mask indexing
 
-# When you index an array with a boolean array, it acts as a mask:
-# elements where the mask is true are kept.
+When you index an array with a boolean array, it acts as a mask: elements where the mask is `true` are kept.
+
+```cutlet
 my xs = [10, 20, 30, 40, 50]
 xs[[true, false, true, false, true]]  # => [10, 30, 50]
+```
 
-# All false => empty array.
+All false returns an empty array:
+
+```cutlet
 [1, 2, 3][[false, false, false]]      # => []
+```
 
-# The mask must be the same length as the array.
+The mask must be the same length as the array:
+
+```cutlet
 # [1, 2, 3][[true, false]]   # => ERR mask length mismatch
+```
 
-# The mask must contain only booleans.
+The mask must contain only booleans:
+
+```cutlet
 # [1, 2, 3][[1, 0, 1]]      # => ERR mask must contain only booleans
+```
 
-# --- Combining @ with mask indexing ---
+### Combining `@` with mask indexing
 
-# This is where @ really shines. Vectorized comparison produces a
-# boolean array, which you can use directly as a mask.
+This is where `@` really shines. Vectorized comparison produces a boolean array, which you can use directly as a mask:
+
+```cutlet
 my scores = [85, 92, 67, 74, 95]
 scores[scores @>= 70]               # => [85, 92, 74, 95]
 
 my data = [1, 2, 3, 4, 5, 6, 7, 8]
 data[data @> 3]                      # => [4, 5, 6, 7, 8]
+```
 
-# --- @ on maps ---
+### `@` on maps
 
-# The @ meta-operator works on maps too. Prefix @op reduces (folds)
-# over the map's values in insertion order.
+The `@` meta-operator works on maps too. Prefix `@op` reduces (folds) over the map's values in insertion order:
+
+```cutlet
 @+ {math: 92, english: 87, science: 95}   # => 274
 @* {a: 2, b: 3, c: 4}                      # => 24
 @++ {first: "hello", second: " world"}     # => hello world
+```
 
-# Single-entry maps return that value. Empty maps are a runtime error.
+Single-entry maps return that value. Empty maps are a runtime error:
+
+```cutlet
 @+ {x: 42}                # => 42
 # @+ {}                   # => ERR cannot reduce empty map
+```
 
-# @and and @or short-circuit over map values, same as arrays.
+`@and` and `@or` short-circuit over map values, same as arrays:
+
+```cutlet
 @and {a: true, b: true, c: false}   # => false
 @or {a: false, b: 0, c: "hi"}       # => hi
+```
 
-# Infix @op on two maps: vectorizes by key intersection.
-# Only shared keys appear in the result. Non-shared keys are dropped.
+Infix `@op` on two maps: vectorizes by key intersection. Only shared keys appear in the result; non-shared keys are dropped:
+
+```cutlet
 {a: 1, b: 2} @+ {a: 10, b: 20}     # => {a: 11, b: 22}
 {a: 1, b: 2, c: 3} @+ {b: 10, c: 20, d: 30}  # => {b: 12, c: 23}
 {a: 1} @+ {b: 2}                    # => {} (no shared keys)
+```
 
-# Scalar broadcast: when one operand is a scalar, it applies to
-# every value in the map.
+Scalar broadcast: when one operand is a scalar, it applies to every value in the map:
+
+```cutlet
 {a: 1, b: 2} @* 10                  # => {a: 10, b: 20}
 100 @- {a: 10, b: 20}               # => {a: 90, b: 80}
 {math: 85, english: 90} @>= 88      # => {math: false, english: true}
+```
 
-# Maps and arrays cannot be mixed in vectorized operations.
+Maps and arrays cannot be mixed in vectorized operations. Use `values()` or `keys()` to convert first.
+
+```cutlet
 # {a: 1} @+ [1, 2]       # => ERR cannot vectorize map with array
 # [1, 2] @+ {a: 1}       # => ERR cannot vectorize array with map
-# Use values() or keys() to convert first.
+```
 
-# --- @: (zip arrays into a map) ---
+### `@:` (zip arrays into a map)
 
-# @: takes two arrays — keys on the left, values on the right — and
-# produces a map. It's the idiomatic way to construct a map from arrays.
+`@:` takes two arrays — keys on the left, values on the right — and produces a map. It's the idiomatic way to construct a map from arrays:
+
+```cutlet
 ["a", "b", "c"] @: [1, 2, 3]        # => {a: 1, b: 2, c: 3}
+```
 
-# Works with any valid key type (strings, numbers, booleans, nothing).
+Works with any valid key type (strings, numbers, booleans, `nothing`):
+
+```cutlet
 [1, 2] @: ["one", "two"]            # => {1: one, 2: two}
 [true, false] @: ["yes", "no"]      # => {true: yes, false: no}
+```
 
-# Empty arrays produce an empty map.
+Empty arrays produce an empty map:
+
+```cutlet
 [] @: []                              # => {}
+```
 
-# Duplicate keys: last occurrence wins (same as map literal behavior).
+Duplicate keys: last occurrence wins (same as map literal behavior):
+
+```cutlet
 ["a", "b", "a"] @: [1, 2, 3]        # => {a: 3, b: 2}
+```
 
-# Compose with other @op operations.
+Compose with other `@op` operations:
+
+```cutlet
 my names = ["alice", "bob"]
 my scores = [85, 92]
 names @: (scores @* 1.1)             # => {alice: 93.5, bob: 101.2}
+```
 
-# Map inversion using keys() and values().
+Map inversion using `keys()` and `values()`:
+
+```cutlet
 my m = {x: 1, y: 2}
 values(m) @: keys(m)                 # => {1: x, 2: y}
+```
 
-# Round-trip: decompose a map and zip it back.
+Round-trip: decompose a map and zip it back:
+
+```cutlet
 my m = {a: 1, b: 2}
 keys(m) @: values(m)                 # => {a: 1, b: 2}
+```
 
-# Mismatched array lengths are a runtime error.
+Mismatched array lengths, non-array operands, and invalid key types (e.g. functions) are all runtime errors. `@:` cannot be used as a prefix (reduction) operator.
+
+```cutlet
 # ["a"] @: [1, 2]                   # => ERR array length mismatch in @:
-# Non-array operands are a runtime error.
 # "a" @: [1]                        # => ERR @: requires two arrays
-# Invalid key types (e.g. functions) are a runtime error.
-# @: cannot be used as a prefix (reduction) operator.
 # @: [1, 2, 3]                      # => ERR ':' cannot be used as a reduction
+```
 
-# --- Composability ---
+### Composability
 
-# Since keys(), values() return arrays and @ works on both arrays
-# and maps, you can mix freely.
+Since `keys()` and `values()` return arrays and `@` works on both arrays and maps, you can mix freely:
+
+```cutlet
 my scores = {math: 92, english: 87, science: 95}
 @+ values(scores)                    # => 274 (reduce the values array)
+```
 
-# Vectorize then reduce: total of element-wise product.
+Vectorize then reduce — total of element-wise product:
+
+```cutlet
 @+ ({a: 2, b: 3} @* {a: 10, b: 20}) # => 80
+```
 
-# ============================================================
-# 16. say() for output
-# ============================================================
+## 16. `say()` for output
 
-# say() prints a value followed by a newline. Returns nothing.
-# say() auto-formats any value type (unlike ++, which requires strings).
+`say()` prints a value followed by a newline and returns `nothing`. Unlike `++`, `say()` auto-formats any value type.
+
+```cutlet
 say("hello")    # prints: hello
 say(42)         # prints: 42
 say(1 + 2)      # prints: 3
 say(true)       # prints: true
 say(nothing)    # prints: nothing
+```
 
-# str() converts any value to a string. Use it with ++ for mixed-type output.
+Use `str()` with `++` for mixed-type output:
+
+```cutlet
 say("result: " ++ str(42))   # prints: result: 42
+```
 
-# ============================================================
-# 17. Running Cutlet programs
-# ============================================================
+## 17. Running Cutlet programs
 
-# Save code to a file (e.g., hello.cutlet):
-#
-#   say("Hello, world!")
-#   my x = 10
-#   my y = 20
-#   say(x + y)
-#
-# Run it:
-#   cutlet run hello.cutlet
-#
-# Output:
-#   Hello, world!
-#   30
-#
-# In file mode, only say() produces output.
-# The final expression value is NOT printed (unlike the REPL).
+Save code to a file (e.g., `hello.cutlet`):
 
-# ============================================================
-# 18. The REPL
-# ============================================================
+```cutlet
+say("Hello, world!")
+my x = 10
+my y = 20
+say(x + y)
+```
 
-# Start an interactive REPL:
-#   cutlet repl
-#
-# The REPL evaluates each expression and prints the result.
-# Multi-line input is supported — the prompt changes to ... when
-# your input is incomplete (unclosed if/end, parentheses, etc.).
-#
-# You can also pipe input:
-#   echo "1 + 2" | cutlet repl
-#
-# Debug flags:
-#   cutlet repl --tokens         # show tokenizer output
-#   cutlet repl --ast            # show AST output
-#   cutlet repl --tokens --ast   # show both
-#
-# For networked REPL (TCP server/client):
-#   cutlet repl --listen              # start a TCP REPL server
-#   cutlet repl --connect             # connect to a running server
-#   cutlet repl --listen :9000        # listen on custom port
-#   cutlet repl --connect :9000       # connect to custom port
+Run it:
+
+```sh
+cutlet run hello.cutlet
+```
+
+Output:
+
+```
+Hello, world!
+30
+```
+
+In file mode, only `say()` produces output. The final expression value is NOT printed (unlike the REPL).
+
+## 18. The REPL
+
+Start an interactive REPL:
+
+```sh
+cutlet repl
+```
+
+The REPL evaluates each expression and prints the result. Multi-line input is supported — the prompt changes to `...` when your input is incomplete (unclosed `if`/`end`, parentheses, etc.).
+
+You can also pipe input:
+
+```sh
+echo "1 + 2" | cutlet repl
+```
+
+Debug flags:
+
+```sh
+cutlet repl --tokens         # show tokenizer output
+cutlet repl --ast            # show AST output
+cutlet repl --tokens --ast   # show both
+```
+
+For networked REPL (TCP server/client):
+
+```sh
+cutlet repl --listen              # start a TCP REPL server
+cutlet repl --connect             # connect to a running server
+cutlet repl --listen :9000        # listen on custom port
+cutlet repl --connect :9000       # connect to custom port
 ```
