@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# agent-connect — Resume and reattach to a cutlet-agent container.
+#
+# Usage: scripts/agent-connect <branch-name>
+#
+# If the container is paused, it is unpaused first. Then attaches to the
+# existing tmux session inside the container. Also works for running
+# containers the user simply disconnected from.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-connect <branch-name>\n" >&2
+    printf "  Resumes a paused container and reattaches to its tmux session.\n" >&2
+    printf "  Also works for running containers you disconnected from.\n" >&2
+    exit 1
+}
+
+if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+BRANCH="$1"
+CONTAINER="cutlet-agent-${BRANCH}"
+
+# Check that the container exists.
+if ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    printf "Error: container '%s' does not exist.\n" "$CONTAINER" >&2
+    printf "  Use 'scripts/agent-list' to see available containers.\n" >&2
+    exit 1
+fi
+
+# Check container status.
+STATUS="$(docker inspect -f '{{.State.Status}}' "$CONTAINER")"
+
+if [ "$STATUS" = "paused" ]; then
+    printf "Resuming paused container '%s' ...\n" "$CONTAINER"
+    docker unpause "$CONTAINER" > /dev/null
+elif [ "$STATUS" != "running" ]; then
+    printf "Error: container '%s' is %s, not running or paused.\n" "$CONTAINER" "$STATUS" >&2
+    printf "  Use 'scripts/agent-delete %s' to remove it, then\n" "$BRANCH" >&2
+    printf "  'scripts/agent-start %s' to create a new one.\n" "$BRANCH" >&2
+    exit 1
+fi
+
+# Verify the tmux session still exists inside the container.
+if ! docker exec "$CONTAINER" tmux has-session -t main 2>/dev/null; then
+    printf "Error: tmux session 'main' is gone inside container '%s'.\n" "$CONTAINER" >&2
+    printf "  Use 'scripts/agent-delete %s' to remove it, then\n" "$BRANCH" >&2
+    printf "  'scripts/agent-start %s' to create a new one.\n" "$BRANCH" >&2
+    exit 1
+fi
+
+printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
+
+# Attach to the tmux session inside the container.
+docker exec -it "$CONTAINER" tmux attach -t main

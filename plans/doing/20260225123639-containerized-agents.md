@@ -311,6 +311,7 @@ Since this is infrastructure (not language source code), verification is manual 
 - [x] Step 3: `scripts/agent-start` — created start script that creates a container, clones repo from mounted .git, creates/checks out branch, configures git identity, starts tmux with Claude Code + shell panes, waits for tmux ready, and attaches
 - [x] Step 4: `scripts/agent-list` — created list script that shows all cutlet-agent containers with status/uptime, or prints "No agent containers." when none exist
 - [x] Step 5: `scripts/agent-pause` — created pause script that verifies container exists and is running, then freezes it with `docker pause`
+- [x] Step 6: `scripts/agent-connect` — created connect script that unpauses paused containers, verifies tmux session exists, and reattaches to it
 
 ---
 End of plan.
