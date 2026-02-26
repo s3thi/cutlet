@@ -43,13 +43,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # all worktrees). --absolute-git-dir would return the worktree-specific
 # metadata dir, which git clone can't use.
 REPO_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --path-format=absolute --git-common-dir)"
-CLAUDE_DIR="$HOME/.claude"
-CLAUDE_JSON="$HOME/.claude.json"
-
-if [ ! -d "$CLAUDE_DIR" ]; then
-    printf "Error: Claude credentials directory not found at %s\n" "$CLAUDE_DIR" >&2
-    exit 1
-fi
 
 # Read git identity from the host repo.
 GIT_USER_NAME="$(git -C "$REPO_ROOT" config user.name 2>/dev/null || true)"
@@ -58,24 +51,6 @@ GIT_USER_EMAIL="$(git -C "$REPO_ROOT" config user.email 2>/dev/null || true)"
 if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
     printf "Error: git user.name and user.email must be set in the host repo.\n" >&2
     exit 1
-fi
-
-# Extract OAuth token from macOS Keychain. Claude Code stores its OAuth
-# credentials in the system keychain, which isn't available inside Docker.
-# We extract the access token and pass it via env var instead.
-OAUTH_TOKEN=""
-if command -v security &>/dev/null; then
-    CRED_JSON="$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)"
-    if [ -n "$CRED_JSON" ]; then
-        # Extract accessToken from {"claudeAiOauth":{"accessToken":"..."}}
-        OAUTH_TOKEN="$(printf '%s' "$CRED_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null || true)"
-    fi
-fi
-
-if [ -z "$OAUTH_TOKEN" ]; then
-    printf "Warning: Could not extract OAuth token from macOS Keychain.\n" >&2
-    printf "  Claude Code may not be authenticated in the container.\n" >&2
-    printf "  You can set ANTHROPIC_API_KEY manually inside the container.\n" >&2
 fi
 
 AGENT_HOME="/home/agent"
@@ -87,15 +62,6 @@ ENTRYPOINT_SCRIPT=$(cat <<'ENTRYPOINT'
 set -euo pipefail
 
 AGENT_HOME="/home/agent"
-
-# Copy Claude credentials from the read-only mounts into the agent
-# user's home. Claude Code needs to write session state, so a direct
-# read-only mount doesn't work. Copying gives the container a writable
-# copy without risking host credential modification.
-cp -a /host-claude "$AGENT_HOME/.claude"
-if [ -f /host-claude.json ]; then
-    cp /host-claude.json "$AGENT_HOME/.claude.json"
-fi
 
 # Clone from the mounted host repo .git directory.
 git clone /host-repo.git /workspace
@@ -112,25 +78,16 @@ fi
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
-# Hand ownership of workspace and credentials to the agent user.
-chown -R agent:agent /workspace "$AGENT_HOME/.claude"
-if [ -f "$AGENT_HOME/.claude.json" ]; then
-    chown agent:agent "$AGENT_HOME/.claude.json"
-fi
+# Hand ownership of workspace to the agent user.
+chown -R agent:agent /workspace
 
 # Start tmux as the agent user with two panes:
 #   Left:  Claude Code with --dangerously-skip-permissions
 #   Right: bash shell in /workspace
 # The left pane falls back to bash if Claude exits (e.g., auth failure),
 # so the pane stays alive and the user can re-run claude manually.
-# Pass the OAuth token through to the agent user's environment if set.
-CLAUDE_ENV=""
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    CLAUDE_ENV="ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-fi
-
 su -l agent -c "cd /workspace && tmux new-session -d -s main -c /workspace \
-    '$CLAUDE_ENV claude --dangerously-skip-permissions; exec bash'"
+    'claude --dangerously-skip-permissions; exec bash'"
 su -l agent -c "tmux split-window -h -t main -c /workspace"
 # Focus the left pane (Claude Code) so the user lands there on attach.
 su -l agent -c "tmux select-pane -t main.0"
@@ -143,24 +100,13 @@ ENTRYPOINT
 
 printf "Starting container '%s' ...\n" "$CONTAINER"
 
-# Build volume mount arguments. Always mount the git dir and claude dir.
-# Optionally mount .claude.json if it exists on the host.
-VOLUME_ARGS=(
-    -v "$REPO_GIT_DIR":/host-repo.git
-    -v "$CLAUDE_DIR":/host-claude:ro
-)
-if [ -f "$CLAUDE_JSON" ]; then
-    VOLUME_ARGS+=(-v "$CLAUDE_JSON":/host-claude.json:ro)
-fi
-
-# Start the container detached with host repo .git and Claude credentials mounted.
+# Start the container detached with host repo .git mounted.
 docker run -d \
     --name "$CONTAINER" \
     -e BRANCH="$BRANCH" \
     -e GIT_USER_NAME="$GIT_USER_NAME" \
     -e GIT_USER_EMAIL="$GIT_USER_EMAIL" \
-    ${OAUTH_TOKEN:+-e ANTHROPIC_API_KEY="$OAUTH_TOKEN"} \
-    "${VOLUME_ARGS[@]}" \
+    -v "$REPO_GIT_DIR":/host-repo.git \
     cutlet-agent:latest \
     /bin/bash -c "$ENTRYPOINT_SCRIPT"
 
