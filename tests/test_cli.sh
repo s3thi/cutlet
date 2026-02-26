@@ -1350,6 +1350,40 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# `in` operator — end-to-end
+# ============================================================
+echo
+echo "in operator (end-to-end):"
+
+# Basic in expression via local REPL pipe
+test_local_repl "in map membership" '"a" in {a: 1, b: 2}' "true"
+
+# not in expression via local REPL pipe
+test_local_repl "not in array" '10 not in [1, 2, 3]' "true"
+
+# --bytecode shows OP_IN for in expression
+bc_in_result=$(printf '"a" in {a: 1}' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_in_result" | grep -qF "OP_IN"; then
+    echo "  PASS: --bytecode shows OP_IN"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_IN"
+    echo "    Got: $bc_in_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode shows OP_IN + OP_NOT for not in expression
+bc_not_in_result=$(printf '10 not in [1, 2, 3]' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_not_in_result" | grep -qF "OP_IN" && echo "$bc_not_in_result" | grep -qF "OP_NOT"; then
+    echo "  PASS: --bytecode shows OP_IN + OP_NOT for not in"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_IN + OP_NOT for not in"
+    echo "    Got: $bc_not_in_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

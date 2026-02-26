@@ -3357,6 +3357,33 @@ TEST(test_in_precedence_and) { assert_vm_bool("true and 1 in [1, 2]", true, "in 
 /* `not` binds looser than `in`: not (5 in [1,2,3]) → true */
 TEST(test_in_precedence_not) { assert_vm_bool("not 5 in [1, 2, 3]", true, "not after in"); }
 
+/* --- Edge cases --- */
+
+/* nothing as a map key: nothing in {[nothing]: 1} → true */
+TEST(test_in_nothing_as_map_key) {
+    assert_vm_bool("nothing in {[nothing]: 1}", true, "nothing as map key");
+}
+
+/* nothing in an array: nothing in [nothing, 1, 2] → true */
+TEST(test_in_nothing_in_array) {
+    assert_vm_bool("nothing in [nothing, 1, 2]", true, "nothing in array");
+}
+
+/* Empty string in empty string: "" in "" → true */
+TEST(test_in_empty_string_in_empty_string) {
+    assert_vm_bool("\"\" in \"\"", true, "empty string in empty string");
+}
+
+/* Composability with keys(): "a" in keys({a: 1, b: 2}) → true */
+TEST(test_in_composable_with_keys) {
+    assert_vm_bool("\"a\" in keys({a: 1, b: 2})", true, "in with keys()");
+}
+
+/* Compound expression: not in + in with variables and `and` */
+TEST(test_in_compound_not_in_and_in) {
+    assert_vm_bool("my xs = [1, 2, 3]\n5 not in xs and 1 in xs", true, "not in and in compound");
+}
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -4058,6 +4085,13 @@ int main(void) {
     RUN_TEST(test_in_precedence_arithmetic);
     RUN_TEST(test_in_precedence_and);
     RUN_TEST(test_in_precedence_not);
+
+    printf("\n`in` operator — edge cases:\n");
+    RUN_TEST(test_in_nothing_as_map_key);
+    RUN_TEST(test_in_nothing_in_array);
+    RUN_TEST(test_in_empty_string_in_empty_string);
+    RUN_TEST(test_in_composable_with_keys);
+    RUN_TEST(test_in_compound_not_in_and_in);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
