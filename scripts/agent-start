@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# agent-start — Create a new containerized agent and attach to its tmux session.
+#
+# Usage: scripts/agent-start <branch-name>
+#
+# Creates a Docker container named cutlet-agent-<branch>, clones the repo from
+# the host's .git directory, creates/checks out <branch>, and drops the user
+# into a tmux session with two panes:
+#   Left:  claude --dangerously-skip-permissions
+#   Right: bash shell
+#
+# The container stays running after tmux detach (Ctrl+B, D). Use agent-connect
+# to reattach, agent-pause to freeze, or agent-delete to remove.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-start <branch-name>\n" >&2
+    printf "  Creates a containerized agent on the given branch.\n" >&2
+    printf "  The branch is created if it doesn't exist.\n" >&2
+    exit 1
+}
+
+if [ $# -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+BRANCH="$1"
+CONTAINER="cutlet-agent-${BRANCH}"
+
+# Check if a container with this name already exists.
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    printf "Error: container '%s' already exists.\n" "$CONTAINER" >&2
+    printf "  Use 'scripts/agent-connect %s' to reattach, or\n" "$BRANCH" >&2
+    printf "  'scripts/agent-delete %s' to remove it first.\n" "$BRANCH" >&2
+    exit 1
+fi
+
+# Resolve host paths.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --absolute-git-dir)"
+CLAUDE_DIR="$HOME/.claude"
+
+if [ ! -d "$CLAUDE_DIR" ]; then
+    printf "Error: Claude credentials directory not found at %s\n" "$CLAUDE_DIR" >&2
+    exit 1
+fi
+
+# Read git identity from the host repo.
+GIT_USER_NAME="$(git -C "$REPO_ROOT" config user.name 2>/dev/null || true)"
+GIT_USER_EMAIL="$(git -C "$REPO_ROOT" config user.email 2>/dev/null || true)"
+
+if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
+    printf "Error: git user.name and user.email must be set in the host repo.\n" >&2
+    exit 1
+fi
+
+# The entrypoint script runs inside the container as PID 1.
+# It clones the repo, creates the branch, configures git, starts tmux,
+# then sleeps forever to keep the container alive.
+ENTRYPOINT_SCRIPT=$(cat <<'ENTRYPOINT'
+set -euo pipefail
+
+# Clone from the mounted host repo .git directory.
+git clone /host-repo.git /workspace
+cd /workspace
+
+# Create or check out the branch.
+if git branch -r | grep -q "origin/${BRANCH}$"; then
+    git checkout -b "$BRANCH" "origin/$BRANCH"
+else
+    git checkout -b "$BRANCH"
+fi
+
+# Configure git identity (passed in from host via env vars).
+git config user.name "$GIT_USER_NAME"
+git config user.email "$GIT_USER_EMAIL"
+
+# Start a tmux session with two panes:
+#   Left:  Claude Code with --dangerously-skip-permissions
+#   Right: bash shell in /workspace
+tmux new-session -d -s main -c /workspace \
+    'claude --dangerously-skip-permissions'
+tmux split-window -h -t main -c /workspace
+
+# Keep the container alive. tmux server runs in the background;
+# sleep infinity keeps PID 1 alive so the container doesn't exit.
+sleep infinity
+ENTRYPOINT
+)
+
+printf "Starting container '%s' ...\n" "$CONTAINER"
+
+# Start the container detached with host repo .git and Claude credentials mounted.
+docker run -d \
+    --name "$CONTAINER" \
+    -e BRANCH="$BRANCH" \
+    -e GIT_USER_NAME="$GIT_USER_NAME" \
+    -e GIT_USER_EMAIL="$GIT_USER_EMAIL" \
+    -v "$REPO_GIT_DIR":/host-repo.git \
+    -v "$CLAUDE_DIR":/root/.claude:ro \
+    cutlet-agent:latest \
+    /bin/bash -c "$ENTRYPOINT_SCRIPT"
+
+# Wait for the tmux session to be ready (up to 30 seconds).
+printf "Waiting for tmux session ...\n"
+for i in $(seq 1 30); do
+    if docker exec "$CONTAINER" tmux has-session -t main 2>/dev/null; then
+        break
+    fi
+    if [ "$i" -eq 30 ]; then
+        printf "Error: tmux session did not start within 30 seconds.\n" >&2
+        printf "Check container logs: docker logs %s\n" "$CONTAINER" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+printf "Attaching to tmux session. Detach with Ctrl+B, D.\n"
+
+# Attach to the tmux session inside the container.
+docker exec -it "$CONTAINER" tmux attach -t main

@@ -308,6 +308,7 @@ Since this is infrastructure (not language source code), verification is manual 
 
 - [x] Step 1: Dockerfile and .dockerignore — created Dockerfile (Ubuntu 24.04, gcc-14, clang-format-18, clang-tidy-18, bear, python3, ctags, cscope, Node.js 20, Claude Code, build-time `make test` verification) and .dockerignore (excludes build/, build-sanitize/, compile_commands.json, .git/)
 - [x] Step 2: `scripts/agent-build` — created build script that runs `docker build -t cutlet-agent:latest --progress=plain` from repo root, with `-h` usage help
+- [x] Step 3: `scripts/agent-start` — created start script that creates a container, clones repo from mounted .git, creates/checks out branch, configures git identity, starts tmux with Claude Code + shell panes, waits for tmux ready, and attaches
 
 ---
 End of plan.
