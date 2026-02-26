@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   bear             — compile_commands.json generator
 #   python3          — analysis scripts
 #   universal-ctags, cscope — codebase understanding tools
-#   curl, ca-certificates — for downloading Node.js and adding PPAs
+#   curl, ca-certificates — for downloading Claude Code and adding PPAs
 #   software-properties-common — for add-apt-repository
 #   tmux             — terminal multiplexer
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -59,13 +59,12 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 100 && \
     update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100 && \
     update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
 
-# Install Node.js 20 LTS via NodeSource (required for Claude Code).
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code globally.
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code via the native installer (no Node.js dependency).
+# The installer places the binary at ~/.local/bin/claude. We install as
+# root so it lands at /root/.local/bin/claude, then symlink to /usr/local/bin
+# so all users can run it.
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    ln -s /root/.local/bin/claude /usr/local/bin/claude
 
 # Verification: copy repo source, run make test to prove the toolchain works,
 # then discard the copy. The real source comes from git clone at runtime.
@@ -74,6 +73,10 @@ RUN cd /tmp/cutlet-verify && make test && rm -rf /tmp/cutlet-verify
 
 # Create a non-root user. Claude Code refuses --dangerously-skip-permissions
 # when running as root for security reasons.
-RUN useradd -m -s /bin/bash agent
+# Write locale/terminal env vars into the agent user's profile so they
+# survive `su -l` (which resets the environment from Docker ENV).
+RUN useradd -m -s /bin/bash agent && \
+    printf 'export LANG=en_US.UTF-8\nexport LC_ALL=en_US.UTF-8\nexport TERM=xterm-256color\n' \
+        >> /home/agent/.profile
 
 WORKDIR /workspace
