@@ -59,13 +59,6 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 100 && \
     update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100 && \
     update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
 
-# Install Claude Code via the native installer (no Node.js dependency).
-# The installer places the binary at ~/.local/bin/claude. We install as
-# root so it lands at /root/.local/bin/claude, then symlink to /usr/local/bin
-# so all users can run it.
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    ln -s /root/.local/bin/claude /usr/local/bin/claude
-
 # Verification: copy repo source, run make test to prove the toolchain works,
 # then discard the copy. The real source comes from git clone at runtime.
 COPY . /tmp/cutlet-verify
@@ -76,7 +69,14 @@ RUN cd /tmp/cutlet-verify && make test && rm -rf /tmp/cutlet-verify
 # Write locale/terminal env vars into the agent user's profile so they
 # survive `su -l` (which resets the environment from Docker ENV).
 RUN useradd -m -s /bin/bash agent && \
-    printf 'export LANG=en_US.UTF-8\nexport LC_ALL=en_US.UTF-8\nexport TERM=xterm-256color\n' \
+    printf 'export LANG=en_US.UTF-8\nexport LC_ALL=en_US.UTF-8\nexport TERM=xterm-256color\nexport PATH="$HOME/.local/bin:$PATH"\n' \
         >> /home/agent/.profile
+
+# Install Claude Code via the native installer as the agent user.
+# The installer places the binary at ~/.local/bin/claude and updates
+# the user's shell profile to add it to PATH.
+USER agent
+RUN curl -fsSL https://claude.ai/install.sh | bash
+USER root
 
 WORKDIR /workspace
