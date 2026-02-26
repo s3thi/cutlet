@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# agent-list — List all cutlet-agent containers.
+#
+# Usage: scripts/agent-list
+#
+# Shows all cutlet-agent containers (running, paused, and stopped) with
+# their status and uptime.
+
+set -euo pipefail
+
+usage() {
+    printf "Usage: scripts/agent-list\n" >&2
+    printf "  Lists all cutlet-agent containers with their status.\n" >&2
+    exit 1
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage
+fi
+
+# List all containers whose name starts with cutlet-agent-.
+OUTPUT="$(docker ps -a --filter "name=cutlet-agent-" --format "table {{.Names}}\t{{.Status}}")"
+
+# docker ps --format "table ..." always outputs a header line.
+# If there are no matching containers, the output is just the header.
+LINE_COUNT="$(printf '%s\n' "$OUTPUT" | wc -l | tr -d ' ')"
+
+if [ "$LINE_COUNT" -le 1 ]; then
+    printf "No agent containers.\n"
+else
+    printf '%s\n' "$OUTPUT"
+fi
