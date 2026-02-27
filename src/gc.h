@@ -1,0 +1,121 @@
+/*
+ * gc.h - Garbage collection infrastructure for Cutlet
+ *
+ * Provides the Obj base header, object type tags, a global object
+ * tracking list, and allocation/deallocation primitives. Every
+ * heap-allocated object (ObjFunction, ObjClosure, ObjArray, ObjMap,
+ * ObjUpvalue) will eventually embed an Obj as its first field so
+ * that the GC can walk all live objects via a single linked list.
+ *
+ * This is the structural foundation for mark-and-sweep GC.
+ * gc_collect() is currently a no-op stub — marking and sweeping
+ * are implemented in later GC tasks.
+ *
+ * Refcounting remains the primary lifetime management mechanism
+ * during the transition period. The GC list exists alongside it.
+ */
+
+#ifndef CUTLET_GC_H
+#define CUTLET_GC_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+/* Object type tags for GC-tracked heap objects. */
+typedef enum {
+    OBJ_FUNCTION,
+    OBJ_CLOSURE,
+    OBJ_ARRAY,
+    OBJ_MAP,
+    OBJ_UPVALUE,
+} ObjType;
+
+/*
+ * Obj - common header for all GC-tracked heap objects.
+ *
+ * Must be the first field of every heap object struct so that
+ * casting (Obj*)ptr works correctly.
+ *
+ * type:       Identifies the concrete object type (OBJ_FUNCTION, etc.).
+ * is_marked:  Used by the mark phase of mark-and-sweep GC.
+ * next:       Intrusive linked list pointer for the global object list.
+ * alloc_size: Records the allocation size for bytes_allocated tracking.
+ */
+typedef struct Obj {
+    ObjType type;
+    bool is_marked;
+    struct Obj *next;
+    size_t alloc_size;
+} Obj;
+
+/*
+ * GC - global garbage collector state.
+ *
+ * objects:         Head of the intrusive linked list of all GC-tracked objects.
+ * bytes_allocated: Running total of memory allocated through gc_alloc().
+ * next_gc:         Threshold (in bytes) at which gc_collect() triggers.
+ */
+typedef struct {
+    Obj *objects;
+    size_t bytes_allocated;
+    size_t next_gc;
+} GC;
+
+/* Cast any Obj-embedded pointer to read its type tag. */
+#define OBJ_TYPE(obj) (((Obj *)(obj))->type)
+
+/*
+ * Initialize the global GC state. Must be called before any gc_alloc().
+ * Sets objects list to NULL, bytes_allocated to 0, and next_gc to an
+ * initial threshold.
+ */
+void gc_init(void);
+
+/*
+ * Allocate a GC-tracked object of the given type and size.
+ *
+ * Uses calloc(1, size) so all fields are zero-initialized.
+ * Initializes the Obj header (type, is_marked=false, alloc_size=size)
+ * and prepends the object to the global object list.
+ *
+ * Returns a pointer to the allocated memory, or NULL on failure.
+ */
+void *gc_alloc(ObjType type, size_t size);
+
+/*
+ * Unlink an object from the global GC object list without freeing it.
+ * Decrements bytes_allocated by obj->alloc_size.
+ * Safe to call if obj is not in the list (no-op in that case).
+ */
+void gc_unlink(Obj *obj);
+
+/*
+ * Free a single GC-tracked object: unlink it from the list, then free.
+ * Does NOT free internal contents (name, data arrays, etc.) — only
+ * the object struct itself. Callers should free contents first if needed.
+ */
+void gc_free_object(Obj *obj);
+
+/*
+ * Free all objects on the GC list. For each object, frees internal
+ * contents (type-specific: name, data, entries, etc.) then frees
+ * the object struct. Resets the list to empty and bytes_allocated to 0.
+ * Used at shutdown.
+ */
+void gc_free_all(void);
+
+/*
+ * Run a garbage collection cycle. Currently a no-op stub.
+ * Will implement mark-and-sweep in a later GC task.
+ */
+void gc_collect(void);
+
+/* ---- Test/inspection accessors ---- */
+
+/* Return the head of the global object list (for test inspection). */
+Obj *gc_get_objects(void);
+
+/* Return the current bytes_allocated counter (for test inspection). */
+size_t gc_get_bytes_allocated(void);
+
+#endif /* CUTLET_GC_H */

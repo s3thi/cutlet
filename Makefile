@@ -39,7 +39,7 @@ ISOCLINE_SANITIZE_BUILD_CFLAGS = $(ISOCLINE_BUILD_CFLAGS) \
 	-fsanitize=address,undefined -fno-sanitize-recover=all
 
 # Library source files (everything except main.c)
-LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/compiler.c $(SRC_DIR)/vm.c
+LIB_SRCS = $(SRC_DIR)/tokenizer.c $(SRC_DIR)/repl.c $(SRC_DIR)/repl_server.c $(SRC_DIR)/parser.c $(SRC_DIR)/runtime.c $(SRC_DIR)/json.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/compiler.c $(SRC_DIR)/vm.c $(SRC_DIR)/gc.c
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SRCS))
 
 # Main binary
@@ -80,6 +80,9 @@ TEST_VM_BIN = $(BUILD_DIR)/test_vm
 TEST_VALUE_SRC = $(TEST_DIR)/test_value.c
 TEST_VALUE_BIN = $(BUILD_DIR)/test_value
 
+TEST_GC_SRC = $(TEST_DIR)/test_gc.c
+TEST_GC_BIN = $(BUILD_DIR)/test_gc
+
 # Default target: build the cutlet binary
 .PHONY: all
 all: $(BIN)
@@ -103,7 +106,7 @@ $(BIN): $(MAIN_SRC) $(LIB_SRCS) $(ISOCLINE_OBJ) | $(BUILD_DIR)
 
 # Build and run all tests
 .PHONY: test
-test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-ptr-array test-json test-chunk test-compiler test-vm test-value test-cli test-examples
+test: test-tokenizer test-repl test-parser test-repl-server test-runtime test-ptr-array test-json test-chunk test-compiler test-vm test-value test-gc test-cli test-examples
 
 # Run tokenizer tests
 .PHONY: test-tokenizer
@@ -160,6 +163,11 @@ test-vm: $(TEST_VM_BIN)
 test-value: $(TEST_VALUE_BIN)
 	./$(TEST_VALUE_BIN)
 
+# Run GC infrastructure tests
+.PHONY: test-gc
+test-gc: $(TEST_GC_BIN)
+	./$(TEST_GC_BIN)
+
 # Run CLI integration tests
 .PHONY: test-cli
 test-cli: $(BIN)
@@ -214,6 +222,10 @@ $(TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/
 $(TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(LDFLAGS) -lm
 
+# Build GC infrastructure test binary
+$(TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(LDFLAGS) -lm
+
 # ---------- Formatting (clang-format) ----------
 
 # All tracked C source and header files, excluding vendor/ (third-party code).
@@ -232,7 +244,7 @@ format-check:
 # ---------- Compile database ----------
 
 # All source files that contribute to the compile database.
-ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC) $(TEST_JSON_SRC) $(TEST_CHUNK_SRC) $(TEST_COMPILER_SRC) $(TEST_VM_SRC) $(TEST_VALUE_SRC)
+ALL_SRCS = $(MAIN_SRC) $(LIB_SRCS) $(TEST_TOKENIZER_SRC) $(TEST_REPL_SRC) $(TEST_PARSER_SRC) $(TEST_REPL_SERVER_SRC) $(TEST_RUNTIME_SRC) $(TEST_PTR_ARRAY_SRC) $(TEST_JSON_SRC) $(TEST_CHUNK_SRC) $(TEST_COMPILER_SRC) $(TEST_VM_SRC) $(TEST_VALUE_SRC) $(TEST_GC_SRC)
 
 # Auto-generate compile_commands.json when missing or when any source file changes.
 compile_commands.json: $(ALL_SRCS) $(shell git ls-files '*.h')
@@ -279,6 +291,7 @@ SANITIZE_TEST_CHUNK_BIN = $(SANITIZE_BUILD_DIR)/test_chunk
 SANITIZE_TEST_COMPILER_BIN = $(SANITIZE_BUILD_DIR)/test_compiler
 SANITIZE_TEST_VM_BIN = $(SANITIZE_BUILD_DIR)/test_vm
 SANITIZE_TEST_VALUE_BIN = $(SANITIZE_BUILD_DIR)/test_value
+SANITIZE_TEST_GC_BIN = $(SANITIZE_BUILD_DIR)/test_gc
 
 $(SANITIZE_BUILD_DIR):
 	mkdir -p $(SANITIZE_BUILD_DIR)
@@ -325,9 +338,12 @@ $(SANITIZE_TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(
 $(SANITIZE_TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SANITIZE_LDFLAGS) -lm
 
+$(SANITIZE_TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SANITIZE_LDFLAGS) -lm
+
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize
-test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_TEST_JSON_BIN) $(SANITIZE_TEST_CHUNK_BIN) $(SANITIZE_TEST_COMPILER_BIN) $(SANITIZE_TEST_VM_BIN) $(SANITIZE_TEST_VALUE_BIN) $(SANITIZE_BIN)
+test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITIZE_TEST_PARSER_BIN) $(SANITIZE_TEST_REPL_SERVER_BIN) $(SANITIZE_TEST_RUNTIME_BIN) $(SANITIZE_TEST_PTR_ARRAY_BIN) $(SANITIZE_TEST_JSON_BIN) $(SANITIZE_TEST_CHUNK_BIN) $(SANITIZE_TEST_COMPILER_BIN) $(SANITIZE_TEST_VM_BIN) $(SANITIZE_TEST_VALUE_BIN) $(SANITIZE_TEST_GC_BIN) $(SANITIZE_BIN)
 	./$(SANITIZE_TEST_TOKENIZER_BIN)
 	./$(SANITIZE_TEST_REPL_BIN)
 	./$(SANITIZE_TEST_PARSER_BIN)
@@ -339,6 +355,7 @@ test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITI
 	./$(SANITIZE_TEST_COMPILER_BIN)
 	./$(SANITIZE_TEST_VM_BIN)
 	./$(SANITIZE_TEST_VALUE_BIN)
+	./$(SANITIZE_TEST_GC_BIN)
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_examples.sh
 
