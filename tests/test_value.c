@@ -816,6 +816,7 @@ TEST(test_obj_string_new) {
      * the length. Verify all fields are set correctly.
      */
     gc_init();
+    gc_suppress();
     ObjString *str = obj_string_new("hello", 5);
     ASSERT(str != NULL, "obj_string_new should return non-NULL");
     ASSERT(strcmp(str->chars, "hello") == 0, "chars should equal 'hello'");
@@ -833,6 +834,7 @@ TEST(test_obj_string_take) {
      * and the chars pointer is the same buffer we passed in.
      */
     gc_init();
+    gc_suppress();
     char *buf = strdup("world");
     char *original_ptr = buf;
     ObjString *str = obj_string_take(buf, 5);
@@ -853,6 +855,7 @@ TEST(test_obj_string_hash_consistency) {
      * and for correctness of hash-based comparisons.
      */
     gc_init();
+    gc_suppress();
     ObjString *a = obj_string_new("consistent", 10);
     ObjString *b = obj_string_new("consistent", 10);
     ASSERT(a->hash == b->hash, "same content should produce same hash");
@@ -867,6 +870,7 @@ TEST(test_obj_string_hash_different) {
      * to make this deterministic in practice.
      */
     gc_init();
+    gc_suppress();
     ObjString *a = obj_string_new("alpha", 5);
     ObjString *b = obj_string_new("beta", 4);
     ASSERT(a->hash != b->hash, "different content should produce different hashes");
@@ -881,6 +885,7 @@ TEST(test_make_string_returns_val_string) {
      * should be accessible via v.string->chars.
      */
     gc_init();
+    gc_suppress();
     Value v = make_string(strdup("testing"));
     ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
     ASSERT(v.string != NULL, "string field should be non-NULL");
@@ -899,6 +904,7 @@ TEST(test_value_clone_string_independent) {
      * the ObjString lifetime), so the clone remains valid.
      */
     gc_init();
+    gc_suppress();
     Value original = make_string(strdup("original"));
     Value clone;
     bool ok = value_clone(&clone, &original);
@@ -928,6 +934,7 @@ TEST(test_value_free_string) {
      * passes under sanitizers, the memory management is correct.
      */
     gc_init();
+    gc_suppress();
     Value v = make_string(strdup("ephemeral"));
     ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
     ASSERT(v.string != NULL, "string should be non-NULL before free");
@@ -945,13 +952,13 @@ TEST(test_value_equal_strings_via_objstring) {
      * the ObjString layer.
      */
     gc_init();
+    gc_suppress();
     Value a = make_string(strdup("same"));
     Value b = make_string(strdup("same"));
     ASSERT(value_equal(&a, &b) == true, "strings with same content should be equal");
 
     Value c = make_string(strdup("different"));
     ASSERT(value_equal(&a, &c) == false, "strings with different content should not be equal");
-
     value_free(&a);
     value_free(&b);
     value_free(&c);
@@ -966,6 +973,7 @@ TEST(test_make_string_copy) {
      * valid and independently freeable.
      */
     gc_init();
+    gc_suppress();
     const char *original = "hello copy";
     Value v = make_string_copy(original, strlen(original));
     ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
@@ -986,6 +994,7 @@ TEST(test_make_string_copy_null) {
      * VAL_STRING representing an empty string.
      */
     gc_init();
+    gc_suppress();
     Value v = make_string_copy(NULL, 0);
     ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
     ASSERT(v.string != NULL, "string should be non-NULL");
@@ -1002,6 +1011,7 @@ TEST(test_make_string_copy_zero_length) {
      * should produce an empty string.
      */
     gc_init();
+    gc_suppress();
     Value v = make_string_copy("ignored", 0);
     ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
     ASSERT(v.string != NULL, "string should be non-NULL");
@@ -1020,6 +1030,7 @@ TEST(test_value_equal_hash_shortcircuit) {
      * (and thus different hashes) should compare as not equal.
      */
     gc_init();
+    gc_suppress();
     Value a = make_string(strdup("alpha"));
     Value b = make_string(strdup("beta"));
     /* Hashes should be different for these distinct strings. */
@@ -1038,6 +1049,7 @@ TEST(test_make_error_uses_error_field) {
      * not in the `string` field (which is now ObjString*).
      */
     gc_init();
+    gc_suppress();
     Value v = make_error("oops");
     ASSERT(v.type == VAL_ERROR, "type should be VAL_ERROR");
     ASSERT(v.error != NULL, "error field should be non-NULL");
@@ -1058,6 +1070,7 @@ int main(void) {
      * obj_array_new, obj_string_new, etc.) has a proper threshold
      * and doesn't trigger premature collections. */
     gc_init();
+    gc_suppress();
 
     printf("Running value tests...\n\n");
 
@@ -1122,6 +1135,12 @@ int main(void) {
     RUN_TEST(test_value_equal_maps_same_backing);
     RUN_TEST(test_value_equal_map_vs_nonmap);
 
+    /* Free GC-tracked objects from the tests above before the ObjString
+     * tests, which call gc_init() internally and would orphan any
+     * remaining objects on the GC list (causing LSan leak reports). */
+    gc_unsuppress();
+    gc_free_all();
+
     printf("\nObjString creation and properties:\n");
     RUN_TEST(test_obj_string_new);
     RUN_TEST(test_obj_string_take);
@@ -1149,6 +1168,11 @@ int main(void) {
     printf("Passed:    %d\n", tests_passed);
     printf("Failed:    %d\n", tests_failed);
     printf("========================================\n");
+
+    /* Free all remaining GC-tracked objects (interned strings, arrays,
+     * maps created during tests). This prevents LSan from reporting
+     * leaks for objects that the GC would normally reclaim at shutdown. */
+    gc_free_all();
 
     return tests_failed > 0 ? 1 : 0;
 }

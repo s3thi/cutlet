@@ -82,6 +82,7 @@ static bool obj_in_list(Obj *target) {
 
 TEST(test_gc_init) {
     gc_init();
+    gc_suppress();
     ASSERT(gc_get_objects() == NULL, "object list should be NULL after init");
     ASSERT(gc_get_bytes_allocated() == 0, "bytes_allocated should be 0 after init");
     PASS();
@@ -93,6 +94,7 @@ TEST(test_gc_init) {
 
 TEST(test_gc_alloc_single) {
     gc_init();
+    gc_suppress();
 
     /* Allocate an OBJ_ARRAY-sized object. */
     void *ptr = gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -122,6 +124,7 @@ TEST(test_gc_alloc_single) {
 
 TEST(test_gc_alloc_multiple) {
     gc_init();
+    gc_suppress();
 
     /* Allocate three objects of different types. */
     void *p1 = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -160,6 +163,7 @@ TEST(test_gc_alloc_multiple) {
 
 TEST(test_gc_free_object) {
     gc_init();
+    gc_suppress();
 
     void *ptr = gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(ptr != NULL, "alloc should succeed");
@@ -180,6 +184,7 @@ TEST(test_gc_free_object) {
 
 TEST(test_gc_free_all) {
     gc_init();
+    gc_suppress();
 
     /* Allocate several objects. */
     gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -206,6 +211,7 @@ TEST(test_gc_free_all) {
 
 TEST(test_gc_mark_simple_object) {
     gc_init();
+    gc_suppress();
 
     /* Allocate an ObjArray via gc_alloc. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -237,6 +243,7 @@ TEST(test_gc_mark_simple_object) {
 TEST(test_gc_mark_clears_after_collect) {
     /* Use runtime_init so gc_collect can call runtime_mark_globals. */
     runtime_init();
+    gc_suppress();
     gc_set_vm(NULL);
 
     /* Allocate several objects of different types — none are rooted. */
@@ -251,6 +258,7 @@ TEST(test_gc_mark_clears_after_collect) {
 
     /* gc_collect() marks roots (none) then sweeps — all 3 unreachable
      * objects should be freed. Do not access arr/fn/m after this. */
+    gc_unsuppress();
     gc_collect();
 
     ASSERT(count_gc_objects() == 0, "all unreachable objects should be freed after collect");
@@ -271,6 +279,7 @@ TEST(test_gc_mark_clears_after_collect) {
 
 TEST(test_gc_mark_reachable_from_array) {
     gc_init();
+    gc_suppress();
 
     /* Allocate a function and a closure wrapping it. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -328,6 +337,7 @@ TEST(test_gc_mark_reachable_from_array) {
 
 TEST(test_gc_mark_reachable_from_map) {
     gc_init();
+    gc_suppress();
 
     /* Allocate a string key. */
     ObjString *key_str = obj_string_new("hello", 5);
@@ -397,6 +407,7 @@ TEST(test_gc_mark_reachable_from_map) {
 
 TEST(test_gc_mark_closure_traces_function_and_upvalues) {
     gc_init();
+    gc_suppress();
 
     /* Allocate a function. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -464,6 +475,7 @@ TEST(test_gc_mark_closure_traces_function_and_upvalues) {
 TEST(test_gc_stress_mode) {
     /* Use runtime_init so gc_collect can call runtime_mark_globals. */
     runtime_init();
+    gc_suppress();
     gc_set_vm(NULL);
 
     /* Allocate a mix of object types — none are rooted. */
@@ -483,10 +495,15 @@ TEST(test_gc_stress_mode) {
     /* Call gc_collect — should mark roots (none) and sweep all.
      * The key assertion is that this doesn't crash or trigger any
      * assertion failures. All unreachable objects are freed. */
+    gc_unsuppress();
     gc_collect();
 
     /* All objects were unreachable, so all should be freed. */
     ASSERT(count_gc_objects() == 0, "all unreachable objects should be swept");
+
+    /* Re-suppress so the post-collect allocation isn't immediately
+     * swept by GC_STRESS before we can inspect it. */
+    gc_suppress();
 
     /* Allocate more objects after collect — verify no corruption. */
     ObjArray *arr2 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -506,6 +523,7 @@ TEST(test_gc_stress_mode) {
 TEST(test_gc_set_vm_null_safe) {
     /* Use runtime_init so gc_collect can call runtime_mark_globals. */
     runtime_init();
+    gc_suppress();
 
     /* Ensure gc_vm is NULL (default after gc_init or explicit set). */
     gc_set_vm(NULL);
@@ -518,6 +536,7 @@ TEST(test_gc_set_vm_null_safe) {
     /* gc_collect calls gc_mark_roots (no-op when gc_vm is NULL and
      * no globals), then sweeps. The unreachable object should be freed.
      * Should not crash. */
+    gc_unsuppress();
     gc_collect();
 
     /* Object was unreachable — it should be freed by sweep. */
@@ -540,6 +559,7 @@ TEST(test_gc_set_vm_null_safe) {
 
 TEST(test_gc_mark_roots_marks_stack) {
     gc_init();
+    gc_suppress();
 
     /* Create a GC-tracked array to put on the VM stack. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -561,6 +581,7 @@ TEST(test_gc_mark_roots_marks_stack) {
 
     /* Register the VM and call gc_mark_roots directly. */
     gc_set_vm(&vm);
+    gc_unsuppress();
     gc_mark_roots();
 
     /* The array should be marked because it's on the VM stack. */
@@ -580,6 +601,7 @@ TEST(test_gc_mark_roots_marks_stack) {
 
 TEST(test_gc_mark_roots_marks_frame_closures) {
     gc_init();
+    gc_suppress();
 
     /* Create a GC-tracked function and closure. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -606,6 +628,7 @@ TEST(test_gc_mark_roots_marks_frame_closures) {
 
     /* Register the VM and call gc_mark_roots directly. */
     gc_set_vm(&vm);
+    gc_unsuppress();
     gc_mark_roots();
 
     /* The closure and its function should be marked. */
@@ -625,6 +648,7 @@ TEST(test_gc_mark_roots_marks_frame_closures) {
 
 TEST(test_gc_mark_roots_marks_open_upvalues) {
     gc_init();
+    gc_suppress();
 
     /* Create a GC-tracked upvalue. */
     ObjUpvalue *uv = (ObjUpvalue *)gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
@@ -650,6 +674,7 @@ TEST(test_gc_mark_roots_marks_open_upvalues) {
 
     /* Register the VM and call gc_mark_roots directly. */
     gc_set_vm(&vm);
+    gc_unsuppress();
     gc_mark_roots();
 
     /* The upvalue should be marked because it's in the open upvalue list. */
@@ -675,6 +700,7 @@ TEST(test_gc_mark_roots_marks_open_upvalues) {
 TEST(test_gc_mark_roots_marks_globals) {
     /* runtime_init calls gc_init internally. */
     runtime_init();
+    gc_suppress();
 
     /* Ensure no VM is active — only globals should be roots. */
     gc_set_vm(NULL);
@@ -697,6 +723,7 @@ TEST(test_gc_mark_roots_marks_globals) {
 
     /* The clone inside var_table also points to arr (refcount 2).
      * Call gc_mark_roots — runtime_mark_globals should mark arr. */
+    gc_unsuppress();
     gc_mark_roots();
 
     ASSERT(arr->obj.is_marked == true, "global variable's array should be marked by gc_mark_roots");
@@ -716,6 +743,7 @@ TEST(test_gc_mark_roots_marks_globals) {
 
 TEST(test_gc_mark_native_function_null_chunk) {
     gc_init();
+    gc_suppress();
 
     /* Allocate an ObjFunction and simulate a native function
      * (chunk == NULL, native != NULL). gc_alloc calloc-zeroes
@@ -749,6 +777,7 @@ TEST(test_gc_mark_native_function_null_chunk) {
 
 TEST(test_gc_mark_stack_allocated_script_objects) {
     gc_init();
+    gc_suppress();
 
     /* Simulate the stack-allocated script objects from vm_execute.
      * The key difference from heap-allocated objects: these are NOT
@@ -784,6 +813,7 @@ TEST(test_gc_mark_stack_allocated_script_objects) {
 
     /* Register the VM and mark roots. */
     gc_set_vm(&vm);
+    gc_unsuppress();
     gc_mark_roots();
 
     /* The stack-allocated closure and function should be marked.
@@ -809,6 +839,7 @@ TEST(test_gc_mark_stack_allocated_script_objects) {
 
 TEST(test_gc_sweep_frees_unmarked) {
     gc_init();
+    gc_suppress();
 
     /* Allocate three objects. */
     ObjArray *a1 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -823,6 +854,7 @@ TEST(test_gc_sweep_frees_unmarked) {
     a2->obj.is_marked = true;
 
     /* Sweep should free a1 and a3 (unmarked), keeping a2. */
+    gc_unsuppress();
     gc_sweep();
 
     ASSERT(count_gc_objects() == 1, "only 1 object should remain after sweep");
@@ -845,6 +877,7 @@ TEST(test_gc_sweep_frees_unmarked) {
 
 TEST(test_gc_sweep_clears_marks) {
     gc_init();
+    gc_suppress();
 
     /* Allocate two objects and mark both. */
     ObjArray *a1 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
@@ -857,6 +890,7 @@ TEST(test_gc_sweep_clears_marks) {
 
     /* Sweep: both are marked, so both survive. But marks should be
      * cleared on surviving objects for the next collection cycle. */
+    gc_unsuppress();
     gc_sweep();
 
     ASSERT(count_gc_objects() == 2, "both marked objects should survive sweep");
@@ -877,6 +911,7 @@ TEST(test_gc_sweep_clears_marks) {
 TEST(test_gc_collect_full_cycle) {
     /* runtime_init calls gc_init internally. */
     runtime_init();
+    gc_suppress();
 
     /* Ensure no VM is active — globals are the only root set. */
     gc_set_vm(NULL);
@@ -905,6 +940,7 @@ TEST(test_gc_collect_full_cycle) {
 
     /* Run a full GC cycle. With sweep implemented, unreachable objects
      * should be freed. Without sweep, all objects remain. */
+    gc_unsuppress();
     gc_collect();
 
     /* After a full collect cycle, reachable object must survive. */
@@ -939,7 +975,9 @@ TEST(test_gc_auto_trigger) {
     /* Allocate several unreachable objects. Each gc_alloc checks
      * bytes_allocated > next_gc and calls gc_collect() if true.
      * Once sweep is implemented, unreachable objects will be freed
-     * during these triggered collections. */
+     * during these triggered collections.
+     * GC must NOT be suppressed here — the whole point is auto-triggering. */
+    gc_unsuppress();
     for (int i = 0; i < 10; i++) {
         gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     }
@@ -967,6 +1005,7 @@ TEST(test_gc_auto_trigger) {
 TEST(test_gc_threshold_grows) {
     /* Use the runtime so gc_collect can call runtime_mark_globals. */
     runtime_init();
+    gc_suppress();
     gc_set_vm(NULL);
 
     /* Allocate a reachable object (stored in a global). */
@@ -987,6 +1026,7 @@ TEST(test_gc_threshold_grows) {
 
     /* Run a collection. After sweep, next_gc should be updated
      * to a value proportional to surviving bytes. */
+    gc_unsuppress();
     gc_collect();
 
     size_t next_gc_after = gc_get_next_gc();
@@ -1017,6 +1057,7 @@ TEST(test_gc_threshold_grows) {
  * (once interning is implemented). */
 TEST(test_intern_same_content_same_pointer) {
     gc_init();
+    gc_suppress();
 
     ObjString *s1 = obj_string_new("hello", 5);
     ObjString *s2 = obj_string_new("hello", 5);
@@ -1035,6 +1076,7 @@ TEST(test_intern_same_content_same_pointer) {
  * pointers. */
 TEST(test_intern_different_content_different_pointer) {
     gc_init();
+    gc_suppress();
 
     ObjString *s1 = obj_string_new("hello", 5);
     ObjString *s2 = obj_string_new("world", 5);
@@ -1056,6 +1098,7 @@ TEST(test_intern_different_content_different_pointer) {
  * the returned pointer matches the pre-existing interned string. */
 TEST(test_intern_string_take_deduplicates) {
     gc_init();
+    gc_suppress();
 
     /* Create the first string via obj_string_new (becomes interned). */
     ObjString *s1 = obj_string_new("dedup", 5);
@@ -1081,6 +1124,7 @@ TEST(test_intern_string_take_deduplicates) {
  * (enabling O(1) pointer comparison). */
 TEST(test_intern_value_equal_pointer_compare) {
     gc_init();
+    gc_suppress();
 
     /* Create two string values with the same content. */
     Value v1 = make_string_copy("compare", 7);
@@ -1110,6 +1154,7 @@ TEST(test_intern_value_equal_pointer_compare) {
 TEST(test_intern_dead_strings_swept) {
     /* runtime_init calls gc_init internally. */
     runtime_init();
+    gc_suppress();
     gc_set_vm(NULL);
 
     /* Create a string — it's only referenced by our local pointer. */
@@ -1119,7 +1164,12 @@ TEST(test_intern_dead_strings_swept) {
     /* Make the string unreachable: we don't store it in any root.
      * Force a GC cycle — sweep should free the unreachable string
      * and remove it from the intern table. */
+    gc_unsuppress();
     gc_collect();
+
+    /* Re-suppress GC so subsequent allocations aren't swept by
+     * GC_STRESS before we can inspect them. */
+    gc_suppress();
 
     /* After sweep, s1 is dangling — do NOT dereference it.
      *
@@ -1158,6 +1208,7 @@ TEST(test_intern_dead_strings_swept) {
  * the pointer instead of deep-copying. */
 TEST(test_intern_clone_shares_pointer) {
     gc_init();
+    gc_suppress();
 
     /* Create a string value. */
     Value src = make_string_copy("shared", 6);

@@ -187,6 +187,68 @@ void gc_mark_roots(void);
  */
 void gc_sweep(void);
 
+/* ---- Temporary GC root pinning ---- */
+
+/*
+ * Maximum number of temporarily pinned objects. VM opcodes push
+ * objects here when they hold references in local C variables
+ * (not on the VM stack) and need them to survive a GC triggered
+ * by a subsequent gc_alloc. Must be large enough for the deepest
+ * nesting of pinned objects in any single opcode.
+ */
+#define GC_TEMP_ROOTS_MAX 16
+
+/*
+ * Pin an object as a temporary GC root. While pinned, gc_mark_roots()
+ * will mark it and trace its children, preventing collection even if
+ * the object is not reachable from the VM stack or globals.
+ *
+ * Must be paired with gc_unpin() in reverse order.
+ */
+void gc_pin(Obj *obj);
+
+/*
+ * Unpin the most recently pinned temporary root.
+ */
+void gc_unpin(void);
+
+/*
+ * Pin the heap object (if any) inside a Value as a temporary GC root.
+ * Handles VAL_STRING, VAL_FUNCTION, VAL_CLOSURE, VAL_ARRAY, VAL_MAP.
+ * No-op for scalar types (VAL_NUMBER, VAL_BOOL, VAL_NOTHING, VAL_ERROR).
+ */
+void gc_pin_value(struct Value *v);
+
+/* ---- Compiler root tracking ---- */
+
+/* Forward declaration of Chunk (defined in chunk.h). */
+struct Chunk;
+
+/*
+ * Maximum depth of nested compiler chunks that can be tracked as GC
+ * roots. Each nested function definition pushes one chunk. Matches
+ * the practical nesting limit of the compiler.
+ */
+#define GC_COMPILER_ROOTS_MAX 64
+
+/*
+ * Push a Chunk onto the compiler roots stack. While on the stack,
+ * gc_mark_roots() will mark all Values in the chunk's constant pool,
+ * preventing GC from collecting ObjStrings and other objects that are
+ * being compiled but not yet reachable from the VM stack or globals.
+ *
+ * Must be paired with gc_pop_compiler_root() when compilation of
+ * that chunk is complete.
+ */
+void gc_push_compiler_root(struct Chunk *chunk);
+
+/*
+ * Pop the most recently pushed compiler root chunk. Must be called
+ * after compilation of the corresponding chunk is complete, in
+ * reverse order of gc_push_compiler_root() calls.
+ */
+void gc_pop_compiler_root(void);
+
 /* ---- String intern table ---- */
 
 /* Forward declaration of ObjString (defined in value.h). */
@@ -220,5 +282,17 @@ size_t gc_get_next_gc(void);
 
 /* Set the next_gc threshold (for testing automatic GC triggering). */
 void gc_set_next_gc(size_t threshold);
+
+/*
+ * Suppress / unsuppress GC collection. While suppressed, gc_collect()
+ * is a no-op (including GC_STRESS-triggered collections). This is used
+ * by unit tests that create GC-tracked objects outside a VM context
+ * where no root set exists to protect objects from sweep.
+ *
+ * Must be paired: gc_suppress() / gc_unsuppress(). Nesting is NOT
+ * supported — a single gc_unsuppress() fully re-enables collection.
+ */
+void gc_suppress(void);
+void gc_unsuppress(void);
 
 #endif /* CUTLET_GC_H */

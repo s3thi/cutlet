@@ -972,6 +972,10 @@ static void compile_function(Compiler *c, const AstNode *node) {
     }
     chunk_init(body_chunk);
 
+    /* Register the function body chunk as a GC root so constants
+     * compiled into it survive any GC triggered during compilation. */
+    gc_push_compiler_root(body_chunk);
+
     /* Set up a temporary Compiler for the function body.
      * Function context enables local variable resolution.
      * The enclosing pointer links to the parent compiler for
@@ -999,6 +1003,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
     for (size_t i = 0; i < node->param_count; i++) {
         if (body_compiler.local_count >= LOCALS_MAX) {
             compiler_error(c, "too many local variables");
+            gc_pop_compiler_root();
             chunk_free(body_chunk);
             free(body_chunk);
             return;
@@ -1012,6 +1017,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
 
     if (body_compiler.had_error) {
         compiler_error(c, "%s", body_err.message);
+        gc_pop_compiler_root();
         chunk_free(body_chunk);
         free(body_chunk);
         return;
@@ -1021,10 +1027,16 @@ static void compile_function(Compiler *c, const AstNode *node) {
     emit_byte(&body_compiler, OP_RETURN, line);
 
     /* Build the ObjFunction.
-     * For anonymous functions (node->value == NULL), fn->name is NULL. */
+     * For anonymous functions (node->value == NULL), fn->name is NULL.
+     *
+     * Note: body_chunk remains on the compiler root stack during
+     * ObjFunction construction. This prevents GC (especially in
+     * GC_STRESS mode) from sweeping the chunk's ObjString constants
+     * before they become reachable via the parent chunk's constant pool. */
     ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     if (!fn) {
         compiler_error(c, "memory allocation failed");
+        gc_pop_compiler_root();
         chunk_free(body_chunk);
         free(body_chunk);
         return;
@@ -1032,6 +1044,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
     if (node->value) {
         fn->name = compiler_strdup(c, node->value);
         if (!fn->name) {
+            gc_pop_compiler_root();
             chunk_free(body_chunk);
             free(body_chunk);
             /* Unlink from GC object list before freeing (error path). */
@@ -1053,6 +1066,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
         if (!fn->params) {
             compiler_error(c, "memory allocation failed");
             free(fn->name);
+            gc_pop_compiler_root();
             chunk_free(body_chunk);
             free(body_chunk);
             /* Unlink from GC object list before freeing (error path). */
@@ -1068,6 +1082,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
                     free(fn->params[j]);
                 free((void *)fn->params);
                 free(fn->name);
+                gc_pop_compiler_root();
                 chunk_free(body_chunk);
                 free(body_chunk);
                 /* Unlink from GC object list before freeing (error path). */
@@ -1084,6 +1099,12 @@ static void compile_function(Compiler *c, const AstNode *node) {
      * an ObjClosure from it. */
     Value fn_val = make_function(fn);
     int fn_idx = chunk_find_or_add_constant(c->chunk, fn_val);
+
+    /* Done with body_chunk as a compiler root — the function is now
+     * stored in the parent chunk's constant pool, which is itself a
+     * compiler root (or will be a VM root once execution begins). */
+    gc_pop_compiler_root();
+
     if (fn_idx < 0) {
         compiler_error(c, "too many constants in one chunk");
         return;
@@ -1422,6 +1443,11 @@ Chunk *compile(const AstNode *node, CompileError *err) {
     }
     chunk_init(chunk);
 
+    /* Register the chunk as a GC root so that ObjStrings created
+     * during compilation (and stored in the constant pool) survive
+     * any GC triggered by subsequent gc_alloc calls. */
+    gc_push_compiler_root(chunk);
+
     Compiler c = {
         .chunk = chunk,
         .err = err,
@@ -1437,6 +1463,7 @@ Chunk *compile(const AstNode *node, CompileError *err) {
     compile_node(&c, node);
 
     if (c.had_error) {
+        gc_pop_compiler_root();
         chunk_free(chunk);
         free(chunk);
         return NULL;
@@ -1445,5 +1472,6 @@ Chunk *compile(const AstNode *node, CompileError *err) {
     /* Emit OP_RETURN to end execution. Use the last node's line. */
     emit_byte(&c, OP_RETURN, (int)node->line);
 
+    gc_pop_compiler_root();
     return chunk;
 }

@@ -251,12 +251,14 @@ static Value native_push(int argc, Value *args, EvalContext *ctx) {
     ObjArray *new_arr = obj_array_clone_deep(args[0].array);
     if (!new_arr)
         return make_error("memory allocation failed");
+    gc_pin((Obj *)new_arr);
 
     /* Clone the value to append (new_arr takes ownership of the clone). */
     Value elem;
     value_clone(&elem, &args[1]);
     obj_array_push(new_arr, elem);
 
+    gc_unpin();
     return make_array(new_arr);
 }
 
@@ -282,6 +284,7 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
     ObjArray *new_arr = obj_array_new();
     if (!new_arr)
         return make_error("memory allocation failed");
+    gc_pin((Obj *)new_arr);
 
     for (size_t i = 0; i < src->count - 1; i++) {
         Value elem;
@@ -289,6 +292,7 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
         obj_array_push(new_arr, elem);
     }
 
+    gc_unpin();
     return make_array(new_arr);
 }
 
@@ -307,6 +311,7 @@ static Value native_keys(int argc, Value *args, EvalContext *ctx) {
     ObjArray *arr = obj_array_new();
     if (!arr)
         return make_error("memory allocation failed");
+    gc_pin((Obj *)arr);
 
     for (size_t i = 0; i < m->count; i++) {
         Value key;
@@ -314,6 +319,7 @@ static Value native_keys(int argc, Value *args, EvalContext *ctx) {
         obj_array_push(arr, key);
     }
 
+    gc_unpin();
     return make_array(arr);
 }
 
@@ -332,6 +338,7 @@ static Value native_values(int argc, Value *args, EvalContext *ctx) {
     ObjArray *arr = obj_array_new();
     if (!arr)
         return make_error("memory allocation failed");
+    gc_pin((Obj *)arr);
 
     for (size_t i = 0; i < m->count; i++) {
         Value val;
@@ -339,6 +346,7 @@ static Value native_values(int argc, Value *args, EvalContext *ctx) {
         obj_array_push(arr, val);
     }
 
+    gc_unpin();
     return make_array(arr);
 }
 
@@ -548,9 +556,11 @@ static Value reduce_apply_op(OpCode op, const Value *a, const Value *b) {
             ObjArray *result = obj_array_new();
             if (!result)
                 return make_error("memory allocation failed");
+            gc_pin((Obj *)result);
             for (size_t i = 0; i < a->array->count; i++) {
                 Value elem;
                 if (!value_clone(&elem, &a->array->data[i])) {
+                    gc_unpin();
                     Value tmp = make_array(result);
                     value_free(&tmp);
                     return make_error("memory allocation failed");
@@ -560,12 +570,14 @@ static Value reduce_apply_op(OpCode op, const Value *a, const Value *b) {
             for (size_t i = 0; i < b->array->count; i++) {
                 Value elem;
                 if (!value_clone(&elem, &b->array->data[i])) {
+                    gc_unpin();
                     Value tmp = make_array(result);
                     value_free(&tmp);
                     return make_error("memory allocation failed");
                 }
                 obj_array_push(result, elem);
             }
+            gc_unpin();
             return make_array(result);
         }
         return make_error("++ requires strings or arrays");
@@ -609,11 +621,6 @@ static Value reduce_apply_op(OpCode op, const Value *a, const Value *b) {
 /* ---- Main dispatch loop ---- */
 
 Value vm_execute(Chunk *chunk, EvalContext *ctx) {
-    /* Ensure built-in functions are registered in the global environment.
-     * Called every time so builtins are available even if a prior eval
-     * overwrote a builtin name (e.g. "my say = 42"). */
-    register_builtins();
-
     VM vm;
     vm.ctx = ctx;
     vm.open_upvalues = NULL;
@@ -658,8 +665,24 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
     vm.frame_count++;
 
     /* Register the VM with the GC so gc_mark_roots() can walk
-     * the stack, call frames, and open upvalues during collection. */
+     * the stack, call frames, and open upvalues during collection.
+     *
+     * This must happen BEFORE register_builtins() because that
+     * function calls gc_alloc() to create native ObjFunctions,
+     * and in GC_STRESS mode, gc_alloc triggers gc_collect(). The
+     * chunk's constants (including ObjStrings from compilation)
+     * must be reachable via the VM's call frame to survive. */
     gc_set_vm(&vm);
+
+    /* Ensure built-in functions are registered in the global environment.
+     * Called every time so builtins are available even if a prior eval
+     * overwrote a builtin name (e.g. "my say = 42").
+     *
+     * Must be called after gc_set_vm() so that any GC triggered by
+     * native function allocation can find the chunk's constants via
+     * the VM's call frame (frame 0 -> script_closure -> script_fn
+     * -> chunk -> constants). */
+    register_builtins();
 
     /* Run the dispatch loop. base_frame_count=0 means run until the
      * top-level script returns (frame_count drops back to 0). */
@@ -690,8 +713,13 @@ static Value vm_call_value(VM *vm, const Value *fn_val, Value arg1, Value arg2) 
             return make_error("'%s' expects %d argument(s), got 2", fn->name ? fn->name : "<fn>",
                               fn->arity);
         }
+        /* Pin args against GC during native call (args are off-stack). */
+        gc_pin_value(&arg1);
+        gc_pin_value(&arg2);
         Value args[2] = {arg1, arg2};
         Value result = fn->native(2, args, vm->ctx);
+        gc_unpin();
+        gc_unpin();
         value_free(&arg1);
         value_free(&arg2);
         return result;
@@ -936,6 +964,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&b);
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped heap objects against GC during allocations. */
+            gc_pin_value(&a);
+            gc_pin_value(&b);
 
             /* Array concatenation: both operands must be arrays. */
             if (a.type == VAL_ARRAY && b.type == VAL_ARRAY) {
@@ -943,14 +974,20 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 ObjArray *lb = b.array;
                 ObjArray *result = obj_array_new();
                 if (!result) {
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&a);
                     value_free(&b);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                gc_pin((Obj *)result);
                 /* Append all elements from left array, then right array. */
                 for (size_t i = 0; i < la->count; i++) {
                     Value elem;
                     if (!value_clone(&elem, &la->data[i])) {
+                        gc_unpin();
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&a);
                         value_free(&b);
                         /* Free partially-built result array. */
@@ -963,6 +1000,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 for (size_t i = 0; i < lb->count; i++) {
                     Value elem;
                     if (!value_clone(&elem, &lb->data[i])) {
+                        gc_unpin();
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&a);
                         value_free(&b);
                         Value tmp = make_array(result);
@@ -971,6 +1011,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     }
                     obj_array_push(result, elem);
                 }
+                gc_unpin();
+                gc_unpin();
+                gc_unpin();
                 value_free(&a);
                 value_free(&b);
                 if (!vm_push(vm, make_array(result))) {
@@ -986,10 +1029,13 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 ObjMap *lb = b.map;
                 ObjMap *result = obj_map_new();
                 if (!result) {
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&a);
                     value_free(&b);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                gc_pin((Obj *)result);
                 /* Copy all entries from left map. */
                 for (size_t i = 0; i < la->count; i++) {
                     obj_map_set(result, &la->entries[i].key, &la->entries[i].value);
@@ -998,6 +1044,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 for (size_t i = 0; i < lb->count; i++) {
                     obj_map_set(result, &lb->entries[i].key, &lb->entries[i].value);
                 }
+                gc_unpin();
+                gc_unpin();
+                gc_unpin();
                 value_free(&a);
                 value_free(&b);
                 if (!vm_push(vm, make_map(result))) {
@@ -1011,6 +1060,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 b.type == VAL_MAP) {
                 const char *ta = value_type_name(a.type);
                 const char *tb = value_type_name(b.type);
+                gc_unpin();
+                gc_unpin();
                 value_free(&a);
                 value_free(&b);
                 return vm_runtime_error(vm, "cannot concatenate %s with %s", ta, tb);
@@ -1020,6 +1071,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (a.type != VAL_STRING || b.type != VAL_STRING) {
                 const char *ta = value_type_name(a.type);
                 const char *tb = value_type_name(b.type);
+                gc_unpin();
+                gc_unpin();
                 value_free(&a);
                 value_free(&b);
                 return vm_runtime_error(vm, "++ requires strings, got %s and %s", ta, tb);
@@ -1030,6 +1083,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             size_t slb = strlen(sb);
             char *sresult = malloc(sla + slb + 1);
             if (!sresult) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&a);
                 value_free(&b);
                 return vm_runtime_error(vm, "memory allocation failed");
@@ -1037,6 +1092,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
             memcpy(sresult, sa, sla);
             memcpy(sresult + sla, sb, slb);
             sresult[sla + slb] = '\0';
+            /* Unpin before value_free since we've copied the chars. */
+            gc_unpin();
+            gc_unpin();
             value_free(&a);
             value_free(&b);
             if (!vm_push(vm, make_string(sresult))) {
@@ -1503,11 +1561,22 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 Value callee_val;
                 vm_pop(vm, &callee_val);
 
+                /* Pin popped args and callee against GC. Native functions
+                 * may call gc_alloc (e.g. obj_array_new in native_keys). */
+                gc_pin_value(&callee_val);
+                for (int i = 0; i < argc; i++) {
+                    gc_pin_value(&args[i]);
+                }
+
                 /* Call the native. fn->native is read before callee_val
                  * is freed, so the pointer is still valid. */
                 Value result = fn->native(argc, args, vm->ctx);
 
-                /* Free the argument values and the callee. */
+                /* Unpin all and free the argument values and the callee. */
+                for (int i = 0; i < argc; i++) {
+                    gc_unpin();
+                }
+                gc_unpin(); /* callee_val */
                 for (int i = 0; i < argc; i++) {
                     value_free(&args[i]);
                 }
@@ -1549,19 +1618,27 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Create an ObjClosure from a constant pool ObjFunction.
              * The constant index points to a VAL_FUNCTION in the pool.
              * After the constant index, there are fn->upvalue_count pairs
-             * of (is_local, index) bytes describing captured variables.
-             * For now, upvalue_count is always 0 (no captures yet). */
+             * of (is_local, index) bytes describing captured variables. */
             uint8_t idx = read_byte(frame);
             ObjFunction *fn = frame->closure->function->chunk->constants[idx].function;
             ObjClosure *cl = obj_closure_new(fn, fn->upvalue_count);
             if (!cl) {
                 return vm_runtime_error(vm, "memory allocation failed");
             }
+
+            /* Push the closure onto the stack BEFORE populating its
+             * upvalue array. This ensures the ObjClosure is reachable
+             * from GC roots (via the VM stack) during any GC triggered
+             * by capture_upvalue -> obj_upvalue_new -> gc_alloc.
+             * Without this, GC_STRESS would sweep the unrooted closure. */
+            if (!vm_push(vm, make_closure(cl))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+
             /* Read upvalue descriptors and populate the closure's upvalue array.
              * Each descriptor is a pair of (is_local, index) bytes:
              * - is_local=1: capture a local from the enclosing frame's stack slot.
-             * - is_local=0: copy an upvalue from the enclosing closure's upvalue array.
-             * Currently upvalue_count is always 0 (capture emitted in closures-capture). */
+             * - is_local=0: copy an upvalue from the enclosing closure's upvalue array. */
             for (int i = 0; i < fn->upvalue_count; i++) {
                 uint8_t is_local = read_byte(frame);
                 uint8_t index = read_byte(frame);
@@ -1579,26 +1656,37 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     }
                 }
                 if (!cl->upvalues[i]) {
-                    /* Free the partially-constructed closure on failure. */
-                    value_free(&(Value){.type = VAL_CLOSURE, .closure = cl});
+                    /* The closure is already on the stack (pushed above).
+                     * Pop it and free it before reporting the error. */
+                    Value bad_cl;
+                    vm_pop(vm, &bad_cl);
+                    value_free(&bad_cl);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
             }
-            if (!vm_push(vm, make_closure(cl))) {
-                return vm_runtime_error(vm, "stack overflow");
-            }
+            /* The closure was already pushed onto the stack before the
+             * upvalue loop (to root it for GC safety). Nothing more to do. */
             break;
         }
 
         case OP_ARRAY: {
             /* Build an array from the top N values on the stack.
              * The first element was pushed first (deepest on stack),
-             * so we pop in reverse and insert back-to-front. */
+             * so we pop in reverse and insert back-to-front.
+             *
+             * obj_array_new() is called first (before popping) so the
+             * values remain on the VM stack and are GC-reachable during
+             * the allocation. obj_array_push does not allocate GC objects,
+             * so no pinning is needed here. */
             uint8_t count = read_byte(frame);
             ObjArray *arr = obj_array_new();
             if (!arr) {
                 return vm_runtime_error(vm, "out of memory");
             }
+            /* Pin the new array so it survives any GC triggered by
+             * subsequent obj_array_push reallocs. The elements are
+             * still on the VM stack at this point. */
+            gc_pin((Obj *)arr);
 
             /* Pre-grow the array to the correct size. Pop values into
              * a temporary buffer, then push them in element order. */
@@ -1608,6 +1696,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     /* Free already-popped values */
                     for (int j = i + 1; j < count; j++)
                         value_free(&temp[j]);
+                    gc_unpin();
                     free(arr->data);
                     free(arr);
                     return vm_runtime_error(vm, "stack underflow");
@@ -1618,6 +1707,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 obj_array_push(arr, temp[i]); /* takes ownership */
             }
 
+            gc_unpin();
             if (!vm_push(vm, make_array(arr))) {
                 return vm_runtime_error(vm, "stack overflow");
             }
@@ -1627,9 +1717,20 @@ static Value vm_run(VM *vm, int base_frame_count) {
         case OP_MAP: {
             /* Build a map from the top 2*count values on the stack.
              * Stack layout (bottom to top): key0, val0, key1, val1, ...
-             * The first key was pushed first (deepest on stack). */
+             * The first key was pushed first (deepest on stack).
+             *
+             * We allocate the ObjMap before popping so values remain
+             * GC-reachable on the VM stack during the allocation. */
             uint8_t pair_count = read_byte(frame);
             int total = pair_count * 2;
+
+            ObjMap *map = obj_map_new();
+            if (!map) {
+                return vm_runtime_error(vm, "out of memory");
+            }
+            /* Pin the new map so it survives any GC triggered by
+             * obj_map_set allocations below. */
+            gc_pin((Obj *)map);
 
             /* Pop all key-value pairs into a temporary buffer. */
             Value temp[512]; /* max 255 pairs = 510 values */
@@ -1637,18 +1738,22 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (!vm_pop(vm, &temp[i])) {
                     for (int j = i + 1; j < total; j++)
                         value_free(&temp[j]);
+                    gc_unpin();
+                    Value map_val = make_map(map);
+                    value_free(&map_val);
                     return vm_runtime_error(vm, "stack underflow");
                 }
             }
 
-            ObjMap *map = obj_map_new();
-            if (!map) {
-                for (int i = 0; i < total; i++)
-                    value_free(&temp[i]);
-                return vm_runtime_error(vm, "out of memory");
-            }
-
-            /* Insert pairs in order. Validate key types. */
+            /* Insert pairs in order. Validate key types.
+             * Note: obj_map_set may trigger gc_alloc, but values in
+             * temp[] are safe because obj_map_set copies them into the
+             * map (which is pinned and thus GC-reachable). Values
+             * already inserted are reachable through the map. Values
+             * not yet inserted are at risk, but their ObjStrings are
+             * also referenced from the chunk constant pool (the
+             * compiler already roots chunks). For arrays/maps created
+             * inline, they remain on the GC list. */
             for (int i = 0; i < total; i += 2) {
                 Value *key = &temp[i];
                 Value *val = &temp[i + 1];
@@ -1660,6 +1765,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     /* Free remaining temp values and the partially built map. */
                     for (int j = 0; j < total; j++)
                         value_free(&temp[j]);
+                    gc_unpin();
                     Value map_val = make_map(map);
                     value_free(&map_val);
                     return vm_runtime_error(vm, "invalid map key type: %s", kt);
@@ -1671,6 +1777,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(val);
             }
 
+            gc_unpin();
             if (!vm_push(vm, make_map(map))) {
                 return vm_runtime_error(vm, "stack overflow");
             }
@@ -1693,6 +1800,11 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped heap objects: subsequent allocations (obj_array_new,
+             * obj_map_new, value_clone) may trigger GC which would otherwise
+             * sweep these objects since they are no longer on the VM stack. */
+            gc_pin_value(&arr_val);
+            gc_pin_value(&idx_val);
 
             /* ---- Map indexing ---- */
             if (arr_val.type == VAL_MAP) {
@@ -1703,6 +1815,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     ObjArray *key_arr = idx_val.array;
                     ObjMap *result = obj_map_new();
                     if (!result) {
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&arr_val);
                         value_free(&idx_val);
                         return vm_runtime_error(vm, "out of memory");
@@ -1714,6 +1828,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         }
                         /* Missing keys are silently skipped. */
                     }
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     if (!vm_push(vm, make_map(result))) {
@@ -1727,6 +1843,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
                     idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
                     const char *kt = value_type_name(idx_val.type);
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     return vm_runtime_error(vm, "invalid map key type: %s", kt);
@@ -1736,10 +1854,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (found) {
                     Value result;
                     if (!value_clone(&result, found)) {
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&arr_val);
                         value_free(&idx_val);
                         return vm_runtime_error(vm, "memory allocation failed");
                     }
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     if (!vm_push(vm, result)) {
@@ -1747,6 +1869,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     }
                 } else {
                     /* Missing key returns nothing. */
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     if (!vm_push(vm, make_nothing())) {
@@ -1758,6 +1882,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "cannot index %s", t);
@@ -1774,6 +1900,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                      * src/mask pointers after the free calls. */
                     size_t mask_count = mask->count;
                     size_t src_count = src->count;
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     return vm_runtime_error(vm,
@@ -1783,6 +1911,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 /* Validate all mask elements are booleans. */
                 for (size_t i = 0; i < mask->count; i++) {
                     if (mask->data[i].type != VAL_BOOL) {
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&arr_val);
                         value_free(&idx_val);
                         return vm_runtime_error(vm, "mask array must contain only booleans");
@@ -1791,6 +1921,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 /* Build result array from elements where mask is true. */
                 ObjArray *result_arr = obj_array_new();
                 if (!result_arr) {
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     return vm_runtime_error(vm, "out of memory");
@@ -1802,6 +1934,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                             /* Clean up partial result via value_free. */
                             Value partial = make_array(result_arr);
                             value_free(&partial);
+                            gc_unpin();
+                            gc_unpin();
                             value_free(&arr_val);
                             value_free(&idx_val);
                             return vm_runtime_error(vm, "memory allocation failed");
@@ -1809,6 +1943,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         obj_array_push(result_arr, elem);
                     }
                 }
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 if (!vm_push(vm, make_array(result_arr))) {
@@ -1819,6 +1955,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             /* ---- Scalar number indexing ---- */
             if (idx_val.type != VAL_NUMBER) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index must be an integer");
@@ -1826,6 +1964,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             double raw_idx = idx_val.number;
             /* Check that the index is an integer. */
             if (raw_idx != floor(raw_idx)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index must be an integer");
@@ -1836,6 +1976,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (int_idx < 0)
                 int_idx += (long long)arr->count;
             if (int_idx < 0 || (size_t)int_idx >= arr->count) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index out of bounds");
@@ -1843,10 +1985,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Clone the element at the index and push it. */
             Value result;
             if (!value_clone(&result, &arr->data[(size_t)int_idx])) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
+            gc_unpin();
+            gc_unpin();
             value_free(&arr_val);
             value_free(&idx_val);
             if (!vm_push(vm, result)) {
@@ -1875,9 +2021,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped heap objects against GC during allocations. */
+            gc_pin_value(&arr_val);
+            gc_pin_value(&idx_val);
             /* Peek at the value (now at TOS after popping index and container). */
             Value val;
             if (!vm_peek(vm, 0, &val)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "stack underflow");
@@ -1889,6 +2040,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (idx_val.type != VAL_STRING && idx_val.type != VAL_NUMBER &&
                     idx_val.type != VAL_BOOL && idx_val.type != VAL_NOTHING) {
                     const char *kt = value_type_name(idx_val.type);
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&arr_val);
                     value_free(&idx_val);
                     return vm_runtime_error(vm, "invalid map key type: %s", kt);
@@ -1897,6 +2050,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 obj_map_ensure_owned(&arr_val);
                 /* Insert or update the key-value pair. */
                 obj_map_set(arr_val.map, &idx_val, &val);
+                gc_unpin();
+                gc_unpin();
                 value_free(&idx_val);
                 /* Push the modified map on top of the value. */
                 if (!vm_push(vm, arr_val)) {
@@ -1907,17 +2062,23 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "cannot index %s", t);
             }
             if (idx_val.type != VAL_NUMBER) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index must be an integer");
             }
             double raw_idx = idx_val.number;
             if (raw_idx != floor(raw_idx)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index must be an integer");
@@ -1927,6 +2088,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (int_idx < 0)
                 int_idx += (long long)arr_val.array->count;
             if (int_idx < 0 || (size_t)int_idx >= arr_val.array->count) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index out of bounds");
@@ -1937,11 +2100,15 @@ static Value vm_run(VM *vm, int base_frame_count) {
             value_free(&arr_val.array->data[(size_t)int_idx]);
             Value cloned_val;
             if (!value_clone(&cloned_val, &val)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&arr_val);
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
             arr_val.array->data[(size_t)int_idx] = cloned_val;
+            gc_unpin();
+            gc_unpin();
             value_free(&idx_val);
             /* Push the modified array on top of the value. */
             if (!vm_push(vm, arr_val)) {
@@ -1960,38 +2127,51 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (!vm_pop(vm, &arr_val)) {
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped value against GC during allocations. */
+            gc_pin_value(&arr_val);
             /* Map operand: extract values in insertion order into a
              * temporary array, then fall through to the array handler. */
             if (arr_val.type == VAL_MAP) {
                 ObjMap *map = arr_val.map;
                 if (map->count == 0) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "cannot reduce empty map");
                 }
                 ObjArray *vals = obj_array_new();
                 if (!vals) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                gc_pin((Obj *)vals);
                 for (size_t i = 0; i < map->count; i++) {
                     Value v;
                     if (!value_clone(&v, &map->entries[i].value)) {
+                        gc_unpin(); /* vals */
                         Value tmp = make_array(vals);
                         value_free(&tmp);
+                        gc_unpin();
                         value_free(&arr_val);
                         return vm_runtime_error(vm, "memory allocation failed");
                     }
                     obj_array_push(vals, v);
                 }
+                gc_unpin(); /* vals */
+                gc_unpin();
                 value_free(&arr_val);
                 arr_val = make_array(vals);
+                /* Re-pin the new array value. */
+                gc_pin_value(&arr_val);
             }
             if (arr_val.type != VAL_ARRAY) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "@ requires an array or map operand");
             }
             ObjArray *arr = arr_val.array;
             if (arr->count == 0) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "cannot reduce empty array");
             }
@@ -1999,9 +2179,11 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (arr->count == 1) {
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                gc_unpin();
                 value_free(&arr_val);
                 if (!vm_push(vm, result)) {
                     return vm_runtime_error(vm, "stack overflow");
@@ -2014,12 +2196,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 /* Return first falsy element, or last element if all truthy. */
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
                 for (size_t i = 0; i < arr->count; i++) {
                     value_free(&result);
                     if (!value_clone(&result, &arr->data[i])) {
+                        gc_unpin();
                         value_free(&arr_val);
                         return vm_runtime_error(vm, "memory allocation failed");
                     }
@@ -2027,6 +2211,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         break; /* Short-circuit: found falsy element. */
                     }
                 }
+                gc_unpin();
                 value_free(&arr_val);
                 if (!vm_push(vm, result)) {
                     return vm_runtime_error(vm, "stack overflow");
@@ -2037,12 +2222,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 /* Return first truthy element, or last element if all falsy. */
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
                 for (size_t i = 0; i < arr->count; i++) {
                     value_free(&result);
                     if (!value_clone(&result, &arr->data[i])) {
+                        gc_unpin();
                         value_free(&arr_val);
                         return vm_runtime_error(vm, "memory allocation failed");
                     }
@@ -2050,6 +2237,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         break; /* Short-circuit: found truthy element. */
                     }
                 }
+                gc_unpin();
                 value_free(&arr_val);
                 if (!vm_push(vm, result)) {
                     return vm_runtime_error(vm, "stack overflow");
@@ -2062,21 +2250,25 @@ static Value vm_run(VM *vm, int base_frame_count) {
              * push acc, push element, then interpret the inner opcode. */
             Value acc;
             if (!value_clone(&acc, &arr->data[0])) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
             for (size_t i = 1; i < arr->count; i++) {
                 /* Push accumulator and current element, then apply op. */
                 if (!vm_push(vm, acc)) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "stack overflow");
                 }
                 Value elem;
                 if (!value_clone(&elem, &arr->data[i])) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "stack overflow");
                 }
                 if (!vm_push(vm, elem)) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "stack overflow");
                 }
@@ -2086,6 +2278,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                  * inner opcode into the bytecode stream conceptually. */
                 Value b, a;
                 if (!vm_pop(vm, &b) || !vm_pop(vm, &a)) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "stack underflow in reduce");
                 }
@@ -2093,6 +2286,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&a);
                 value_free(&b);
                 if (result.type == VAL_ERROR) {
+                    gc_unpin();
                     value_free(&arr_val);
                     /* Include element index in error for debugging. */
                     Value err = vm_runtime_error(vm, "reduce element %zu: %s", i, result.error);
@@ -2101,6 +2295,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 }
                 acc = result;
             }
+            gc_unpin();
             value_free(&arr_val);
             if (!vm_push(vm, acc)) {
                 return vm_runtime_error(vm, "stack overflow");
@@ -2131,6 +2326,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&right_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped heap objects against GC during allocations. */
+            gc_pin_value(&left_val);
+            gc_pin_value(&right_val);
 
             bool left_is_array = (left_val.type == VAL_ARRAY);
             bool right_is_array = (right_val.type == VAL_ARRAY);
@@ -2139,6 +2337,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             /* Map + array or array + map — not allowed. */
             if ((left_is_map && right_is_array) || (left_is_array && right_is_map)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "cannot vectorize %s with %s",
@@ -2152,10 +2352,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
                  * array, since that case was rejected above). */
                 ObjMap *result_map = obj_map_new();
                 if (!result_map) {
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                /* Pin result_map so it survives GC during element operations. */
+                gc_pin((Obj *)result_map);
 
                 if (left_is_map && right_is_map) {
                     /* Map × map: iterate left map entries, apply op for
@@ -2176,6 +2380,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, a)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2184,6 +2391,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, b)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2194,6 +2404,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, a)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2202,6 +2415,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, b)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2212,6 +2428,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                             if (elem_result.type == VAL_ERROR) {
                                 Value tmp = make_map(result_map);
                                 value_free(&tmp);
+                                gc_unpin();
+                                gc_unpin();
+                                gc_unpin();
                                 value_free(&left_val);
                                 value_free(&right_val);
                                 Value err =
@@ -2241,6 +2460,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, a)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2249,6 +2471,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, b)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2259,6 +2484,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, a)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2267,6 +2495,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 if (!value_clone(&elem_result, b)) {
                                     Value tmp = make_map(result_map);
                                     value_free(&tmp);
+                                    gc_unpin();
+                                    gc_unpin();
+                                    gc_unpin();
                                     value_free(&left_val);
                                     value_free(&right_val);
                                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2277,6 +2508,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                             if (elem_result.type == VAL_ERROR) {
                                 Value tmp = make_map(result_map);
                                 value_free(&tmp);
+                                gc_unpin();
+                                gc_unpin();
+                                gc_unpin();
                                 value_free(&left_val);
                                 value_free(&right_val);
                                 Value err =
@@ -2290,6 +2524,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     }
                 }
 
+                gc_unpin();
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 Value result = make_map(result_map);
@@ -2303,6 +2540,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             /* Both scalars — not allowed. */
             if (!left_is_array && !right_is_array) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "@ requires at least one array operand");
@@ -2314,6 +2553,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (left_val.array->count != right_val.array->count) {
                     size_t lc = left_val.array->count;
                     size_t rc = right_val.array->count;
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     return vm_runtime_error(
@@ -2329,10 +2570,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Build the result array by applying the inner op element-wise. */
             ObjArray *result_arr = obj_array_new();
             if (!result_arr) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
+            /* Pin result_arr so it survives GC during element operations. */
+            gc_pin((Obj *)result_arr);
 
             for (size_t i = 0; i < count; i++) {
                 /* Get left and right elements, broadcasting scalars. */
@@ -2347,6 +2592,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         if (!value_clone(&elem_result, a)) {
                             Value tmp = make_array(result_arr);
                             value_free(&tmp);
+                            gc_unpin();
+                            gc_unpin();
+                            gc_unpin();
                             value_free(&left_val);
                             value_free(&right_val);
                             return vm_runtime_error(vm, "memory allocation failed");
@@ -2355,6 +2603,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         if (!value_clone(&elem_result, b)) {
                             Value tmp = make_array(result_arr);
                             value_free(&tmp);
+                            gc_unpin();
+                            gc_unpin();
+                            gc_unpin();
                             value_free(&left_val);
                             value_free(&right_val);
                             return vm_runtime_error(vm, "memory allocation failed");
@@ -2366,6 +2617,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         if (!value_clone(&elem_result, a)) {
                             Value tmp = make_array(result_arr);
                             value_free(&tmp);
+                            gc_unpin();
+                            gc_unpin();
+                            gc_unpin();
                             value_free(&left_val);
                             value_free(&right_val);
                             return vm_runtime_error(vm, "memory allocation failed");
@@ -2374,6 +2628,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         if (!value_clone(&elem_result, b)) {
                             Value tmp = make_array(result_arr);
                             value_free(&tmp);
+                            gc_unpin();
+                            gc_unpin();
+                            gc_unpin();
                             value_free(&left_val);
                             value_free(&right_val);
                             return vm_runtime_error(vm, "memory allocation failed");
@@ -2385,6 +2642,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     if (elem_result.type == VAL_ERROR) {
                         Value tmp = make_array(result_arr);
                         value_free(&tmp);
+                        gc_unpin();
+                        gc_unpin();
                         value_free(&left_val);
                         value_free(&right_val);
                         Value err =
@@ -2397,6 +2656,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 obj_array_push(result_arr, elem_result);
             }
 
+            gc_unpin();
+            gc_unpin();
+            gc_unpin();
             value_free(&left_val);
             value_free(&right_val);
 
@@ -2416,12 +2678,16 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (!vm_pop(vm, &arr_val)) {
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped value against GC during allocations. */
+            gc_pin_value(&arr_val);
             if (arr_val.type != VAL_ARRAY) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "@ requires an array operand");
             }
             ObjArray *arr = arr_val.array;
             if (arr->count == 0) {
+                gc_unpin();
                 value_free(&arr_val);
                 /* Pop the function too before erroring. */
                 Value fn_discard;
@@ -2433,9 +2699,11 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (arr->count == 1) {
                 Value result;
                 if (!value_clone(&result, &arr->data[0])) {
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
+                gc_unpin();
                 value_free(&arr_val);
                 Value fn_discard;
                 vm_pop(vm, &fn_discard);
@@ -2449,11 +2717,13 @@ static Value vm_run(VM *vm, int base_frame_count) {
              * The function is on the stack below; we peek it for each call. */
             Value fn_val;
             if (!vm_peek(vm, 0, &fn_val)) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
             Value acc;
             if (!value_clone(&acc, &arr->data[0])) {
+                gc_unpin();
                 value_free(&arr_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
@@ -2461,11 +2731,13 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 Value elem;
                 if (!value_clone(&elem, &arr->data[i])) {
                     value_free(&acc);
+                    gc_unpin();
                     value_free(&arr_val);
                     return vm_runtime_error(vm, "memory allocation failed");
                 }
                 Value result = vm_call_value(vm, &fn_val, acc, elem);
                 if (result.type == VAL_ERROR) {
+                    gc_unpin();
                     value_free(&arr_val);
                     Value fn_discard;
                     vm_pop(vm, &fn_discard);
@@ -2475,6 +2747,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 }
                 acc = result;
             }
+            gc_unpin();
             value_free(&arr_val);
             /* Pop the function. */
             Value fn_discard;
@@ -2499,12 +2772,17 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&right_val);
                 return vm_runtime_error(vm, "stack underflow");
             }
+            /* Pin popped heap objects against GC during allocations. */
+            gc_pin_value(&left_val);
+            gc_pin_value(&right_val);
 
             bool left_is_array = (left_val.type == VAL_ARRAY);
             bool right_is_array = (right_val.type == VAL_ARRAY);
 
             /* Both scalars — not allowed. */
             if (!left_is_array && !right_is_array) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 Value fn_discard;
@@ -2519,6 +2797,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (left_val.array->count != right_val.array->count) {
                     size_t lc = left_val.array->count;
                     size_t rc = right_val.array->count;
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     Value fn_discard;
@@ -2537,6 +2817,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Peek at the function (it's below left and right, which are now popped). */
             Value fn_val;
             if (!vm_peek(vm, 0, &fn_val)) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "stack underflow");
@@ -2545,10 +2827,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Build result array by calling fn(a, b) for each element pair. */
             ObjArray *result_arr = obj_array_new();
             if (!result_arr) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
+            /* Pin result_arr so it survives GC during fn calls. */
+            gc_pin((Obj *)result_arr);
 
             for (size_t i = 0; i < count; i++) {
                 const Value *a = left_is_array ? &left_val.array->data[i] : &left_val;
@@ -2558,6 +2844,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (!value_clone(&a_clone, a) || !value_clone(&b_clone, b)) {
                     Value tmp = make_array(result_arr);
                     value_free(&tmp);
+                    gc_unpin();
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     return vm_runtime_error(vm, "memory allocation failed");
@@ -2567,6 +2856,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (elem_result.type == VAL_ERROR) {
                     Value tmp = make_array(result_arr);
                     value_free(&tmp);
+                    gc_unpin();
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     Value fn_discard;
@@ -2578,6 +2870,9 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 obj_array_push(result_arr, elem_result);
             }
 
+            gc_unpin();
+            gc_unpin();
+            gc_unpin();
             value_free(&left_val);
             value_free(&right_val);
             /* Pop the function. */
@@ -2600,9 +2895,14 @@ static Value vm_run(VM *vm, int base_frame_count) {
             Value right_val, left_val;
             vm_pop(vm, &right_val);
             vm_pop(vm, &left_val);
+            /* Pin popped heap objects against GC during allocations. */
+            gc_pin_value(&left_val);
+            gc_pin_value(&right_val);
 
             /* Both operands must be arrays. */
             if (left_val.type != VAL_ARRAY || right_val.type != VAL_ARRAY) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "@: requires two arrays");
@@ -2615,6 +2915,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
             if (keys_arr->count != vals_arr->count) {
                 size_t lc = keys_arr->count;
                 size_t rc = vals_arr->count;
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "array length mismatch in @: (left=%zu, right=%zu)", lc,
@@ -2623,6 +2925,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
             ObjMap *map = obj_map_new();
             if (!map) {
+                gc_unpin();
+                gc_unpin();
                 value_free(&left_val);
                 value_free(&right_val);
                 return vm_runtime_error(vm, "out of memory");
@@ -2639,6 +2943,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     const char *kt = value_type_name(key->type);
                     Value map_val = make_map(map);
                     value_free(&map_val);
+                    gc_unpin();
+                    gc_unpin();
                     value_free(&left_val);
                     value_free(&right_val);
                     return vm_runtime_error(vm, "invalid map key type: %s", kt);
@@ -2648,6 +2954,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 obj_map_set(map, key, val);
             }
 
+            gc_unpin();
+            gc_unpin();
             value_free(&left_val);
             value_free(&right_val);
 

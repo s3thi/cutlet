@@ -577,6 +577,11 @@ TEST(test_obj_closure_new) {
     fn->refcount = 1;
     fn->upvalue_count = 0;
 
+    /* Mark fn so it survives GC triggered by obj_closure_new's
+     * gc_alloc call (especially in GC_STRESS mode). Without this,
+     * fn has no GC roots and would be swept immediately. */
+    fn->obj.is_marked = true;
+
     ObjClosure *cl = obj_closure_new(fn, 0);
     ASSERT(cl != NULL, "closure should be allocated");
     ASSERT(cl->refcount == 1, "closure initial refcount should be 1");
@@ -603,6 +608,8 @@ TEST(test_closure_value_format_named) {
     fn->refcount = 1;
     fn->upvalue_count = 0;
 
+    /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
+    fn->obj.is_marked = true;
     ObjClosure *cl = obj_closure_new(fn, 0);
     Value v = make_closure(cl);
     char *fmt = value_format(&v);
@@ -627,6 +634,8 @@ TEST(test_closure_value_format_anonymous) {
     fn->refcount = 1;
     fn->upvalue_count = 0;
 
+    /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
+    fn->obj.is_marked = true;
     ObjClosure *cl = obj_closure_new(fn, 0);
     Value v = make_closure(cl);
     char *fmt = value_format(&v);
@@ -651,6 +660,8 @@ TEST(test_closure_clone_refcount) {
     fn->refcount = 1;
     fn->upvalue_count = 0;
 
+    /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
+    fn->obj.is_marked = true;
     ObjClosure *cl = obj_closure_new(fn, 0);
     Value v = make_closure(cl);
     ASSERT(cl->refcount == 1, "initial closure refcount should be 1");
@@ -683,6 +694,8 @@ TEST(test_closure_is_truthy) {
     fn->refcount = 1;
     fn->upvalue_count = 0;
 
+    /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
+    fn->obj.is_marked = true;
     ObjClosure *cl = obj_closure_new(fn, 0);
     Value v = make_closure(cl);
     ASSERT(is_truthy(&v) == true, "closure should be truthy");
@@ -816,6 +829,9 @@ int main(void) {
     printf("Passed:    %d\n", tests_passed);
     printf("Failed:    %d\n", tests_failed);
     printf("========================================\n");
+
+    /* Free all remaining GC-tracked objects to prevent LSan leak reports. */
+    gc_free_all();
 
     return tests_failed > 0 ? 1 : 0;
 }

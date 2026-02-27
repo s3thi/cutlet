@@ -39,6 +39,94 @@ static GC gc;
  * Used by gc_mark_roots() to walk the VM's stack and call frames. */
 static VM *gc_vm;
 
+/* When true, gc_collect() is a no-op. Used by unit tests that create
+ * GC-tracked objects without a VM root set. */
+static bool gc_suppressed = false;
+
+void gc_suppress(void) { gc_suppressed = true; }
+void gc_unsuppress(void) { gc_suppressed = false; }
+
+/* ---- Temporary GC root pinning ----
+ *
+ * VM opcodes sometimes pop values off the stack into local C
+ * variables, operate on them, and then push results. Between
+ * the pop and the push, if a gc_alloc triggers gc_collect(),
+ * those popped values are unreachable from any GC root and
+ * would be swept. The pin stack lets the VM temporarily root
+ * such objects. */
+
+static Obj *temp_root_stack[GC_TEMP_ROOTS_MAX];
+static int temp_root_count = 0;
+
+void gc_pin(Obj *obj) {
+    if (obj != NULL && temp_root_count < GC_TEMP_ROOTS_MAX) {
+        temp_root_stack[temp_root_count++] = obj;
+    }
+}
+
+void gc_unpin(void) {
+    if (temp_root_count > 0) {
+        temp_root_count--;
+        temp_root_stack[temp_root_count] = NULL;
+    }
+}
+
+void gc_pin_value(Value *v) {
+    if (v == NULL)
+        return;
+    switch (v->type) {
+    case VAL_STRING:
+        gc_pin((Obj *)v->string);
+        break;
+    case VAL_FUNCTION:
+        gc_pin((Obj *)v->function);
+        break;
+    case VAL_CLOSURE:
+        gc_pin((Obj *)v->closure);
+        break;
+    case VAL_ARRAY:
+        gc_pin((Obj *)v->array);
+        break;
+    case VAL_MAP:
+        gc_pin((Obj *)v->map);
+        break;
+    default:
+        break;
+    }
+}
+
+/* ---- Compiler root tracking ----
+ *
+ * During compilation, the compiler creates ObjStrings (and other
+ * objects) that are stored in the chunk's constant pool. These
+ * objects are not yet reachable from the VM stack or globals, so
+ * they would be swept by GC if a collection runs during compilation
+ * (e.g., in GC_STRESS mode). To prevent this, the compiler pushes
+ * its chunk onto a stack of "compiler roots" that gc_mark_roots()
+ * traces during collection.
+ *
+ * The stack supports nested function compilation (each nested
+ * function definition pushes its own chunk). */
+
+static Chunk *compiler_root_stack[GC_COMPILER_ROOTS_MAX];
+static int compiler_root_count = 0;
+
+void gc_push_compiler_root(Chunk *chunk) {
+    if (compiler_root_count < GC_COMPILER_ROOTS_MAX) {
+        compiler_root_stack[compiler_root_count++] = chunk;
+    }
+    /* If the stack overflows, the chunk won't be rooted. This is
+     * extremely unlikely in practice (would need 64+ levels of
+     * nested function definitions). */
+}
+
+void gc_pop_compiler_root(void) {
+    if (compiler_root_count > 0) {
+        compiler_root_count--;
+        compiler_root_stack[compiler_root_count] = NULL;
+    }
+}
+
 /* ---- String intern table ----
  *
  * Open-addressing hash table of ObjString* pointers (weak references).
@@ -202,6 +290,17 @@ void gc_init(void) {
     gc.bytes_allocated = 0;
     gc.next_gc = GC_INITIAL_THRESHOLD;
     gc.sweeping = false;
+    gc_suppressed = false;
+
+    /* Reset the temporary root pin stack. */
+    temp_root_count = 0;
+    for (int i = 0; i < GC_TEMP_ROOTS_MAX; i++)
+        temp_root_stack[i] = NULL;
+
+    /* Reset the compiler root stack. */
+    compiler_root_count = 0;
+    for (int i = 0; i < GC_COMPILER_ROOTS_MAX; i++)
+        compiler_root_stack[i] = NULL;
 
     /* Reset the string intern table. Free any existing table from a
      * previous cycle (e.g. if gc_init is called again in tests). */
@@ -511,9 +610,24 @@ void gc_mark_roots(void) {
             gc_mark_value(slot);
 
         /* Mark the closure in each active call frame.
-         * This includes frame 0's stack-allocated script_closure. */
-        for (int i = 0; i < gc_vm->frame_count; i++)
-            gc_mark_object((Obj *)gc_vm->frames[i].closure);
+         * This includes frame 0's stack-allocated script_closure.
+         *
+         * Important: clear is_marked before marking because stack-
+         * allocated objects (like frame 0's script_closure and
+         * script_fn) are not on the GC object list and therefore
+         * don't have their marks cleared by gc_sweep(). Without
+         * clearing, gc_mark_object would see them as already marked
+         * from the previous cycle and skip tracing their children
+         * (the chunk constant pool), leaving ObjStrings unreachable. */
+        for (int i = 0; i < gc_vm->frame_count; i++) {
+            ObjClosure *cl = gc_vm->frames[i].closure;
+            if (cl != NULL) {
+                cl->obj.is_marked = false;
+                if (cl->function != NULL)
+                    cl->function->obj.is_marked = false;
+                gc_mark_object((Obj *)cl);
+            }
+        }
 
         /* Mark every open upvalue on the linked list. */
         for (ObjUpvalue *uv = gc_vm->open_upvalues; uv != NULL; uv = uv->next)
@@ -523,6 +637,27 @@ void gc_mark_roots(void) {
     /* Mark all Values in the global variable table. Globals persist
      * across evaluations, so this must run even when gc_vm is NULL. */
     runtime_mark_globals();
+
+    /* Mark constants in any chunks currently being compiled. During
+     * compilation, ObjStrings are created and added to a chunk's
+     * constant pool. Without this, a GC triggered by a subsequent
+     * gc_alloc (especially in GC_STRESS mode) would sweep those
+     * strings before the chunk is attached to a function/closure. */
+    for (int i = 0; i < compiler_root_count; i++) {
+        Chunk *chunk = compiler_root_stack[i];
+        if (chunk != NULL) {
+            for (size_t j = 0; j < chunk->const_count; j++)
+                gc_mark_value(&chunk->constants[j]);
+        }
+    }
+
+    /* Mark temporarily pinned objects. VM opcodes pin objects that
+     * are held in local C variables (not on the VM stack) to prevent
+     * them from being swept during gc_alloc-triggered collections. */
+    for (int i = 0; i < temp_root_count; i++) {
+        if (temp_root_stack[i] != NULL)
+            gc_mark_object(temp_root_stack[i]);
+    }
 }
 
 /*
@@ -537,6 +672,8 @@ void gc_mark_roots(void) {
  * When GC_LOG is defined, prints collection stats to stderr.
  */
 void gc_collect(void) {
+    if (gc_suppressed)
+        return;
 #ifdef GC_LOG
     size_t bytes_before = gc.bytes_allocated;
 

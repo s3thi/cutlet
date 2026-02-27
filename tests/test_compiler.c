@@ -1132,5 +1132,8 @@ int main(void) {
     printf("Failed:    %d\n", tests_failed);
     printf("========================================\n");
 
+    /* Free all remaining GC-tracked objects to prevent LSan leak reports. */
+    gc_free_all();
+
     return tests_failed > 0 ? 1 : 0;
 }
