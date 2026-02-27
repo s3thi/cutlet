@@ -6,8 +6,8 @@
  * of all heap-allocated objects, enabling future mark-and-sweep
  * collection.
  *
- * gc_collect() is currently a no-op — marking and sweeping will
- * be implemented in later GC tasks.
+ * gc_collect() marks all reachable objects and clears marks afterward.
+ * Sweep (actual freeing of unreachable objects) is task 4.
  *
  * Design notes:
  * - Module-level static GC state (like var_table in runtime.c).
@@ -44,6 +44,15 @@ void gc_init(void) {
 }
 
 void *gc_alloc(ObjType type, size_t size) {
+    /* In GC_STRESS mode, trigger a collection on every allocation.
+     * This is a development-time check that helps catch missing GC
+     * roots — if an object isn't properly rooted, a stress-mode
+     * collection during allocation will clear its mark and (once
+     * sweep is added) free it prematurely. */
+#ifdef GC_STRESS
+    gc_collect();
+#endif
+
     void *ptr = calloc(1, size);
     if (!ptr)
         return NULL;

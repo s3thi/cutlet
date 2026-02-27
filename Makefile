@@ -359,6 +359,93 @@ test-sanitize: $(SANITIZE_TEST_TOKENIZER_BIN) $(SANITIZE_TEST_REPL_BIN) $(SANITI
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_cli.sh
 	CUTLET=./$(SANITIZE_BIN) ./$(TEST_DIR)/test_examples.sh
 
+# ---------- GC stress testing ----------
+
+# Separate build directory for GC stress mode (every gc_alloc triggers gc_collect).
+GC_STRESS_BUILD_DIR = build-gc-stress
+GC_STRESS_CFLAGS = $(CFLAGS) -DGC_STRESS
+
+GC_STRESS_BIN = $(GC_STRESS_BUILD_DIR)/cutlet
+GC_STRESS_TEST_TOKENIZER_BIN = $(GC_STRESS_BUILD_DIR)/test_tokenizer
+GC_STRESS_TEST_REPL_BIN = $(GC_STRESS_BUILD_DIR)/test_repl
+GC_STRESS_TEST_PARSER_BIN = $(GC_STRESS_BUILD_DIR)/test_parser
+GC_STRESS_TEST_REPL_SERVER_BIN = $(GC_STRESS_BUILD_DIR)/test_repl_server
+GC_STRESS_TEST_RUNTIME_BIN = $(GC_STRESS_BUILD_DIR)/test_runtime
+GC_STRESS_TEST_PTR_ARRAY_BIN = $(GC_STRESS_BUILD_DIR)/test_ptr_array
+GC_STRESS_TEST_JSON_BIN = $(GC_STRESS_BUILD_DIR)/test_json
+GC_STRESS_TEST_CHUNK_BIN = $(GC_STRESS_BUILD_DIR)/test_chunk
+GC_STRESS_TEST_COMPILER_BIN = $(GC_STRESS_BUILD_DIR)/test_compiler
+GC_STRESS_TEST_VM_BIN = $(GC_STRESS_BUILD_DIR)/test_vm
+GC_STRESS_TEST_VALUE_BIN = $(GC_STRESS_BUILD_DIR)/test_value
+GC_STRESS_TEST_GC_BIN = $(GC_STRESS_BUILD_DIR)/test_gc
+
+$(GC_STRESS_BUILD_DIR):
+	mkdir -p $(GC_STRESS_BUILD_DIR)
+
+# Build GC-stress isocline object (isocline itself doesn't use gc_alloc, but
+# we need a separate object file for the stress build directory).
+GC_STRESS_ISOCLINE_OBJ = $(GC_STRESS_BUILD_DIR)/isocline.o
+$(GC_STRESS_ISOCLINE_OBJ): $(ISOCLINE_SRC) | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(ISOCLINE_BUILD_CFLAGS) $(ISOCLINE_INCLUDES) -c -o $@ $<
+
+$(GC_STRESS_BIN): $(MAIN_SRC) $(LIB_SRCS) $(GC_STRESS_ISOCLINE_OBJ) | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) $(ISOCLINE_INCLUDES) -o $@ $(MAIN_SRC) $(LIB_SRCS) $(GC_STRESS_ISOCLINE_OBJ) $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_TOKENIZER_BIN): $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_TOKENIZER_SRC) $(SRC_DIR)/tokenizer.c $(LDFLAGS)
+
+$(GC_STRESS_TEST_PARSER_BIN): $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_PARSER_SRC) $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(LDFLAGS)
+
+$(GC_STRESS_TEST_REPL_BIN): $(TEST_REPL_SRC) $(LIB_SRCS) | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_REPL_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_REPL_SERVER_BIN): $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_REPL_SERVER_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_RUNTIME_BIN): $(TEST_RUNTIME_SRC) $(LIB_SRCS) | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -DCUTLET_TESTING -o $@ $(TEST_RUNTIME_SRC) $(LIB_SRCS) $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c $(LDFLAGS)
+
+$(GC_STRESS_TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(LDFLAGS)
+
+$(GC_STRESS_TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
+
+$(GC_STRESS_TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c | $(GC_STRESS_BUILD_DIR)
+	$(CC) $(GC_STRESS_CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
+
+# Run the full test suite under GC stress mode (gc_collect on every allocation).
+# This is a development-time check, not part of the regular `make test`.
+.PHONY: test-gc-stress
+test-gc-stress: $(GC_STRESS_TEST_TOKENIZER_BIN) $(GC_STRESS_TEST_REPL_BIN) $(GC_STRESS_TEST_PARSER_BIN) $(GC_STRESS_TEST_REPL_SERVER_BIN) $(GC_STRESS_TEST_RUNTIME_BIN) $(GC_STRESS_TEST_PTR_ARRAY_BIN) $(GC_STRESS_TEST_JSON_BIN) $(GC_STRESS_TEST_CHUNK_BIN) $(GC_STRESS_TEST_COMPILER_BIN) $(GC_STRESS_TEST_VM_BIN) $(GC_STRESS_TEST_VALUE_BIN) $(GC_STRESS_TEST_GC_BIN) $(GC_STRESS_BIN)
+	./$(GC_STRESS_TEST_TOKENIZER_BIN)
+	./$(GC_STRESS_TEST_REPL_BIN)
+	./$(GC_STRESS_TEST_PARSER_BIN)
+	./$(GC_STRESS_TEST_REPL_SERVER_BIN)
+	./$(GC_STRESS_TEST_RUNTIME_BIN)
+	./$(GC_STRESS_TEST_PTR_ARRAY_BIN)
+	./$(GC_STRESS_TEST_JSON_BIN)
+	./$(GC_STRESS_TEST_CHUNK_BIN)
+	./$(GC_STRESS_TEST_COMPILER_BIN)
+	./$(GC_STRESS_TEST_VM_BIN)
+	./$(GC_STRESS_TEST_VALUE_BIN)
+	./$(GC_STRESS_TEST_GC_BIN)
+	CUTLET=./$(GC_STRESS_BIN) ./$(TEST_DIR)/test_cli.sh
+	CUTLET=./$(GC_STRESS_BIN) ./$(TEST_DIR)/test_examples.sh
+
 # ---------- Combined checks ----------
 
 # Required pre-commit checks.
@@ -389,7 +476,7 @@ pipeline-trace: $(BIN)
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) $(SANITIZE_BUILD_DIR) compile_commands.json
+	rm -rf $(BUILD_DIR) $(SANITIZE_BUILD_DIR) $(GC_STRESS_BUILD_DIR) compile_commands.json
 
 # Help
 .PHONY: help
@@ -408,6 +495,7 @@ help:
 	@echo "  format-check  - Check formatting (fails on diff)"
 	@echo "  compile-db    - Generate compile_commands.json (requires bear)"
 	@echo "  lint          - Run clang-tidy static analysis (requires compile-db)"
+	@echo "  test-gc-stress - Run tests with GC_STRESS (gc_collect on every alloc)"
 	@echo "  test-sanitize - Run tests under ASan+UBSan+LSan"
 	@echo "  check         - Run all required checks (format-check + lint)"
 	@echo "  symbol-index  - Generate symbol index from src/*.h (requires Universal Ctags)"
