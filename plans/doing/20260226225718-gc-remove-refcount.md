@@ -253,6 +253,61 @@ copy-on-write / value semantics for arrays and maps.
 **Expected failures (7 VM tests, 2 example tests):** These tests assert reference semantics
 behavior but the implementation still uses COW. They will pass once Steps 2-5 are implemented.
 
+### Step 2: Remove refcount from all Obj* types ✅
+
+**Completed 2026-02-27.**
+
+Removed `size_t refcount` field from all five Obj* types and fixed all
+compilation errors and behavioral consequences.
+
+**src/value.h changes:**
+- Removed `size_t refcount` from ObjFunction, ObjClosure, ObjArray, ObjMap, ObjUpvalue
+- Removed declarations: `obj_upvalue_free()`, `obj_closure_free()`, `obj_function_free()`
+- Removed declarations: `obj_array_ensure_owned()`, `obj_map_ensure_owned()`
+- Updated all comments to reference GC-managed lifetimes instead of refcounting
+
+**src/value.c changes:**
+- `make_function()`: Removed `fn->refcount = 1`
+- `obj_upvalue_new()`: Removed `uv->refcount = 1`
+- `obj_closure_new()`: Removed `cl->refcount = 1`, `fn->refcount++`, error-path `fn->refcount--`
+- Removed `obj_closure_free()`, `obj_upvalue_free()`, `obj_function_free()` entirely
+- Removed static helpers `obj_array_free()`, `obj_map_free()` (no longer called)
+- Removed `obj_array_ensure_owned()`, `obj_map_ensure_owned()` (COW helpers)
+- `obj_array_new()`: Removed `arr->refcount = 1`
+- `obj_map_new()`: Removed `m->refcount = 1`
+- `value_free()`: Rewritten as no-op for GC types (just nulls pointers); only frees VAL_ERROR message
+- `value_clone()`: Rewritten as shallow copy; only deep-copies VAL_ERROR message
+
+**src/vm.c changes:**
+- `capture_upvalue()`: Removed `curr->refcount++` when reusing existing upvalue
+- `vm_execute()`: Removed `.refcount = 1` from stack-allocated script_fn and script_closure
+- OP_CLOSURE handler: Removed `cl->upvalues[i]->refcount++` when copying from enclosing closure
+- OP_INDEX_SET: Removed `obj_map_ensure_owned()` and `obj_array_ensure_owned()` calls
+- `native_push()`: Changed from deep-clone-then-append to mutate-in-place (reference semantics)
+- `native_pop()`: Changed from build-new-array to remove-last-in-place (reference semantics)
+
+**src/gc.c changes:**
+- Updated comments to reflect that refcounting has been removed
+
+**src/runtime.c changes:**
+- Updated comments to reflect GC-managed lifetimes
+
+**Test changes:**
+- `test_chunk.c`: Removed all `fn->refcount = 1` initializations; removed refcount assertions;
+  removed `obj_function_free()`, `obj_closure_free()`, `obj_upvalue_free()` calls (GC handles cleanup)
+- `test_gc.c`: Removed all refcount initializations from test objects
+- `test_value.c`: Updated comment (refcount → pointer shared)
+- `test_cli.sh`: Updated "array builtins" expected output for reference semantics (pop after push)
+
+**Autonomous decisions:**
+- Changed `native_push()` and `native_pop()` to mutate in-place rather than deep-clone.
+  This was planned for Step 5 but was needed now because Step 1 tests already expected
+  reference semantics. All tests pass with this change.
+- Removed the `obj_array_free` and `obj_map_free` static functions entirely (they were
+  dead code after value_free stopped calling them). GC sweep handles cleanup.
+
+**All tests pass. Format check passes. Lint warnings are pre-existing (not in modified files).**
+
 ---
 
 End of plan.
