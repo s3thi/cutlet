@@ -357,8 +357,26 @@ void gc_collect(void) {
     }
 }
 
+/* ---- Sweep phase ---- */
+
+/*
+ * gc_sweep - walk the object list and free unmarked objects.
+ *
+ * Stub: currently a no-op. Step 2 of the gc-sweep plan will
+ * implement the actual sweep logic that:
+ *   - Frees every unmarked object (type-dispatched destructor + free).
+ *   - Relinks the list around freed objects.
+ *   - Clears is_marked on surviving objects.
+ *   - Decrements bytes_allocated for each freed object.
+ */
+void gc_sweep(void) { /* No-op stub — sweep logic will be added in step 2. */ }
+
 /* ---- Test/inspection accessors ---- */
 
 Obj *gc_get_objects(void) { return gc.objects; }
 
 size_t gc_get_bytes_allocated(void) { return gc.bytes_allocated; }
+
+size_t gc_get_next_gc(void) { return gc.next_gc; }
+
+void gc_set_next_gc(size_t threshold) { gc.next_gc = threshold; }

@@ -165,6 +165,19 @@ void gc_set_vm(struct VM *vm);
  */
 void gc_mark_roots(void);
 
+/* ---- Sweep phase ---- */
+
+/*
+ * Sweep the object list: free every unmarked object, clear is_marked
+ * on survivors. Called by gc_collect() after gc_mark_roots().
+ *
+ * During sweep, gc_unlink() is suppressed (objects are relinked
+ * inline rather than via gc_unlink's O(n) list walk).
+ *
+ * Stub: currently a no-op. Implemented in gc-sweep task step 2.
+ */
+void gc_sweep(void);
+
 /* ---- Test/inspection accessors ---- */
 
 /* Return the head of the global object list (for test inspection). */
@@ -172,5 +185,11 @@ Obj *gc_get_objects(void);
 
 /* Return the current bytes_allocated counter (for test inspection). */
 size_t gc_get_bytes_allocated(void);
+
+/* Return the current next_gc threshold (for test inspection). */
+size_t gc_get_next_gc(void);
+
+/* Set the next_gc threshold (for testing automatic GC triggering). */
+void gc_set_next_gc(size_t threshold);
 
 #endif /* CUTLET_GC_H */

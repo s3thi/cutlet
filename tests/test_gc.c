@@ -798,6 +798,204 @@ TEST(test_gc_mark_stack_allocated_script_objects) {
 }
 
 /* ============================================================
+ * test_gc_sweep_frees_unmarked: allocate 3 objects, mark one,
+ * call gc_sweep(). Verify only the marked object remains.
+ * ============================================================ */
+
+TEST(test_gc_sweep_frees_unmarked) {
+    gc_init();
+
+    /* Allocate three objects. */
+    ObjArray *a1 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ObjArray *a2 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ObjArray *a3 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(a1 != NULL, "a1 alloc should succeed");
+    ASSERT(a2 != NULL, "a2 alloc should succeed");
+    ASSERT(a3 != NULL, "a3 alloc should succeed");
+    ASSERT(count_gc_objects() == 3, "should have 3 objects before sweep");
+
+    /* Mark only a2 as reachable. */
+    a2->obj.is_marked = true;
+
+    /* Sweep should free a1 and a3 (unmarked), keeping a2. */
+    gc_sweep();
+
+    ASSERT(count_gc_objects() == 1, "only 1 object should remain after sweep");
+    ASSERT(obj_in_list((Obj *)a2), "marked object (a2) should survive sweep");
+    ASSERT(!obj_in_list((Obj *)a1), "unmarked object (a1) should be freed by sweep");
+    ASSERT(!obj_in_list((Obj *)a3), "unmarked object (a3) should be freed by sweep");
+
+    /* bytes_allocated should reflect only the surviving object. */
+    ASSERT(gc_get_bytes_allocated() == sizeof(ObjArray),
+           "bytes_allocated should equal one ObjArray after sweep");
+
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_sweep_clears_marks: allocate and mark objects, sweep,
+ * then verify surviving objects have is_marked == false.
+ * ============================================================ */
+
+TEST(test_gc_sweep_clears_marks) {
+    gc_init();
+
+    /* Allocate two objects and mark both. */
+    ObjArray *a1 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ObjArray *a2 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(a1 != NULL, "a1 alloc should succeed");
+    ASSERT(a2 != NULL, "a2 alloc should succeed");
+
+    a1->obj.is_marked = true;
+    a2->obj.is_marked = true;
+
+    /* Sweep: both are marked, so both survive. But marks should be
+     * cleared on surviving objects for the next collection cycle. */
+    gc_sweep();
+
+    ASSERT(count_gc_objects() == 2, "both marked objects should survive sweep");
+    ASSERT(a1->obj.is_marked == false, "a1 is_marked should be cleared after sweep");
+    ASSERT(a2->obj.is_marked == false, "a2 is_marked should be cleared after sweep");
+
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_collect_full_cycle: set up runtime with a global
+ * variable referencing one object. Allocate several objects,
+ * some reachable from the global, some not. Call gc_collect().
+ * Verify unreachable objects are freed, reachable ones survive.
+ * ============================================================ */
+
+TEST(test_gc_collect_full_cycle) {
+    /* runtime_init calls gc_init internally. */
+    runtime_init();
+
+    /* Ensure no VM is active — globals are the only root set. */
+    gc_set_vm(NULL);
+
+    /* Allocate a GC-tracked array that will be reachable via a global. */
+    ObjArray *reachable = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(reachable != NULL, "reachable alloc should succeed");
+    reachable->refcount = 1;
+
+    /* Store the reachable array in a global variable. */
+    Value val;
+    memset(&val, 0, sizeof(Value));
+    val.type = VAL_ARRAY;
+    val.array = reachable;
+    RuntimeVarStatus st = runtime_var_define("keep_me", &val);
+    ASSERT(st == RUNTIME_VAR_OK, "runtime_var_define should succeed");
+
+    /* Allocate unreachable objects (not stored in any root). */
+    ObjArray *unreachable1 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ObjArray *unreachable2 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(unreachable1 != NULL, "unreachable1 alloc should succeed");
+    ASSERT(unreachable2 != NULL, "unreachable2 alloc should succeed");
+
+    int before_count = count_gc_objects();
+    ASSERT(before_count >= 3, "should have at least 3 objects before collect");
+
+    /* Run a full GC cycle. With sweep implemented, unreachable objects
+     * should be freed. Without sweep, all objects remain. */
+    gc_collect();
+
+    /* After a full collect cycle, reachable object must survive. */
+    ASSERT(obj_in_list((Obj *)reachable), "reachable object should survive gc_collect");
+
+    /* Unreachable objects should be freed by sweep. If sweep is a stub,
+     * they will still be present — this test detects that failure. */
+    ASSERT(!obj_in_list((Obj *)unreachable1), "unreachable1 should be freed by gc_collect");
+    ASSERT(!obj_in_list((Obj *)unreachable2), "unreachable2 should be freed by gc_collect");
+
+    runtime_destroy();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_auto_trigger: set next_gc to a low value, allocate
+ * objects until a collection is triggered. Verify that
+ * bytes_allocated decreased (objects were freed).
+ * ============================================================ */
+
+TEST(test_gc_auto_trigger) {
+    /* Use the runtime so gc_collect can call runtime_mark_globals. */
+    runtime_init();
+    gc_set_vm(NULL);
+
+    /* Set a very low threshold so the next allocation triggers GC. */
+    gc_set_next_gc(1);
+
+    /* Record bytes before allocations. */
+    size_t bytes_before = gc_get_bytes_allocated();
+
+    /* Allocate several unreachable objects. Each gc_alloc checks
+     * bytes_allocated > next_gc and calls gc_collect() if true.
+     * Once sweep is implemented, unreachable objects will be freed
+     * during these triggered collections. */
+    for (int i = 0; i < 10; i++) {
+        gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    }
+
+    size_t bytes_after = gc_get_bytes_allocated();
+
+    /* If auto-triggering + sweep work, bytes_allocated should be
+     * less than 10 * sizeof(ObjArray) because intermediate objects
+     * were collected. With the stub sweep, all 10 survive and
+     * bytes_after will equal bytes_before + 10 * sizeof(ObjArray).
+     * We test that automatic collection reduced the total. */
+    size_t max_expected = bytes_before + 10 * sizeof(ObjArray);
+    ASSERT(bytes_after < max_expected,
+           "auto-triggered GC should reduce bytes_allocated below maximum");
+
+    runtime_destroy();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_threshold_grows: after a collection, verify that
+ * next_gc is larger than before (proportional to surviving bytes).
+ * ============================================================ */
+
+TEST(test_gc_threshold_grows) {
+    /* Use the runtime so gc_collect can call runtime_mark_globals. */
+    runtime_init();
+    gc_set_vm(NULL);
+
+    /* Allocate a reachable object (stored in a global). */
+    ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(arr != NULL, "arr alloc should succeed");
+    arr->refcount = 1;
+
+    Value val;
+    memset(&val, 0, sizeof(Value));
+    val.type = VAL_ARRAY;
+    val.array = arr;
+    RuntimeVarStatus st = runtime_var_define("threshold_test", &val);
+    ASSERT(st == RUNTIME_VAR_OK, "runtime_var_define should succeed");
+
+    /* Set next_gc to a small value so we can observe it grow. */
+    gc_set_next_gc(1);
+    size_t next_gc_before = gc_get_next_gc();
+
+    /* Run a collection. After sweep, next_gc should be updated
+     * to a value proportional to surviving bytes. */
+    gc_collect();
+
+    size_t next_gc_after = gc_get_next_gc();
+
+    /* next_gc should grow after collection to at least the minimum
+     * threshold or proportional to surviving bytes. With the stub
+     * sweep, gc_collect doesn't update next_gc, so this will fail. */
+    ASSERT(next_gc_after > next_gc_before, "next_gc should grow after a collection cycle");
+
+    runtime_destroy();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -833,6 +1031,13 @@ int main(void) {
     printf("\nGC edge cases:\n");
     RUN_TEST(test_gc_mark_native_function_null_chunk);
     RUN_TEST(test_gc_mark_stack_allocated_script_objects);
+
+    printf("\nGC sweep phase:\n");
+    RUN_TEST(test_gc_sweep_frees_unmarked);
+    RUN_TEST(test_gc_sweep_clears_marks);
+    RUN_TEST(test_gc_collect_full_cycle);
+    RUN_TEST(test_gc_auto_trigger);
+    RUN_TEST(test_gc_threshold_grows);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
