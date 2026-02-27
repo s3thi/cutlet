@@ -1,10 +1,12 @@
 /*
- * test_value.c - Tests for ObjArray and VAL_ARRAY value type
+ * test_value.c - Tests for Value types: ObjArray, ObjMap, ObjString
  *
  * Tests array creation, formatting, cloning (refcounting),
  * truthiness, and copy-on-write via obj_array_ensure_owned.
+ * Also tests ObjString GC-tracked string type (GC Task 2).
  */
 
+#include "../src/gc.h"
 #include "../src/value.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -794,6 +796,179 @@ TEST(test_obj_map_clone_deep) {
 }
 
 /* ============================================================
+ * ObjString creation and property tests
+ *
+ * These tests exercise the ObjString GC-tracked string type
+ * introduced in GC Task 2. ObjString wraps a char* with a
+ * precomputed hash and length, allocated via gc_alloc on the
+ * GC object list. The Value struct's VAL_STRING type now holds
+ * an ObjString* in its `string` field, while VAL_ERROR uses
+ * a separate `error` field (plain char*).
+ * ============================================================ */
+
+TEST(test_obj_string_new) {
+    /*
+     * obj_string_new allocates a new ObjString via gc_alloc,
+     * copies the input chars, computes the hash, and records
+     * the length. Verify all fields are set correctly.
+     */
+    gc_init();
+    ObjString *str = obj_string_new("hello", 5);
+    ASSERT(str != NULL, "obj_string_new should return non-NULL");
+    ASSERT(strcmp(str->chars, "hello") == 0, "chars should equal 'hello'");
+    ASSERT(str->length == 5, "length should be 5");
+    ASSERT(str->hash != 0, "hash should be non-zero for 'hello'");
+    ASSERT(OBJ_TYPE(str) == OBJ_STRING, "obj type should be OBJ_STRING");
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_obj_string_take) {
+    /*
+     * obj_string_take takes ownership of an existing heap-allocated
+     * char* buffer instead of copying. Verify it wraps correctly
+     * and the chars pointer is the same buffer we passed in.
+     */
+    gc_init();
+    char *buf = strdup("world");
+    char *original_ptr = buf;
+    ObjString *str = obj_string_take(buf, 5);
+    ASSERT(str != NULL, "obj_string_take should return non-NULL");
+    ASSERT(str->chars == original_ptr, "chars should be the same pointer we passed in");
+    ASSERT(strcmp(str->chars, "world") == 0, "chars should equal 'world'");
+    ASSERT(str->length == 5, "length should be 5");
+    ASSERT(str->hash != 0, "hash should be non-zero for 'world'");
+    ASSERT(OBJ_TYPE(str) == OBJ_STRING, "obj type should be OBJ_STRING");
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_obj_string_hash_consistency) {
+    /*
+     * Two ObjStrings created with identical content should have
+     * the same hash value. This is required for future interning
+     * and for correctness of hash-based comparisons.
+     */
+    gc_init();
+    ObjString *a = obj_string_new("consistent", 10);
+    ObjString *b = obj_string_new("consistent", 10);
+    ASSERT(a->hash == b->hash, "same content should produce same hash");
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_obj_string_hash_different) {
+    /*
+     * Two ObjStrings with different content should (with very high
+     * probability) have different hashes. Use known distinct strings
+     * to make this deterministic in practice.
+     */
+    gc_init();
+    ObjString *a = obj_string_new("alpha", 5);
+    ObjString *b = obj_string_new("beta", 4);
+    ASSERT(a->hash != b->hash, "different content should produce different hashes");
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_make_string_returns_val_string) {
+    /*
+     * make_string() wraps a heap-allocated char* in an ObjString
+     * and returns a Value with type VAL_STRING. The string content
+     * should be accessible via v.string->chars.
+     */
+    gc_init();
+    Value v = make_string(strdup("testing"));
+    ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
+    ASSERT(v.string != NULL, "string field should be non-NULL");
+    ASSERT(strcmp(v.string->chars, "testing") == 0, "string->chars should match input");
+    ASSERT(v.string->length == 7, "string->length should be 7");
+    value_free(&v);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_value_clone_string_independent) {
+    /*
+     * Cloning a VAL_STRING value should produce an independent copy.
+     * Freeing the original should not affect the clone's string data.
+     */
+    gc_init();
+    Value original = make_string(strdup("original"));
+    Value clone;
+    bool ok = value_clone(&clone, &original);
+    ASSERT(ok, "clone should succeed");
+    ASSERT(clone.type == VAL_STRING, "clone type should be VAL_STRING");
+    ASSERT(clone.string != original.string, "clone should have a different ObjString");
+    ASSERT(strcmp(clone.string->chars, "original") == 0, "clone chars should match");
+
+    /* Free the original — clone should remain valid. */
+    value_free(&original);
+    ASSERT(strcmp(clone.string->chars, "original") == 0,
+           "clone chars should still be valid after freeing original");
+
+    value_free(&clone);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_value_free_string) {
+    /*
+     * Create and free a string Value. This test relies on sanitizers
+     * (ASan/MSan) to detect leaks or use-after-free. If this test
+     * passes under sanitizers, the memory management is correct.
+     */
+    gc_init();
+    Value v = make_string(strdup("ephemeral"));
+    ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
+    ASSERT(v.string != NULL, "string should be non-NULL before free");
+    value_free(&v);
+    /* After free, the string pointer should be NULL. */
+    ASSERT(v.string == NULL, "string should be NULL after free");
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_value_equal_strings_via_objstring) {
+    /*
+     * Two VAL_STRING values with the same content should be equal
+     * (via value_equal). This tests that equality works through
+     * the ObjString layer.
+     */
+    gc_init();
+    Value a = make_string(strdup("same"));
+    Value b = make_string(strdup("same"));
+    ASSERT(value_equal(&a, &b) == true, "strings with same content should be equal");
+
+    Value c = make_string(strdup("different"));
+    ASSERT(value_equal(&a, &c) == false, "strings with different content should not be equal");
+
+    value_free(&a);
+    value_free(&b);
+    value_free(&c);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_make_error_uses_error_field) {
+    /*
+     * make_error() should produce a Value with type VAL_ERROR and
+     * the error message stored in the `error` field (a plain char*),
+     * not in the `string` field (which is now ObjString*).
+     */
+    gc_init();
+    Value v = make_error("oops");
+    ASSERT(v.type == VAL_ERROR, "type should be VAL_ERROR");
+    ASSERT(v.error != NULL, "error field should be non-NULL");
+    ASSERT(strcmp(v.error, "oops") == 0, "error should contain 'oops'");
+    /* The string field should be NULL for errors — errors don't use ObjString. */
+    ASSERT(v.string == NULL, "string field should be NULL for errors");
+    value_free(&v);
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -860,6 +1035,19 @@ int main(void) {
     RUN_TEST(test_value_equal_maps_empty);
     RUN_TEST(test_value_equal_maps_same_backing);
     RUN_TEST(test_value_equal_map_vs_nonmap);
+
+    printf("\nObjString creation and properties:\n");
+    RUN_TEST(test_obj_string_new);
+    RUN_TEST(test_obj_string_take);
+    RUN_TEST(test_obj_string_hash_consistency);
+    RUN_TEST(test_obj_string_hash_different);
+
+    printf("\nObjString Value integration:\n");
+    RUN_TEST(test_make_string_returns_val_string);
+    RUN_TEST(test_value_clone_string_independent);
+    RUN_TEST(test_value_free_string);
+    RUN_TEST(test_value_equal_strings_via_objstring);
+    RUN_TEST(test_make_error_uses_error_field);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
