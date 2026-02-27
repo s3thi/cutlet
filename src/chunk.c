@@ -155,6 +155,10 @@ const char *opcode_name(OpCode op) {
         return "OP_LOOP";
     case OP_POP:
         return "OP_POP";
+    case OP_DUP:
+        return "OP_DUP";
+    case OP_SWAP:
+        return "OP_SWAP";
     case OP_GET_LOCAL:
         return "OP_GET_LOCAL";
     case OP_SET_LOCAL:
@@ -299,6 +303,8 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
     case OP_IN:
     case OP_NOT:
     case OP_POP:
+    case OP_DUP:
+    case OP_SWAP:
     case OP_CLOSE_UPVALUE:
     case OP_INDEX_GET:
     case OP_INDEX_SET:

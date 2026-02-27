@@ -1260,6 +1260,64 @@ static void compile_vectorize(Compiler *c, const AstNode *node) {
     emit_byte(c, OP_VECTORIZE_CALL, line);
 }
 
+/*
+ * Compile a method call: obj.method(args)
+ *
+ * The AST_METHOD_CALL node has:
+ *   left       = receiver expression (the object/map)
+ *   value      = method name string
+ *   children[] = explicit argument expressions
+ *
+ * Emitted bytecode:
+ *   1. Compile receiver      → stack: [obj]
+ *   2. OP_DUP                → stack: [obj, obj']
+ *   3. OP_CONSTANT <method>  → stack: [obj, obj', "method"]
+ *   4. OP_INDEX_GET          → stack: [obj, fn]
+ *   5. OP_SWAP               → stack: [fn, obj]   (self is first arg)
+ *   6. Compile each explicit arg → stack: [fn, obj, arg1, arg2, ...]
+ *   7. OP_CALL argc+1        → stack: [result]
+ *
+ * The function receives the map as its first parameter ("self"),
+ * followed by any explicit arguments.
+ */
+static void compile_method_call(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* 1. Compile receiver — pushes the map onto the stack. */
+    compile_node(c, node->left);
+
+    /* 2. OP_DUP — one copy for the method lookup, one stays as self. */
+    emit_byte(c, OP_DUP, line);
+
+    /* 3. Push method name as a string constant. */
+    char *method_name = compiler_strdup(c, node->value);
+    if (!method_name)
+        return; /* compiler_strdup already set the error. */
+    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(method_name));
+    if (name_idx < 0) {
+        compiler_error(c, "too many constants");
+        return;
+    }
+    emit_bytes(c, OP_CONSTANT, (uint8_t)name_idx, line);
+
+    /* 4. OP_INDEX_GET — pops method name and object copy, pushes the function.
+     * Stack: [obj, fn] */
+    emit_byte(c, OP_INDEX_GET, line);
+
+    /* 5. OP_SWAP — puts callee below self argument.
+     * Stack: [fn, obj] */
+    emit_byte(c, OP_SWAP, line);
+
+    /* 6. Compile explicit arguments (pushed after self). */
+    for (size_t i = 0; i < node->child_count; i++) {
+        compile_node(c, node->children[i]);
+    }
+
+    /* 7. OP_CALL with argc = explicit args + 1 (self).
+     * The function's first parameter receives the map (self). */
+    emit_bytes(c, OP_CALL, (uint8_t)(node->child_count + 1), line);
+}
+
 /* Compile any AST node by dispatching on its type. */
 static void compile_node(Compiler *c, const AstNode *node) {
     if (c->had_error)
@@ -1338,6 +1396,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_VECTORIZE:
         compile_vectorize(c, node);
+        break;
+    case AST_METHOD_CALL:
+        compile_method_call(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

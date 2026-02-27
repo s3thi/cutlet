@@ -69,7 +69,9 @@ typedef enum {
     OP_LOOP,          /* Backward jump. Operand: 2-byte offset to subtract from IP */
 
     /* Stack management */
-    OP_POP, /* Discard TOS */
+    OP_POP,  /* Discard TOS */
+    OP_DUP,  /* Clone and push TOS. Stack: [..., a] -> [..., a, a']. */
+    OP_SWAP, /* Swap TOS and TOS-1. Stack: [..., a, b] -> [..., b, a]. No clone. */
 
     /* Local variables (stack-slot based, used inside functions) */
     OP_GET_LOCAL, /* Operand: 1-byte slot index. Push clone of frame->slots[slot]. */

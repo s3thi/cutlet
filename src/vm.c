@@ -1400,6 +1400,36 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_DUP: {
+            /* Clone TOS and push the clone. Ownership is shared via refcount. */
+            Value top;
+            if (!vm_peek(vm, 0, &top)) {
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            Value clone;
+            if (!value_clone(&clone, &top)) {
+                return vm_runtime_error(vm, "memory allocation failed");
+            }
+            if (!vm_push(vm, clone)) {
+                value_free(&clone);
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
+        case OP_SWAP: {
+            /* Swap TOS and TOS-1 in place. No cloning needed. */
+            if (vm->stack_top - vm->stack < 2) {
+                return vm_runtime_error(vm, "stack underflow");
+            }
+            Value *a = vm->stack_top - 1;
+            Value *b = vm->stack_top - 2;
+            Value tmp = *a;
+            *a = *b;
+            *b = tmp;
+            break;
+        }
+
         case OP_CLOSE_UPVALUE: {
             /* Close the upvalue pointing at TOS, then pop and free the
              * value (same effect as OP_POP but closes first). Used by
