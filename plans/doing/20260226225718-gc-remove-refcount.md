@@ -308,6 +308,52 @@ compilation errors and behavioral consequences.
 
 **All tests pass. Format check passes. Lint warnings are pre-existing (not in modified files).**
 
+### Step 3: Simplify value_clone — pointer copies only ✅
+
+**Completed as part of Step 2 (2026-02-27).**
+
+`value_clone()` was rewritten as a shallow copy (`*out = *src`), with only `VAL_ERROR`
+deep-copied via `strdup`. All GC-managed types (function, closure, array, map, string)
+are simple pointer copies — the GC keeps the objects alive.
+
+### Step 4: Simplify value_free — no-op for GC types ✅
+
+**Completed as part of Step 2 (2026-02-27).**
+
+`value_free()` was rewritten as a no-op for GC-managed types (just nulls out pointers).
+Only `VAL_ERROR` has non-GC heap data that needs freeing (the error message string).
+The GC sweep handles freeing all GC-managed objects via `free_object_contents()` in `gc.c`.
+
+### Step 5: Remove COW infrastructure and update VM ✅
+
+**Completed as part of Step 2 (2026-02-27).**
+
+- Removed `obj_array_ensure_owned()` and `obj_map_ensure_owned()` from `value.h` and `value.c`.
+- Removed COW calls from OP_INDEX_SET handler in `vm.c`.
+- `native_push()` and `native_pop()` now mutate arrays in-place (reference semantics).
+- Removed refcount bumps from `capture_upvalue()`, OP_CLOSURE handler, and `close_upvalues()`.
+
+### Step 6: Simplify the runtime globals table ✅
+
+**Completed 2026-02-27.**
+
+Updated `src/runtime.c` to reflect GC-based semantics and simplified code flow:
+
+**`runtime_var_define()`**: Eliminated temporary `cloned` variable. Now calls
+`value_free()` on the old value (no-op for GC types) then `value_clone()` directly
+into `entry->value`. For new entries, clones directly into the table slot.
+
+**`runtime_var_assign()`**: Same simplification — `value_free()` old value then
+`value_clone()` directly into the entry. No temporary needed.
+
+**`runtime_var_get()`**: Added comment documenting that `value_clone()` is now a
+shallow pointer copy for GC types. No code change needed.
+
+**`var_table_clear()`**: Added comment documenting that `value_free()` is a no-op
+for GC types — actual object cleanup happens in `gc_free_all()`.
+
+**All tests pass. Format check passes. Lint warnings are pre-existing (not in modified files).**
+
 ---
 
 End of plan.

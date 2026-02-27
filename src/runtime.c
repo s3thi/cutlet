@@ -104,7 +104,9 @@ static bool var_table_resize(size_t new_cap) {
     return true;
 }
 
-/* Clear all entries in the variable table. */
+/* Clear all entries in the variable table.
+ * value_free() is a no-op for GC-managed types (just nulls pointers).
+ * The actual GC-managed objects are freed later by gc_free_all(). */
 static void var_table_clear(void) {
     for (size_t i = 0; i < var_table_cap; i++) {
         if (var_table[i].name != NULL) {
@@ -218,6 +220,10 @@ void runtime_eval_unlock(void) {
     pthread_rwlock_unlock(&eval_lock);
 }
 
+/* Look up a global variable by name.
+ * Returns a shallow copy of the stored Value via value_clone().
+ * For GC-managed types this is just a pointer copy — the GC keeps
+ * the object alive. Only VAL_ERROR requires a deep copy (strdup). */
 RuntimeVarStatus runtime_var_get(const char *name, Value *out) {
     runtime_init();
     VarEntry *entry = var_table_find(name);
@@ -228,17 +234,21 @@ RuntimeVarStatus runtime_var_get(const char *name, Value *out) {
     return RUNTIME_VAR_OK;
 }
 
+/* Define (or redefine) a global variable.
+ * Stores a shallow copy of the Value via value_clone(). For GC-managed
+ * types this is just a pointer copy — the GC keeps the object alive.
+ * value_free() on the old value is a no-op for GC types (just nulls
+ * pointers); only VAL_ERROR needs actual cleanup (freeing the message). */
 RuntimeVarStatus runtime_var_define(const char *name, const Value *value) {
     runtime_init();
 
     /* Check if already exists (overwrite). */
     VarEntry *entry = var_table_find(name);
     if (entry) {
-        Value cloned;
-        if (!value_clone(&cloned, value))
-            return RUNTIME_VAR_OOM;
+        /* Free old value (no-op for GC types), then shallow-copy new value. */
         value_free(&entry->value);
-        entry->value = cloned;
+        if (!value_clone(&entry->value, value))
+            return RUNTIME_VAR_OOM;
         return RUNTIME_VAR_OK;
     }
 
@@ -246,34 +256,33 @@ RuntimeVarStatus runtime_var_define(const char *name, const Value *value) {
     if (!var_table_ensure_capacity())
         return RUNTIME_VAR_OOM;
 
-    Value cloned;
-    if (!value_clone(&cloned, value))
-        return RUNTIME_VAR_OOM;
-
     char *name_dup = strdup(name);
-    if (!name_dup) {
-        value_free(&cloned);
+    if (!name_dup)
         return RUNTIME_VAR_OOM;
-    }
 
     size_t slot = var_table_find_slot(var_table, var_table_cap, name);
     var_table[slot].name = name_dup;
-    var_table[slot].value = cloned;
+    if (!value_clone(&var_table[slot].value, value)) {
+        free(name_dup);
+        var_table[slot].name = NULL;
+        return RUNTIME_VAR_OOM;
+    }
     var_table_count++;
     return RUNTIME_VAR_OK;
 }
 
+/* Assign a new value to an existing global variable.
+ * Same simplification as runtime_var_define(): value_free() is a no-op
+ * for GC types, and value_clone() is a shallow pointer copy. */
 RuntimeVarStatus runtime_var_assign(const char *name, const Value *value) {
     runtime_init();
     VarEntry *entry = var_table_find(name);
     if (!entry)
         return RUNTIME_VAR_NOT_FOUND;
 
-    Value cloned;
-    if (!value_clone(&cloned, value))
-        return RUNTIME_VAR_OOM;
-
+    /* Free old value (no-op for GC types), then shallow-copy new value. */
     value_free(&entry->value);
-    entry->value = cloned;
+    if (!value_clone(&entry->value, value))
+        return RUNTIME_VAR_OOM;
     return RUNTIME_VAR_OK;
 }
