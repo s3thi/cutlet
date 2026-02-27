@@ -275,6 +275,21 @@ static void assert_vm_formatted(const char *input, const char *expected, const c
     (void)label;
 }
 
+/* Helper: run input, verify the result is NOT an error (any other type is OK). */
+static void assert_vm_not_error(const char *input, const char *label) {
+    Value v = run_input(input, &test_ctx);
+    if (v.type == VAL_ERROR) {
+        printf("FAIL\n    expected no error for '%s', got error\n", input);
+        value_free(&v);
+        tests_failed++;
+        return;
+    }
+    value_free(&v);
+    printf("PASS\n");
+    tests_passed++;
+    (void)label;
+}
+
 /* ============================================================
  * Basic arithmetic
  * ============================================================ */
@@ -3480,6 +3495,36 @@ TEST(test_method_call_not_callable) {
 TEST(test_dot_on_non_map) { assert_vm_error("42.name", "dot on non-map"); }
 
 /* ============================================================
+ * Dot access + method call integration / edge cases
+ * ============================================================ */
+
+/* Dot access works together with `in` operator. */
+TEST(test_dot_access_with_in) {
+    assert_vm_bool("my obj = {name: \"alice\"}\n\"name\" in obj and obj.name == \"alice\"", true,
+                   "dot access works with in");
+}
+
+/* Bracket index after dot access: obj.items[1] chains correctly. */
+TEST(test_dot_then_bracket_index) {
+    assert_vm_number("my obj = {items: [1, 2, 3]}\nobj.items[1]", 2.0,
+                     "bracket index after dot access");
+}
+
+/* Chained method calls returning self — should not error. */
+TEST(test_chained_method_calls_returning_self) {
+    assert_vm_not_error("my obj = {f: fn(self) is self end}\nobj.f().f().f()",
+                        "chained method calls returning self");
+}
+
+/* Function assigned from variable, called as method. */
+TEST(test_method_call_fn_from_variable) {
+    assert_vm_number("my f = fn(self, a, b) is a + b end\n"
+                     "my obj = {calc: f}\n"
+                     "obj.calc(10, 20)",
+                     30.0, "function from variable called as method");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4220,6 +4265,13 @@ int main(void) {
     RUN_TEST(test_method_call_missing_key);
     RUN_TEST(test_method_call_not_callable);
     RUN_TEST(test_dot_on_non_map);
+
+    /* ---- Dot access + method call integration / edge cases ---- */
+    printf("\nDot access + method call integration:\n");
+    RUN_TEST(test_dot_access_with_in);
+    RUN_TEST(test_dot_then_bracket_index);
+    RUN_TEST(test_chained_method_calls_returning_self);
+    RUN_TEST(test_method_call_fn_from_variable);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

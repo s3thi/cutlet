@@ -1384,6 +1384,40 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Dot access and method calls — end-to-end
+# ============================================================
+echo
+echo "Dot access and method calls (end-to-end):"
+
+# Basic dot access in REPL
+test_local_repl "dot access get" '{name: "alice"}.name' "alice"
+
+# Dot set then dot get — REPL prints each expression result
+test_local_repl "dot access set" "$(printf 'my o = {x: 1}\no.x = 2\no.x')" "$(printf '{x: 1}\n2\n2')"
+
+# --ast output for dot access shows INDEX and STRING nodes
+ast_dot_result=$(printf 'obj.name' | "$CUTLET" repl --ast 2>/dev/null)
+if echo "$ast_dot_result" | grep -qF "INDEX" && echo "$ast_dot_result" | grep -qF "STRING"; then
+    echo "  PASS: --ast shows INDEX and STRING for dot access"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows INDEX and STRING for dot access"
+    echo "    Got: $ast_dot_result"
+    FAIL=$((FAIL + 1))
+fi
+
+# --bytecode output for method call shows OP_DUP and OP_SWAP
+bc_method_result=$(printf 'my obj = {f: fn(self) is self end}\nobj.f()' | "$CUTLET" repl --bytecode 2>/dev/null)
+if echo "$bc_method_result" | grep -qF "OP_DUP" && echo "$bc_method_result" | grep -qF "OP_SWAP"; then
+    echo "  PASS: --bytecode shows OP_DUP and OP_SWAP for method call"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_DUP and OP_SWAP for method call"
+    echo "    Got: $bc_method_result"
+    FAIL=$((FAIL + 1))
+fi
+
 # cutlet run with no filename shows error
 set +e
 no_file_stderr=$("$CUTLET" run 2>&1 1>/dev/null)

@@ -1179,6 +1179,146 @@ end
 squares                     # => {1: 1, 2: 4, 3: 9, 4: 16, 5: 25}
 ```
 
+## 13b. Dot access and method calls
+
+Dot access is syntactic sugar for bracket indexing on maps. Instead of
+`person["name"]`, you can write `person.name`.
+
+### Dot access: get
+
+`obj.name` is equivalent to `obj["name"]`:
+
+```cutlet
+my person = {name: "alice", age: 30}
+person.name             # => alice
+person.age              # => 30
+```
+
+Missing keys return `nothing`, same as bracket indexing:
+
+```cutlet
+person.email            # => nothing
+```
+
+Dot on a non-map is a runtime error:
+
+```cutlet
+# 42.name              # => ERR index-get requires array or map
+```
+
+### Dot access: set
+
+`obj.name = value` is equivalent to `obj["name"] = value`:
+
+```cutlet
+my obj = {name: "old"}
+obj.name = "new"
+obj.name                # => new
+```
+
+You can add new keys this way too:
+
+```cutlet
+my obj = {a: 1}
+obj.b = 2
+obj.b                   # => 2
+```
+
+### Chaining
+
+Dot access chains naturally. `a.b.c` is equivalent to `a["b"]["c"]`:
+
+```cutlet
+my data = {user: {name: "alice"}}
+data.user.name          # => alice
+```
+
+You can mix dot and bracket syntax freely:
+
+```cutlet
+my obj = {items: [10, 20, 30]}
+obj.items[1]            # => 20
+```
+
+### Method calls
+
+When a map stores a function, you can call it with dot syntax. The map is
+automatically passed as the first argument, so the function's first parameter
+acts as `self`.
+
+Define a method by giving it a `self` parameter:
+
+```cutlet
+my dog = {
+  name: "rex",
+  speak: fn(self) is
+    "woof! I am " ++ self.name
+  end,
+}
+say(dog.speak())        # prints: woof! I am rex
+```
+
+`obj.method(args)` is equivalent to looking up `obj["method"]` and calling it
+with `obj` prepended to the arguments: `obj["method"](obj, args)`.
+
+Methods with arguments:
+
+```cutlet
+my calc = {
+  x: 10,
+  add: fn(self, n) is self.x + n end,
+}
+say(calc.add(5))        # prints: 15
+```
+
+Methods can access any field on `self`:
+
+```cutlet
+my point = {
+  x: 3,
+  y: 4,
+  magnitude: fn(self) is (self.x ** 2 + self.y ** 2) ** 0.5 end,
+}
+say(point.magnitude())  # prints: 5
+```
+
+### Chaining with method calls
+
+Dot access and method calls can be chained together. The receiver of the
+method call is the result of the preceding expression:
+
+```cutlet
+my inner = {val: 42, get: fn(self) is self.val end}
+my outer = {inner: inner}
+outer.inner.get()       # => 42
+```
+
+A method can return a map to enable fluent chaining:
+
+```cutlet
+my obj = {
+  name: "alice",
+  greet: fn(self) is
+    say("hello " ++ self.name)
+    self
+  end,
+}
+obj.greet().greet()
+# prints: hello alice
+# prints: hello alice
+```
+
+### Functions from variables as methods
+
+A function doesn't have to be defined inline. You can store any function in
+a map and call it as a method:
+
+```cutlet
+my greet = fn(self) is "hi, " ++ self.name end
+my person = {name: "alice", greet: greet}
+person.greet()          # => hi, alice
+```
+
 ## 14. Membership testing with `in`
 
 `in` tests whether a value is a member of a collection. It works with maps (key lookup), arrays (element search), and strings (substring search).

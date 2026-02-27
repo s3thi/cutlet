@@ -1,0 +1,49 @@
+# Dot access and method calls on maps
+#
+# Dot access is syntactic sugar for bracket indexing:
+#   obj.name  is the same as  obj["name"]
+
+# --- Dot access: get ---
+my person = {name: "alice", age: 30}
+say(person.name)
+say(person.age)
+
+# --- Dot access: set ---
+person.name = "bob"
+say(person.name)
+
+# --- Chaining ---
+my data = {user: {name: "charlie", scores: {math: 95, english: 88}}}
+say(data.user.name)
+say(data.user.scores.math)
+
+# --- Method calls ---
+# A method is a function stored in a map. When called with dot syntax,
+# the map is automatically passed as the first argument (self).
+
+my dog = {
+  name: "rex",
+  speak: fn(self) is
+    "woof! I am " ++ self.name
+  end,
+  rename: fn(self, new-name) is
+    {name: new-name, speak: self.speak, rename: self.rename}
+  end,
+}
+
+say(dog.speak())
+say(dog.rename("max").speak())
+
+# --- Method with multiple arguments ---
+my calc = {
+  value: 0,
+  add: fn(self, a, b) is
+    a + b + self.value
+  end,
+}
+say(calc.add(10, 20))
+
+# --- Function assigned from a variable, called as method ---
+my greet-fn = fn(self) is "hello, " ++ self.name end
+my obj = {name: "dana", greet: greet-fn}
+say(obj.greet())
