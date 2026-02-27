@@ -340,8 +340,9 @@ Value make_map(ObjMap *m);
 /*
  * Compare two values for equality. Used by map key lookup and by
  * the VM's equality operators. Handles all value types including
- * VAL_ARRAY (structural equality). VAL_MAP equality is added in a
- * later step.
+ * VAL_ARRAY and VAL_MAP (structural equality).
+ * For VAL_STRING: O(1) pointer comparison thanks to string interning —
+ * identical content always maps to the same ObjString*.
  */
 bool value_equal(const Value *a, const Value *b);
 
@@ -350,6 +351,8 @@ bool value_equal(const Value *a, const Value *b);
 /*
  * Free any heap-allocated memory in a Value.
  * Safe to call on zero-initialized Values.
+ * For VAL_STRING: no-op (just nulls the pointer). The GC manages
+ *   ObjString lifetime; interned strings are shared across Values.
  * For VAL_FUNCTION: decrements refcount; frees ObjFunction when 0.
  * For VAL_CLOSURE: decrements refcount; frees ObjClosure when 0.
  * For VAL_ARRAY: decrements refcount; frees ObjArray + elements when 0.
@@ -384,6 +387,8 @@ bool is_truthy(const Value *v);
 
 /*
  * Clone a Value.
+ * For VAL_STRING: copies the ObjString* pointer directly (no allocation).
+ *   Interned strings are shared and the GC manages their lifetime.
  * For VAL_FUNCTION: increments refcount (shared, not deep-copied).
  * For VAL_CLOSURE: increments closure refcount (shared upvalues).
  * For VAL_ARRAY: increments refcount (shallow copy, structural sharing).

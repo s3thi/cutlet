@@ -327,7 +327,9 @@ static void obj_array_free(ObjArray *arr) {
     free(arr);
 }
 
-/* ---- Value equality (used by map key lookup and VM equality ops) ---- */
+/* ---- Value equality (used by map key lookup and VM equality ops) ----
+ * For VAL_STRING: O(1) pointer comparison thanks to string interning.
+ * Identical string content always maps to the same ObjString*. */
 
 bool value_equal(const Value *a, const Value *b) {
     if (a->type != b->type)
@@ -336,18 +338,11 @@ bool value_equal(const Value *a, const Value *b) {
     case VAL_NUMBER:
         return a->number == b->number;
     case VAL_STRING:
-        /* Compare via ObjString chars. Fast path: same pointer means equal. */
-        if (a->string == b->string)
-            return true;
-        if (!a->string || !b->string)
-            return false;
-        /* Hash shortcut: different hashes guarantee different content.
-         * Avoids expensive strcmp for strings that differ. */
-        if (a->string->hash != b->string->hash)
-            return false;
-        if (a->string->length != b->string->length)
-            return false;
-        return strcmp(a->string->chars, b->string->chars) == 0;
+        /* With string interning, identical content always maps to the same
+         * ObjString*, so pointer comparison is O(1) and definitive.
+         * This also handles the case where both are NULL (two null strings
+         * are trivially equal). No hash/length/strcmp fallback is needed. */
+        return a->string == b->string;
     case VAL_BOOL:
         return a->boolean == b->boolean;
     case VAL_NOTHING:
@@ -750,15 +745,10 @@ bool value_clone(Value *out, const Value *src) {
         return false;
     *out = *src;
     if (src->type == VAL_STRING) {
-        /* Deep-clone the ObjString: allocate a new GC-tracked ObjString
-         * with a copy of the character data. */
-        if (src->string) {
-            out->string = obj_string_new(src->string->chars, src->string->length);
-            if (!out->string)
-                return false;
-        } else {
-            out->string = NULL;
-        }
+        /* With string interning, all identical strings share one ObjString*.
+         * Just copy the pointer — no allocation or intern-table lookup needed.
+         * The GC keeps the ObjString alive as long as it's reachable. */
+        out->string = src->string;
     } else {
         out->string = NULL;
     }
