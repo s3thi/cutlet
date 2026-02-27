@@ -420,7 +420,7 @@ TEST(test_gc_mark_closure_traces_function_and_upvalues) {
     cl->refcount = 1;
     cl->function = fn;
     cl->upvalue_count = 1;
-    cl->upvalues = malloc(sizeof(ObjUpvalue *));
+    cl->upvalues = (ObjUpvalue **)malloc(sizeof(ObjUpvalue *));
     ASSERT(cl->upvalues != NULL, "upvalues array alloc should succeed");
     cl->upvalues[0] = uv;
 

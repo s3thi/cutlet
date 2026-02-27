@@ -111,6 +111,34 @@ void gc_free_all(void);
  */
 void gc_collect(void);
 
+/* ---- Mark phase ---- */
+
+/* Forward declaration of Value (defined in value.h). Needed here so
+ * gc_mark_value can accept a Value pointer without requiring value.h. */
+struct Value;
+
+/*
+ * Mark a single heap object as reachable and recursively trace its
+ * children. Safe to call with NULL (no-op). If the object is already
+ * marked, returns immediately to prevent infinite loops on cycles.
+ *
+ * Tracing rules by type:
+ *   OBJ_STRING:   leaf — no children.
+ *   OBJ_UPVALUE:  if closed (location == &closed), marks the closed Value.
+ *   OBJ_FUNCTION: iterates chunk->constants and marks each Value.
+ *   OBJ_CLOSURE:  marks the underlying function and each upvalue.
+ *   OBJ_ARRAY:    marks each element Value.
+ *   OBJ_MAP:      marks each key and value in entries.
+ */
+void gc_mark_object(Obj *obj);
+
+/*
+ * Mark the heap object (if any) inside a Value and recursively trace
+ * its children. Values that don't contain heap objects (VAL_NUMBER,
+ * VAL_BOOL, VAL_NOTHING, VAL_ERROR) are no-ops.
+ */
+void gc_mark_value(struct Value *v);
+
 /* ---- Test/inspection accessors ---- */
 
 /* Return the head of the global object list (for test inspection). */

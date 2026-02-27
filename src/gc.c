@@ -169,7 +169,139 @@ void gc_free_all(void) {
     gc.bytes_allocated = 0;
 }
 
-void gc_collect(void) { /* No-op stub. Mark-and-sweep will be implemented in a later task. */ }
+/*
+ * gc_mark_value - mark the heap object inside a Value (if any).
+ *
+ * Dispatches on the Value's type to extract the embedded Obj pointer
+ * and call gc_mark_object. Scalar types (number, bool, nothing, error)
+ * contain no heap objects and are no-ops.
+ */
+void gc_mark_value(Value *v) {
+    switch (v->type) {
+    case VAL_FUNCTION:
+        gc_mark_object((Obj *)v->function);
+        break;
+    case VAL_CLOSURE:
+        gc_mark_object((Obj *)v->closure);
+        break;
+    case VAL_ARRAY:
+        gc_mark_object((Obj *)v->array);
+        break;
+    case VAL_MAP:
+        gc_mark_object((Obj *)v->map);
+        break;
+    case VAL_STRING:
+        gc_mark_object((Obj *)v->string);
+        break;
+    case VAL_NUMBER:
+    case VAL_BOOL:
+    case VAL_NOTHING:
+    case VAL_ERROR:
+        /* Scalar/non-heap types — nothing to mark. */
+        break;
+    }
+}
+
+/*
+ * gc_mark_object - mark a heap object and recursively trace its children.
+ *
+ * If obj is NULL or already marked, returns immediately (cycle safety).
+ * Sets is_marked = true, then dispatches on obj->type to trace any
+ * child objects (Values, embedded pointers) that are reachable from
+ * this object.
+ *
+ * Note on recursion depth: deeply nested closures/arrays could cause
+ * deep recursion. For typical program depths this is fine. An explicit
+ * worklist (gray stack) could be added later if stack overflow becomes
+ * a concern.
+ */
+void gc_mark_object(Obj *obj) {
+    if (obj == NULL || obj->is_marked)
+        return;
+
+    obj->is_marked = true;
+
+    switch (obj->type) {
+    case OBJ_STRING:
+        /* Leaf object — no children to trace. */
+        break;
+
+    case OBJ_UPVALUE: {
+        ObjUpvalue *uv = (ObjUpvalue *)obj;
+        /* If the upvalue is closed (location points to the inline
+         * closed field), the closed value may reference heap objects. */
+        if (uv->location == &uv->closed)
+            gc_mark_value(&uv->closed);
+        break;
+    }
+
+    case OBJ_FUNCTION: {
+        ObjFunction *fn = (ObjFunction *)obj;
+        /* Native functions have chunk == NULL — nothing to trace.
+         * User-defined functions own a chunk whose constant pool
+         * may contain ObjStrings and ObjFunctions. */
+        if (fn->chunk != NULL) {
+            for (size_t i = 0; i < fn->chunk->const_count; i++)
+                gc_mark_value(&fn->chunk->constants[i]);
+        }
+        break;
+    }
+
+    case OBJ_CLOSURE: {
+        ObjClosure *cl = (ObjClosure *)obj;
+        /* Mark the underlying function. */
+        gc_mark_object((Obj *)cl->function);
+        /* Mark each captured upvalue. */
+        for (int i = 0; i < cl->upvalue_count; i++) {
+            if (cl->upvalues[i] != NULL)
+                gc_mark_object((Obj *)cl->upvalues[i]);
+        }
+        break;
+    }
+
+    case OBJ_ARRAY: {
+        ObjArray *arr = (ObjArray *)obj;
+        /* Mark each element value in the array's data. */
+        for (size_t i = 0; i < arr->count; i++)
+            gc_mark_value(&arr->data[i]);
+        break;
+    }
+
+    case OBJ_MAP: {
+        ObjMap *m = (ObjMap *)obj;
+        /* Mark each key-value pair in the map's entries. */
+        for (size_t i = 0; i < m->count; i++) {
+            gc_mark_value(&m->entries[i].key);
+            gc_mark_value(&m->entries[i].value);
+        }
+        break;
+    }
+    }
+}
+
+/*
+ * gc_collect - run a garbage collection cycle.
+ *
+ * Currently: no root marking (gc_mark_roots is added in step 3),
+ * but clears all is_marked flags on the object list so that tests
+ * for the mark-then-clear contract pass. No objects are freed yet
+ * (sweep is task 4).
+ *
+ * TODO: call gc_mark_roots() once implemented (step 3).
+ * TODO: sweep phase — see gc-sweep task.
+ */
+void gc_collect(void) {
+    /* Clear all marks on the object list.
+     * This is the "reset" phase: after marking roots (not yet
+     * implemented), we clear marks so objects start fresh for
+     * the next cycle. Once sweep is added, surviving objects'
+     * marks are cleared during sweep instead. */
+    Obj *obj = gc.objects;
+    while (obj) {
+        obj->is_marked = false;
+        obj = obj->next;
+    }
+}
 
 /* ---- Test/inspection accessors ---- */
 
