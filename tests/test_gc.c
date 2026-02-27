@@ -704,6 +704,100 @@ TEST(test_gc_mark_roots_marks_globals) {
 }
 
 /* ============================================================
+ * test_gc_mark_native_function_null_chunk: native ObjFunctions
+ * have chunk == NULL. gc_mark_object must handle this by
+ * skipping the constant pool iteration. Verify no crash.
+ * ============================================================ */
+
+TEST(test_gc_mark_native_function_null_chunk) {
+    gc_init();
+
+    /* Allocate an ObjFunction and simulate a native function
+     * (chunk == NULL, native != NULL). gc_alloc calloc-zeroes
+     * all fields, so chunk is already NULL. */
+    ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
+    ASSERT(fn != NULL, "fn alloc should succeed");
+    fn->refcount = 1;
+    fn->chunk = NULL; /* Explicitly: this is a native function. */
+
+    /* Mark the native function — should not crash or dereference
+     * fn->chunk. The OBJ_FUNCTION case in gc_mark_object guards
+     * with `if (fn->chunk != NULL)`. */
+    gc_mark_object((Obj *)fn);
+    ASSERT(fn->obj.is_marked == true, "native function should be marked");
+
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_mark_stack_allocated_script_objects: verify that
+ * stack-allocated ObjFunction and ObjClosure (as used by
+ * vm_execute's frame 0) can be safely marked via gc_mark_roots.
+ *
+ * These objects are NOT on the GC object list. gc_mark_object
+ * sets is_marked on them (harmless) and traces their children.
+ * The key correctness requirement is that the .obj.type field
+ * is set correctly so gc_mark_object dispatches to the right
+ * case (OBJ_CLOSURE, not OBJ_FUNCTION).
+ * ============================================================ */
+
+TEST(test_gc_mark_stack_allocated_script_objects) {
+    gc_init();
+
+    /* Simulate the stack-allocated script objects from vm_execute.
+     * The key difference from heap-allocated objects: these are NOT
+     * on the GC list (gc_alloc was not called). */
+    ObjFunction script_fn = {
+        .obj = {.type = OBJ_FUNCTION},
+        .refcount = 1,
+        .name = NULL,
+        .arity = 0,
+        .upvalue_count = 0,
+        .params = NULL,
+        .chunk = NULL, /* Simulating: no constants to trace. */
+        .native = NULL,
+    };
+
+    ObjClosure script_closure = {
+        .obj = {.type = OBJ_CLOSURE},
+        .refcount = 1,
+        .function = &script_fn,
+        .upvalues = NULL,
+        .upvalue_count = 0,
+    };
+
+    /* Set up a minimal VM with frame 0 pointing to the stack closure. */
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.stack_top = vm.stack;
+    vm.open_upvalues = NULL;
+    vm.frame_count = 1;
+    vm.frames[0].closure = &script_closure;
+    vm.frames[0].ip = NULL;
+    vm.frames[0].slots = vm.stack;
+
+    /* Register the VM and mark roots. */
+    gc_set_vm(&vm);
+    gc_mark_roots();
+
+    /* The stack-allocated closure and function should be marked.
+     * Since they're not on the GC list, they won't be cleared by
+     * gc_collect's clear phase — we check marks directly. */
+    ASSERT(script_closure.obj.is_marked == true, "stack-allocated script_closure should be marked");
+    ASSERT(script_fn.obj.is_marked == true,
+           "stack-allocated script_fn should be marked (via closure tracing)");
+
+    /* Verify they are NOT in the GC object list. */
+    ASSERT(!obj_in_list((Obj *)&script_closure), "script_closure should NOT be in the GC list");
+    ASSERT(!obj_in_list((Obj *)&script_fn), "script_fn should NOT be in the GC list");
+
+    gc_set_vm(NULL);
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -735,6 +829,10 @@ int main(void) {
     RUN_TEST(test_gc_mark_roots_marks_frame_closures);
     RUN_TEST(test_gc_mark_roots_marks_open_upvalues);
     RUN_TEST(test_gc_mark_roots_marks_globals);
+
+    printf("\nGC edge cases:\n");
+    RUN_TEST(test_gc_mark_native_function_null_chunk);
+    RUN_TEST(test_gc_mark_stack_allocated_script_objects);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

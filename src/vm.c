@@ -621,8 +621,15 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
     /* Create a "script" ObjFunction that wraps the top-level chunk.
      * This lives on the C stack — it's only used for the duration of
-     * this vm_execute() call. The chunk pointer is borrowed (not owned). */
+     * this vm_execute() call. The chunk pointer is borrowed (not owned).
+     *
+     * The .obj.type field must be explicitly initialized so that
+     * gc_mark_object() dispatches correctly when tracing this object
+     * through the VM's call frame closures. These stack-allocated
+     * objects are not on the GC object list, so they are never swept
+     * — marking them is harmless. */
     ObjFunction script_fn = {
+        .obj = {.type = OBJ_FUNCTION},
         .refcount = 1,
         .name = NULL,
         .arity = 0,
@@ -634,8 +641,10 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
 
     /* Wrap the script function in a stack-allocated ObjClosure with
      * 0 upvalues. No heap allocation needed — this closure lives on
-     * the C stack alongside script_fn for the duration of vm_execute(). */
+     * the C stack alongside script_fn for the duration of vm_execute().
+     * The .obj.type must be OBJ_CLOSURE for correct GC mark tracing. */
     ObjClosure script_closure = {
+        .obj = {.type = OBJ_CLOSURE},
         .refcount = 1,
         .function = &script_fn,
         .upvalues = NULL,
