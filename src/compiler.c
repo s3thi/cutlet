@@ -7,6 +7,7 @@
  */
 
 #include "compiler.h"
+#include "gc.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1021,7 +1022,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
 
     /* Build the ObjFunction.
      * For anonymous functions (node->value == NULL), fn->name is NULL. */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     if (!fn) {
         compiler_error(c, "memory allocation failed");
         chunk_free(body_chunk);

@@ -7,6 +7,7 @@
 
 #include "value.h"
 #include "chunk.h"
+#include "gc.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -33,7 +34,7 @@ Value make_function(ObjFunction *fn) {
 }
 
 Value make_native(const char *name, int arity, NativeFn fn) {
-    ObjFunction *obj = calloc(1, sizeof(ObjFunction));
+    ObjFunction *obj = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     if (!obj)
         return make_error("memory allocation failed");
     obj->name = strdup(name);
@@ -60,7 +61,7 @@ Value make_closure(ObjClosure *cl) { return (Value){.type = VAL_CLOSURE, .closur
 Value make_array(ObjArray *arr) { return (Value){.type = VAL_ARRAY, .array = arr}; }
 
 ObjUpvalue *obj_upvalue_new(Value *slot) {
-    ObjUpvalue *uv = calloc(1, sizeof(ObjUpvalue));
+    ObjUpvalue *uv = gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
     if (!uv)
         return NULL;
     uv->refcount = 1;
@@ -84,7 +85,7 @@ void obj_upvalue_free(ObjUpvalue *uv) {
 }
 
 ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
-    ObjClosure *cl = calloc(1, sizeof(ObjClosure));
+    ObjClosure *cl = gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     if (!cl)
         return NULL;
     cl->refcount = 1;
@@ -152,7 +153,7 @@ void obj_function_free(ObjFunction *fn) {
 /* ---- ObjArray utilities ---- */
 
 ObjArray *obj_array_new(void) {
-    ObjArray *arr = calloc(1, sizeof(ObjArray));
+    ObjArray *arr = gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     if (!arr)
         return NULL;
     arr->refcount = 1;
@@ -279,7 +280,7 @@ bool value_equal(const Value *a, const Value *b) {
 /* ---- ObjMap utilities ---- */
 
 ObjMap *obj_map_new(void) {
-    ObjMap *m = calloc(1, sizeof(ObjMap));
+    ObjMap *m = gc_alloc(OBJ_MAP, sizeof(ObjMap));
     if (!m)
         return NULL;
     m->refcount = 1;
