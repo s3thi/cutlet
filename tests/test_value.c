@@ -950,6 +950,78 @@ TEST(test_value_equal_strings_via_objstring) {
     PASS();
 }
 
+TEST(test_make_string_copy) {
+    /*
+     * make_string_copy() creates a VAL_STRING by copying a const char*
+     * buffer rather than taking ownership. The original buffer remains
+     * valid and independently freeable.
+     */
+    gc_init();
+    const char *original = "hello copy";
+    Value v = make_string_copy(original, strlen(original));
+    ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
+    ASSERT(v.string != NULL, "string should be non-NULL");
+    ASSERT(v.string->length == strlen(original), "length should match");
+    ASSERT(strcmp(v.string->chars, original) == 0, "content should match");
+    /* The chars buffer should be a different pointer (a copy, not the original). */
+    ASSERT(v.string->chars != original, "should be a copy, not the same pointer");
+    ASSERT(v.string->hash != 0, "hash should be computed");
+    value_free(&v);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_make_string_copy_null) {
+    /*
+     * make_string_copy() with NULL input should produce a valid
+     * VAL_STRING representing an empty string.
+     */
+    gc_init();
+    Value v = make_string_copy(NULL, 0);
+    ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
+    ASSERT(v.string != NULL, "string should be non-NULL");
+    ASSERT(v.string->length == 0, "length should be 0");
+    ASSERT(strcmp(v.string->chars, "") == 0, "should be empty string");
+    value_free(&v);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_make_string_copy_zero_length) {
+    /*
+     * make_string_copy() with a non-NULL pointer but zero length
+     * should produce an empty string.
+     */
+    gc_init();
+    Value v = make_string_copy("ignored", 0);
+    ASSERT(v.type == VAL_STRING, "type should be VAL_STRING");
+    ASSERT(v.string != NULL, "string should be non-NULL");
+    ASSERT(v.string->length == 0, "length should be 0");
+    ASSERT(v.string->chars[0] == '\0', "should be empty string");
+    value_free(&v);
+    gc_free_all();
+    PASS();
+}
+
+TEST(test_value_equal_hash_shortcircuit) {
+    /*
+     * value_equal() for VAL_STRING should use hash comparison as a
+     * fast-path: if hashes differ, strings are definitely not equal.
+     * We verify this indirectly: two strings with different content
+     * (and thus different hashes) should compare as not equal.
+     */
+    gc_init();
+    Value a = make_string(strdup("alpha"));
+    Value b = make_string(strdup("beta"));
+    /* Hashes should be different for these distinct strings. */
+    ASSERT(a.string->hash != b.string->hash, "hashes should differ for distinct strings");
+    ASSERT(value_equal(&a, &b) == false, "strings with different hashes should not be equal");
+    value_free(&a);
+    value_free(&b);
+    gc_free_all();
+    PASS();
+}
+
 TEST(test_make_error_uses_error_field) {
     /*
      * make_error() should produce a Value with type VAL_ERROR and
@@ -1047,6 +1119,15 @@ int main(void) {
     RUN_TEST(test_value_clone_string_independent);
     RUN_TEST(test_value_free_string);
     RUN_TEST(test_value_equal_strings_via_objstring);
+
+    printf("\nmake_string_copy:\n");
+    RUN_TEST(test_make_string_copy);
+    RUN_TEST(test_make_string_copy_null);
+    RUN_TEST(test_make_string_copy_zero_length);
+
+    printf("\nvalue_equal hash optimization:\n");
+    RUN_TEST(test_value_equal_hash_shortcircuit);
+
     RUN_TEST(test_make_error_uses_error_field);
 
     printf("\n========================================\n");

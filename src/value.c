@@ -26,6 +26,20 @@ Value make_string(char *s) {
     return (Value){.type = VAL_STRING, .string = str};
 }
 
+/*
+ * Create a string Value by copying `s` (len bytes).
+ * The caller retains ownership of the original buffer.
+ * If s is NULL, creates an ObjString wrapping an empty string.
+ */
+Value make_string_copy(const char *s, size_t len) {
+    if (!s) {
+        s = "";
+        len = 0;
+    }
+    ObjString *str = obj_string_new(s, len);
+    return (Value){.type = VAL_STRING, .string = str};
+}
+
 Value make_bool(bool b) { return (Value){.type = VAL_BOOL, .boolean = b}; }
 
 Value make_nothing(void) { return (Value){.type = VAL_NOTHING}; }
@@ -297,6 +311,10 @@ bool value_equal(const Value *a, const Value *b) {
         if (a->string == b->string)
             return true;
         if (!a->string || !b->string)
+            return false;
+        /* Hash shortcut: different hashes guarantee different content.
+         * Avoids expensive strcmp for strings that differ. */
+        if (a->string->hash != b->string->hash)
             return false;
         if (a->string->length != b->string->length)
             return false;

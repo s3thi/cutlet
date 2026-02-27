@@ -230,6 +230,13 @@ Value make_number(double n);
 /* Create a string Value (takes ownership of s). */
 Value make_string(char *s);
 
+/*
+ * Create a string Value by copying `s` (length bytes).
+ * The caller retains ownership of `s`. Uses obj_string_new() internally.
+ * If s is NULL, creates an empty string.
+ */
+Value make_string_copy(const char *s, size_t len);
+
 /* Create a boolean Value. */
 Value make_bool(bool b);
 
