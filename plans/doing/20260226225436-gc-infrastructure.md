@@ -198,7 +198,23 @@ Run the full test suite:
 - [x] **Step 4**: Route all allocations through gc_alloc() — Replaced 6 `calloc(1, sizeof(ObjXxx))` calls with `gc_alloc()` in `src/value.c` (make_native, obj_upvalue_new, obj_closure_new, obj_array_new, obj_map_new) and `src/compiler.c` (compile_function). Added `#include "gc.h"` to both files. Updated Makefile to link `gc.c` into test_chunk, test_compiler, test_vm, and test_value targets (regular + sanitizer builds). All tests pass.
 - [x] **Step 5**: Update free functions to unlink from GC list — Added `gc_unlink()` calls before every `free()` of a gc_alloc'd object. In `src/value.c`: obj_upvalue_free, obj_closure_new (error path), obj_closure_free, obj_function_free, obj_array_clone_deep (error path), obj_array_free, obj_map_clone_deep (error path), obj_map_free (8 sites). In `src/compiler.c`: compile_function error paths (3 sites). Verified stack-allocated script_fn/script_closure in vm_execute() are never passed to these free functions. All tests pass.
 - [x] **Step 6**: Initialize and tear down GC in runtime lifecycle — Added `#include "gc.h"` to `src/runtime.c`. Call `gc_init()` in `runtime_init_impl()` after rwlock init. Call `gc_free_all()` in `runtime_destroy()` after `var_table_clear()`. Verified stack-allocated `script_fn`/`script_closure` in `vm_execute()` are safe (never passed to free functions, zero-initialized Obj header).
-- [ ] **Step 7**: Update Makefile and run full verification
+- [x] **Step 7**: Update Makefile and run full verification — Verified Makefile already had `src/gc.c` in LIB_SRCS, `tests/test_gc.c` in test targets, and all sanitizer build rules from prior steps. Clean build succeeded. All unit tests (12 test suites), CLI tests (162 tests), and example tests (29 tests) pass. Format-check passes. Lint has 11 pre-existing warnings (all in main.c, repl.c, repl_server.c, test_repl_server.c — none GC-related). Fixed 3 issues found by sanitizers: (1) 4 memory leaks in test_chunk.c from ObjFunction objects allocated with raw calloc instead of gc_alloc and missing obj_function_free calls, (2) 3 additional calloc->gc_alloc consistency fixes in test_chunk.c and test_vm.c, (3) use-after-free in vm.c mask-length-mismatch error path where array counts were read after value_free. All sanitizer tests pass clean after fixes.
+
+## Summary
+
+The GC infrastructure is complete. All 7 steps have been implemented:
+
+1. **gc.h/gc.c**: ObjType enum, Obj header struct, GC state struct, gc_init/gc_alloc/gc_unlink/gc_free_object/gc_free_all/gc_collect (no-op stub).
+2. **Obj header embedded**: All 5 heap object types (ObjFunction, ObjClosure, ObjArray, ObjMap, ObjUpvalue) have `Obj obj` as first field.
+3. **Allocations routed**: All `calloc(1, sizeof(ObjXxx))` calls replaced with `gc_alloc()` in src/value.c, src/compiler.c, and test files.
+4. **Unlinking on free**: `gc_unlink()` called before every `free()` of a GC-tracked object.
+5. **Runtime lifecycle**: `gc_init()` in runtime_init, `gc_free_all()` in runtime_destroy.
+6. **Makefile**: gc.c in LIB_SRCS, test_gc in all test/sanitizer targets.
+7. **Full verification**: make test, make format-check, make test-sanitize all pass.
+
+Files changed across all steps:
+- New: `src/gc.h`, `src/gc.c`, `tests/test_gc.c`
+- Modified: `src/value.h`, `src/value.c`, `src/compiler.c`, `src/runtime.c`, `src/vm.c`, `tests/test_chunk.c`, `tests/test_vm.c`, `Makefile`
 
 ---
 
