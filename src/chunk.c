@@ -85,7 +85,9 @@ int chunk_find_or_add_constant(Chunk *chunk, Value value) {
     /* Search for an existing identical constant. */
     for (size_t i = 0; i < chunk->const_count; i++) {
         if (chunk->constants[i].type == value.type) {
-            if (value.type == VAL_STRING && strcmp(chunk->constants[i].string, value.string) == 0) {
+            if (value.type == VAL_STRING && chunk->constants[i].string && value.string &&
+                chunk->constants[i].string->length == value.string->length &&
+                strcmp(chunk->constants[i].string->chars, value.string->chars) == 0) {
                 value_free(&value); /* Don't need the duplicate. */
                 return (int)i;
             }

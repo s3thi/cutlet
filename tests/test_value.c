@@ -237,10 +237,10 @@ TEST(test_obj_array_clone_deep) {
     ASSERT(clone->refcount == 1, "clone refcount should be 1");
     ASSERT(clone->count == 2, "clone should have 2 elements");
     ASSERT(clone->data[0].type == VAL_STRING, "first element should be string");
-    ASSERT(strcmp(clone->data[0].string, "hello") == 0, "first element value");
+    ASSERT(strcmp(clone->data[0].string->chars, "hello") == 0, "first element value");
     ASSERT(clone->data[1].number == 99, "second element value");
 
-    /* Modifying clone's string shouldn't affect original. */
+    /* Modifying clone's string shouldn't affect original (different ObjString*). */
     ASSERT(clone->data[0].string != arr->data[0].string, "strings should be independent copies");
 
     /* Clean up: free both arrays manually. */

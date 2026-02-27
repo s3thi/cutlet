@@ -93,7 +93,7 @@ TEST(test_compile_string) {
     ASSERT(chunk != NULL, "should compile");
     ASSERT(chunk->code[0] == OP_CONSTANT, "OP_CONSTANT");
     ASSERT(chunk->constants[0].type == VAL_STRING, "string constant");
-    ASSERT(strcmp(chunk->constants[0].string, "hello") == 0, "value hello");
+    ASSERT(strcmp(chunk->constants[0].string->chars, "hello") == 0, "value hello");
     free_chunk(chunk);
     PASS();
 }
@@ -217,7 +217,7 @@ TEST(test_compile_ident) {
     ASSERT(chunk != NULL, "should compile");
     ASSERT(chunk->code[0] == OP_GET_GLOBAL, "OP_GET_GLOBAL");
     ASSERT(chunk->constants[0].type == VAL_STRING, "name is string constant");
-    ASSERT(strcmp(chunk->constants[0].string, "x") == 0, "name is x");
+    ASSERT(strcmp(chunk->constants[0].string->chars, "x") == 0, "name is x");
     free_chunk(chunk);
     PASS();
 }
@@ -231,7 +231,7 @@ TEST(test_compile_decl) {
     ASSERT(chunk->code[2] == OP_DEFINE_GLOBAL, "OP_DEFINE_GLOBAL");
     ASSERT(chunk->constants[0].type == VAL_NUMBER, "number constant");
     ASSERT(chunk->constants[1].type == VAL_STRING, "name constant");
-    ASSERT(strcmp(chunk->constants[1].string, "x") == 0, "name is x");
+    ASSERT(strcmp(chunk->constants[1].string->chars, "x") == 0, "name is x");
     free_chunk(chunk);
     PASS();
 }
@@ -383,7 +383,7 @@ TEST(test_compile_dedup_constants) {
     int one_count = 0;
     for (size_t i = 0; i < chunk->const_count; i++) {
         if (chunk->constants[i].type == VAL_STRING &&
-            strcmp(chunk->constants[i].string, "x") == 0) {
+            strcmp(chunk->constants[i].string->chars, "x") == 0) {
             x_count++;
         }
         if (chunk->constants[i].type == VAL_NUMBER && chunk->constants[i].number == 1.0) {
@@ -426,7 +426,7 @@ TEST(test_compile_fn_def_bytecode) {
     /* The name constant should be a string "foo". */
     ASSERT(name_idx < chunk->const_count, "name constant index in range");
     ASSERT(chunk->constants[name_idx].type == VAL_STRING, "name constant is string");
-    ASSERT(strcmp(chunk->constants[name_idx].string, "foo") == 0, "name is foo");
+    ASSERT(strcmp(chunk->constants[name_idx].string->chars, "foo") == 0, "name is foo");
 
     free_chunk(chunk);
     PASS();

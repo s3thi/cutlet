@@ -152,7 +152,10 @@ static bool values_compare(const Value *a, const Value *b, int *result, const ch
         return true;
     }
     if (a->type == VAL_STRING) {
-        *result = strcmp(a->string, b->string);
+        /* Compare through ObjString chars. */
+        const char *sa = a->string ? a->string->chars : "";
+        const char *sb = b->string ? b->string->chars : "";
+        *result = strcmp(sa, sb);
         return true;
     }
 
@@ -221,7 +224,7 @@ static Value native_len(int argc, Value *args, EvalContext *ctx) {
         return make_number((double)args[0].array->count);
     }
     if (args[0].type == VAL_STRING) {
-        return make_number((double)strlen(args[0].string ? args[0].string : ""));
+        return make_number((double)(args[0].string ? args[0].string->length : 0));
     }
     if (args[0].type == VAL_MAP) {
         return make_number((double)args[0].map->count);
@@ -528,13 +531,15 @@ static Value reduce_apply_op(OpCode op, const Value *a, const Value *b) {
         return make_number(pow(a->number, b->number));
     case OP_CONCAT:
         if (a->type == VAL_STRING && b->type == VAL_STRING) {
-            size_t a_len = strlen(a->string);
-            size_t b_len = strlen(b->string);
+            const char *a_chars = a->string ? a->string->chars : "";
+            const char *b_chars = b->string ? b->string->chars : "";
+            size_t a_len = strlen(a_chars);
+            size_t b_len = strlen(b_chars);
             char *s = malloc(a_len + b_len + 1);
             if (!s)
                 return make_error("memory allocation failed");
-            memcpy(s, a->string, a_len);
-            memcpy(s + a_len, b->string, b_len);
+            memcpy(s, a_chars, a_len);
+            memcpy(s + a_len, b_chars, b_len);
             s[a_len + b_len] = '\0';
             return make_string(s);
         }
@@ -1000,16 +1005,18 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&b);
                 return vm_runtime_error(vm, "++ requires strings, got %s and %s", ta, tb);
             }
-            size_t sla = strlen(a.string);
-            size_t slb = strlen(b.string);
+            const char *sa = a.string ? a.string->chars : "";
+            const char *sb = b.string ? b.string->chars : "";
+            size_t sla = strlen(sa);
+            size_t slb = strlen(sb);
             char *sresult = malloc(sla + slb + 1);
             if (!sresult) {
                 value_free(&a);
                 value_free(&b);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
-            memcpy(sresult, a.string, sla);
-            memcpy(sresult + sla, b.string, slb);
+            memcpy(sresult, sa, sla);
+            memcpy(sresult + sla, sb, slb);
             sresult[sla + slb] = '\0';
             value_free(&a);
             value_free(&b);
@@ -1198,7 +1205,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     return vm_runtime_error(vm,
                                             "in requires a string left operand for string search");
                 }
-                found = strstr(haystack.string, needle.string) != NULL;
+                found = strstr(haystack.string ? haystack.string->chars : "",
+                               needle.string ? needle.string->chars : "") != NULL;
                 break;
             default:
                 value_free(&needle);
@@ -1229,7 +1237,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_DEFINE_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->closure->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string->chars;
             /* Peek TOS (don't pop — the value stays as the expression result). */
             Value tos;
             if (!vm_peek(vm, 0, &tos)) {
@@ -1244,7 +1252,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_GET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->closure->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string->chars;
             Value val = {0};
             RuntimeVarStatus status = runtime_var_get(name, &val);
             if (status == RUNTIME_VAR_NOT_FOUND) {
@@ -1261,7 +1269,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
 
         case OP_SET_GLOBAL: {
             uint8_t idx = read_byte(frame);
-            const char *name = frame->closure->function->chunk->constants[idx].string;
+            const char *name = frame->closure->function->chunk->constants[idx].string->chars;
             /* Peek TOS (don't pop — value stays as expression result). */
             Value tos;
             if (!vm_peek(vm, 0, &tos)) {
@@ -2068,7 +2076,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 if (result.type == VAL_ERROR) {
                     value_free(&arr_val);
                     /* Include element index in error for debugging. */
-                    Value err = vm_runtime_error(vm, "reduce element %zu: %s", i, result.string);
+                    Value err = vm_runtime_error(vm, "reduce element %zu: %s", i, result.error);
                     value_free(&result);
                     return err;
                 }
@@ -2188,7 +2196,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 value_free(&left_val);
                                 value_free(&right_val);
                                 Value err =
-                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.string);
+                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.error);
                                 value_free(&elem_result);
                                 return err;
                             }
@@ -2253,7 +2261,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                                 value_free(&left_val);
                                 value_free(&right_val);
                                 Value err =
-                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.string);
+                                    vm_runtime_error(vm, "vectorize key: %s", elem_result.error);
                                 value_free(&elem_result);
                                 return err;
                             }
@@ -2360,8 +2368,8 @@ static Value vm_run(VM *vm, int base_frame_count) {
                         value_free(&tmp);
                         value_free(&left_val);
                         value_free(&right_val);
-                        Value err = vm_runtime_error(vm, "vectorize element %zu: %s", i,
-                                                     elem_result.string);
+                        Value err =
+                            vm_runtime_error(vm, "vectorize element %zu: %s", i, elem_result.error);
                         value_free(&elem_result);
                         return err;
                     }

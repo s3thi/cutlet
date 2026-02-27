@@ -126,7 +126,7 @@ TEST(test_chunk_add_constant_string) {
     ASSERT(idx == 0, "first constant should be index 0");
     ASSERT(c.const_count == 1, "const_count should be 1");
     ASSERT(c.constants[0].type == VAL_STRING, "type should be string");
-    ASSERT(strcmp(c.constants[0].string, "hello") == 0, "value should be hello");
+    ASSERT(strcmp(c.constants[0].string->chars, "hello") == 0, "value should be hello");
     chunk_free(&c);
     PASS();
 }

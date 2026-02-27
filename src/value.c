@@ -14,17 +14,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-Value make_number(double n) { return (Value){.type = VAL_NUMBER, .number = n, .string = NULL}; }
+Value make_number(double n) { return (Value){.type = VAL_NUMBER, .number = n}; }
 
-Value make_string(char *s) { return (Value){.type = VAL_STRING, .number = 0, .string = s}; }
-
-Value make_bool(bool b) {
-    return (Value){.type = VAL_BOOL, .boolean = b, .number = 0, .string = NULL};
+/*
+ * Create a string Value. Takes ownership of the heap-allocated char* `s`.
+ * Wraps it in a GC-tracked ObjString via obj_string_take().
+ */
+Value make_string(char *s) {
+    size_t len = s ? strlen(s) : 0;
+    ObjString *str = obj_string_take(s, len);
+    return (Value){.type = VAL_STRING, .string = str};
 }
 
-Value make_nothing(void) {
-    return (Value){.type = VAL_NOTHING, .boolean = false, .number = 0, .string = NULL};
-}
+Value make_bool(bool b) { return (Value){.type = VAL_BOOL, .boolean = b}; }
+
+Value make_nothing(void) { return (Value){.type = VAL_NOTHING}; }
 
 Value make_function(ObjFunction *fn) {
     /* Ensure refcount starts at 1 for the owning Value. */
@@ -53,7 +57,7 @@ Value make_error(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    return (Value){.type = VAL_ERROR, .number = 0, .string = strdup(buf)};
+    return (Value){.type = VAL_ERROR, .number = 0, .error = strdup(buf)};
 }
 
 Value make_closure(ObjClosure *cl) { return (Value){.type = VAL_CLOSURE, .closure = cl}; }
@@ -289,7 +293,14 @@ bool value_equal(const Value *a, const Value *b) {
     case VAL_NUMBER:
         return a->number == b->number;
     case VAL_STRING:
-        return strcmp(a->string, b->string) == 0;
+        /* Compare via ObjString chars. Fast path: same pointer means equal. */
+        if (a->string == b->string)
+            return true;
+        if (!a->string || !b->string)
+            return false;
+        if (a->string->length != b->string->length)
+            return false;
+        return strcmp(a->string->chars, b->string->chars) == 0;
     case VAL_BOOL:
         return a->boolean == b->boolean;
     case VAL_NOTHING:
@@ -441,9 +452,20 @@ static void obj_map_free(ObjMap *m) {
 void value_free(Value *v) {
     if (!v)
         return;
-    if (v->string) {
+    /* Free ObjString for VAL_STRING: release the GC-tracked object and
+     * its owned char buffer. For now (before full GC sweep), manually
+     * free the chars and unlink from the GC object list. */
+    if (v->type == VAL_STRING && v->string) {
+        free(v->string->chars);
+        v->string->chars = NULL;
+        gc_unlink((Obj *)v->string);
         free(v->string);
         v->string = NULL;
+    }
+    /* Free error message for VAL_ERROR (plain heap-allocated char*). */
+    if (v->type == VAL_ERROR && v->error) {
+        free(v->error);
+        v->error = NULL;
     }
     if (v->type == VAL_FUNCTION && v->function) {
         /* Decrement refcount; only free when no references remain. */
@@ -503,14 +525,15 @@ char *value_format(const Value *v) {
         return strdup("nothing");
 
     case VAL_STRING:
-        return strdup(v->string ? v->string : "");
+        /* Access chars through the ObjString wrapper. */
+        return strdup(v->string ? v->string->chars : "");
 
     case VAL_ERROR: {
-        /* Format: "ERR <message>" */
-        size_t len = 4 + strlen(v->string ? v->string : "") + 1;
+        /* Format: "ERR <message>". Error message is a plain char*. */
+        size_t len = 4 + strlen(v->error ? v->error : "") + 1;
         char *buf = malloc(len);
         if (buf) {
-            snprintf(buf, len, "ERR %s", v->string ? v->string : "");
+            snprintf(buf, len, "ERR %s", v->error ? v->error : "");
         }
         return buf;
     }
@@ -660,7 +683,7 @@ bool is_truthy(const Value *v) {
     case VAL_NUMBER:
         return v->number != 0;
     case VAL_STRING:
-        return v->string != NULL && v->string[0] != '\0';
+        return v->string != NULL && v->string->length > 0;
     case VAL_FUNCTION: // NOLINT(bugprone-branch-clone)
         return true;
     case VAL_CLOSURE:
@@ -682,13 +705,26 @@ bool value_clone(Value *out, const Value *src) {
     if (!out || !src)
         return false;
     *out = *src;
-    if (src->type == VAL_STRING || src->type == VAL_ERROR) {
-        const char *s = src->string ? src->string : "";
-        out->string = strdup(s);
-        if (!out->string)
-            return false;
+    if (src->type == VAL_STRING) {
+        /* Deep-clone the ObjString: allocate a new GC-tracked ObjString
+         * with a copy of the character data. */
+        if (src->string) {
+            out->string = obj_string_new(src->string->chars, src->string->length);
+            if (!out->string)
+                return false;
+        } else {
+            out->string = NULL;
+        }
     } else {
         out->string = NULL;
+    }
+    if (src->type == VAL_ERROR) {
+        const char *s = src->error ? src->error : "";
+        out->error = strdup(s);
+        if (!out->error)
+            return false;
+    } else {
+        out->error = NULL;
     }
     if (src->type == VAL_FUNCTION) {
         /* Shared ownership via refcount — no deep copy needed. */

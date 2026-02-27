@@ -236,8 +236,9 @@ static void assert_vm_string(const char *input, const char *expected, const char
         tests_failed++;
         return;
     }
-    if (strcmp(v.string, expected) != 0) {
-        printf("FAIL\n    '%s': expected \"%s\", got \"%s\"\n", input, expected, v.string);
+    const char *got_chars = v.string ? v.string->chars : "";
+    if (strcmp(got_chars, expected) != 0) {
+        printf("FAIL\n    '%s': expected \"%s\", got \"%s\"\n", input, expected, got_chars);
         value_free(&v);
         tests_failed++;
         return;
@@ -344,7 +345,7 @@ TEST(test_unknown_ident) { assert_vm_error("x_unknown_vm", "unknown ident"); }
 TEST(test_string_value) {
     Value v = run_input("\"hello\"", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "hello", "string value");
+    ASSERT_STR_EQ(v.string->chars, "hello", "string value");
     value_free(&v);
     PASS();
 }
@@ -381,7 +382,7 @@ TEST(test_format_negative) {
 }
 
 TEST(test_format_string_val) {
-    Value v = {.type = VAL_STRING, .number = 0, .string = strdup("hi")};
+    Value v = make_string(strdup("hi"));
     char *s = value_format(&v);
     ASSERT(s != NULL, "format not null");
     ASSERT_STR_EQ(s, "hi", "string format");
@@ -391,7 +392,7 @@ TEST(test_format_string_val) {
 }
 
 TEST(test_format_error_val) {
-    Value v = {.type = VAL_ERROR, .number = 0, .string = strdup("bad")};
+    Value v = {.type = VAL_ERROR, .number = 0, .error = strdup("bad")};
     char *s = value_format(&v);
     ASSERT(s != NULL, "format not null");
     ASSERT_STR_EQ(s, "ERR bad", "error format");
@@ -616,7 +617,7 @@ TEST(test_if_true_no_else) { assert_vm_number("if true then 42 end", 42.0, "if t
 TEST(test_if_comparison_cond) {
     Value v = run_input("if 1 < 2 then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "yes", "should be yes");
+    ASSERT_STR_EQ(v.string->chars, "yes", "should be yes");
     value_free(&v);
     PASS();
 }
@@ -624,7 +625,7 @@ TEST(test_if_comparison_cond) {
 TEST(test_if_comparison_cond_false) {
     Value v = run_input("if 2 < 1 then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "no", "should be no");
+    ASSERT_STR_EQ(v.string->chars, "no", "should be no");
     value_free(&v);
     PASS();
 }
@@ -671,7 +672,7 @@ TEST(test_if_short_circuit_else) {
 TEST(test_if_truthy_number) {
     Value v = run_input("if 1 then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "yes", "1 is truthy");
+    ASSERT_STR_EQ(v.string->chars, "yes", "1 is truthy");
     value_free(&v);
     PASS();
 }
@@ -679,7 +680,7 @@ TEST(test_if_truthy_number) {
 TEST(test_if_falsy_zero) {
     Value v = run_input("if 0 then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "no", "0 is falsy");
+    ASSERT_STR_EQ(v.string->chars, "no", "0 is falsy");
     value_free(&v);
     PASS();
 }
@@ -687,7 +688,7 @@ TEST(test_if_falsy_zero) {
 TEST(test_if_falsy_empty_string) {
     Value v = run_input("if \"\" then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "no", "empty string is falsy");
+    ASSERT_STR_EQ(v.string->chars, "no", "empty string is falsy");
     value_free(&v);
     PASS();
 }
@@ -695,7 +696,7 @@ TEST(test_if_falsy_empty_string) {
 TEST(test_if_falsy_nothing) {
     Value v = run_input("if nothing then \"yes\" else \"no\" end", &test_ctx);
     ASSERT(v.type == VAL_STRING, "should be string");
-    ASSERT_STR_EQ(v.string, "no", "nothing is falsy");
+    ASSERT_STR_EQ(v.string->chars, "no", "nothing is falsy");
     value_free(&v);
     PASS();
 }

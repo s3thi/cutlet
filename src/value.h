@@ -135,19 +135,24 @@ typedef struct ObjMap ObjMap;
 
 /* A tagged union representing a Cutlet value.
  * - VAL_NUMBER: number field holds the value.
- * - VAL_STRING: string field holds a heap-allocated string.
+ * - VAL_STRING: string field holds a GC-tracked ObjString*.
  * - VAL_BOOL: boolean field holds the value.
  * - VAL_NOTHING: no payload.
- * - VAL_ERROR: string field holds a heap-allocated error message.
+ * - VAL_ERROR: error field holds a heap-allocated error message (char*).
  * - VAL_FUNCTION: function field holds a refcounted ObjFunction (natives).
  * - VAL_CLOSURE: closure field holds a refcounted ObjClosure (user functions).
- * - VAL_ARRAY: array field holds a refcounted ObjArray. */
+ * - VAL_ARRAY: array field holds a refcounted ObjArray.
+ * - VAL_MAP: map field holds a refcounted ObjMap.
+ *
+ * Note: string and error are separate fields. VAL_STRING uses ObjString*
+ * (GC-tracked), while VAL_ERROR uses a plain char* (heap-allocated). */
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct Value {
     ValueType type;
     double number;
     bool boolean;
-    char *string;          /* owned; also used for error message */
+    ObjString *string;     /* owned; non-NULL only for VAL_STRING */
+    char *error;           /* owned; non-NULL only for VAL_ERROR */
     ObjFunction *function; /* refcounted; non-NULL only for VAL_FUNCTION */
     ObjClosure *closure;   /* refcounted; non-NULL only for VAL_CLOSURE */
     ObjArray *array;       /* refcounted; non-NULL only for VAL_ARRAY */
