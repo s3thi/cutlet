@@ -458,19 +458,12 @@ static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t s
                           size_t start_col) {
     size_t value_start = tok->pos;
 
-    /* Special case: ++ (concatenation operator).
-     * '+' is a solo symbol, but '++' must be emitted as a single
-     * two-character operator token. Peek ahead before the solo check. */
-    if (tok->input[tok->pos] == '+' && tok->pos + 1 < tok->input_len &&
-        tok->input[tok->pos + 1] == '+') {
-        tok->pos += 2;
-        tok->col += 2;
-    }
-    /* Special case: .. (range operator).
-     * '.' is a solo symbol, but '..' must be emitted as a single
-     * two-character operator token. Peek ahead before the solo check. */
-    else if (tok->input[tok->pos] == '.' && tok->pos + 1 < tok->input_len &&
-             tok->input[tok->pos + 1] == '.') {
+    /* Special case: ++ (concatenation) and .. (range).
+     * '+' and '.' are solo symbols, but '++' and '..' must be emitted as
+     * single two-character operator tokens. Peek ahead before the solo check. */
+    char ch = tok->input[tok->pos];
+    if ((ch == '+' || ch == '.') && tok->pos + 1 < tok->input_len &&
+        tok->input[tok->pos + 1] == ch) {
         tok->pos += 2;
         tok->col += 2;
     } else if (is_solo_symbol(tok->input[tok->pos])) {
@@ -548,13 +541,9 @@ static bool read_meta(Tokenizer *tok, Token *out, size_t start_pos, size_t start
             tok->col++;
         }
     } else if (is_symbol_char(c)) {
-        /* Special case: ++ (concatenation) after @ */
-        if (c == '+' && tok->pos + 1 < tok->input_len && tok->input[tok->pos + 1] == '+') {
-            tok->pos += 2;
-            tok->col += 2;
-        }
-        /* Special case: .. (range) after @ */
-        else if (c == '.' && tok->pos + 1 < tok->input_len && tok->input[tok->pos + 1] == '.') {
+        /* Special case: ++ (concatenation) and .. (range) after @ */
+        if ((c == '+' || c == '.') && tok->pos + 1 < tok->input_len &&
+            tok->input[tok->pos + 1] == c) {
             tok->pos += 2;
             tok->col += 2;
         } else if (is_solo_symbol(c)) {
