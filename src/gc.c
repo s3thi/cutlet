@@ -41,6 +41,7 @@ void gc_init(void) {
     gc.objects = NULL;
     gc.bytes_allocated = 0;
     gc.next_gc = GC_INITIAL_THRESHOLD;
+    gc.sweeping = false;
 }
 
 void *gc_alloc(ObjType type, size_t size) {
@@ -73,6 +74,13 @@ void *gc_alloc(ObjType type, size_t size) {
 
 void gc_unlink(Obj *obj) {
     if (!obj)
+        return;
+
+    /* During sweep, the sweep loop relinks the object list inline.
+     * External gc_unlink calls (e.g. from value_free triggered by
+     * free_object_contents) must be suppressed to avoid corrupting
+     * the list and to prevent O(n^2) behavior. */
+    if (gc.sweeping)
         return;
 
     /* Walk the list to find and unlink obj. */
@@ -362,14 +370,61 @@ void gc_collect(void) {
 /*
  * gc_sweep - walk the object list and free unmarked objects.
  *
- * Stub: currently a no-op. Step 2 of the gc-sweep plan will
- * implement the actual sweep logic that:
- *   - Frees every unmarked object (type-dispatched destructor + free).
- *   - Relinks the list around freed objects.
- *   - Clears is_marked on surviving objects.
- *   - Decrements bytes_allocated for each freed object.
+ * Iterates the gc.objects linked list with a prev pointer for O(1)
+ * relinking. For each object:
+ *   - If marked: clear the mark (ready for the next cycle), advance
+ *     prev to this object, and move to next.
+ *   - If unmarked: unlink from the list (prev->next = obj->next, or
+ *     gc.objects = obj->next if it's the head), free internal contents
+ *     via free_object_contents(), decrement bytes_allocated, and free
+ *     the object struct. prev stays the same.
+ *
+ * The gc.sweeping flag is set to true for the duration so that
+ * gc_unlink() (which may be called indirectly from value_free inside
+ * free_object_contents) becomes a no-op — the sweep loop already
+ * handles relinking, so an external gc_unlink would corrupt the list.
  */
-void gc_sweep(void) { /* No-op stub — sweep logic will be added in step 2. */ }
+void gc_sweep(void) {
+    gc.sweeping = true;
+
+    Obj *prev = NULL;
+    Obj *obj = gc.objects;
+
+    while (obj) {
+        if (obj->is_marked) {
+            /* Object is reachable — clear the mark for the next
+             * collection cycle and advance. */
+            obj->is_marked = false;
+            prev = obj;
+            obj = obj->next;
+        } else {
+            /* Object is unreachable — unlink and free it. */
+            Obj *unreached = obj;
+            obj = obj->next;
+
+            /* Relink around the freed object. */
+            if (prev != NULL) {
+                prev->next = obj;
+            } else {
+                /* unreached was the list head. */
+                gc.objects = obj;
+            }
+
+            /* Decrement bytes_allocated by the object's recorded size. */
+            if (gc.bytes_allocated >= unreached->alloc_size)
+                gc.bytes_allocated -= unreached->alloc_size;
+            else
+                gc.bytes_allocated = 0;
+
+            /* Free type-specific internal allocations (name, data,
+             * entries, etc.) then the object struct itself. */
+            free_object_contents(unreached);
+            free(unreached);
+        }
+    }
+
+    gc.sweeping = false;
+}
 
 /* ---- Test/inspection accessors ---- */
 

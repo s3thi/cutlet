@@ -56,11 +56,17 @@ typedef struct Obj {
  * objects:         Head of the intrusive linked list of all GC-tracked objects.
  * bytes_allocated: Running total of memory allocated through gc_alloc().
  * next_gc:         Threshold (in bytes) at which gc_collect() triggers.
+ * sweeping:        True while gc_sweep() is running. When true, gc_unlink()
+ *                  is a no-op — sweep relinks the list inline, so external
+ *                  gc_unlink calls (e.g. from value_free via
+ *                  free_object_contents) must be suppressed to avoid O(n^2)
+ *                  behavior and double-free issues.
  */
 typedef struct {
     Obj *objects;
     size_t bytes_allocated;
     size_t next_gc;
+    bool sweeping;
 } GC;
 
 /* Cast any Obj-embedded pointer to read its type tag. */
@@ -174,7 +180,7 @@ void gc_mark_roots(void);
  * During sweep, gc_unlink() is suppressed (objects are relinked
  * inline rather than via gc_unlink's O(n) list walk).
  *
- * Stub: currently a no-op. Implemented in gc-sweep task step 2.
+ * Implemented in gc-sweep task step 2.
  */
 void gc_sweep(void);
 
