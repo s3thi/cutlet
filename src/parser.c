@@ -1370,6 +1370,180 @@ static AstNode *parse_expr(Parser *p, int min_prec) {
             continue;
         }
 
+        /* Postfix '.' — dot access / method call: expr.ident or expr.ident(args).
+         * Precedence 10 (same as '['), left-associative so a.b.c chains naturally. */
+        if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+            p->current.value[0] == '.') {
+            if (10 < min_prec)
+                break;
+
+            size_t dot_line = p->current.line;
+            size_t dot_col = p->current.col;
+            advance(p); /* consume '.' */
+
+            /* Expect an identifier after the dot. Distinguish between EOF
+             * (incomplete — the REPL should wait for more input) and a wrong
+             * token like a number (hard error — adding more won't help). */
+            if (p->current.type != TOK_IDENT) {
+                if (p->current.type == TOK_EOF || p->current.type == TOK_NEWLINE) {
+                    parser_error(p, dot_line, dot_col, "expected identifier after '.'");
+                } else {
+                    parser_error(p, p->current.line, p->current.col,
+                                 "expected identifier after '.', got %s",
+                                 token_type_str(p->current.type));
+                }
+                ast_free(left);
+                return NULL;
+            }
+
+            /* Save identifier text before advance invalidates the token buffer. */
+            size_t ident_len = p->current.value_len;
+            char *ident_text = malloc(ident_len + 1);
+            if (!ident_text) {
+                ast_free(left);
+                parser_error(p, dot_line, dot_col, "memory allocation failed");
+                return NULL;
+            }
+            memcpy(ident_text, p->current.value, ident_len);
+            ident_text[ident_len] = '\0';
+            size_t ident_line = p->current.line;
+
+            advance(p); /* consume identifier */
+
+            /* Check if '(' follows — method call syntax: expr.ident(args...) */
+            if (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                p->current.value[0] == '(') {
+                advance(p); /* consume '(' */
+
+                /* Parse comma-separated arguments (same pattern as AST_CALL). */
+                PtrArray args;
+                if (!ptr_array_init(&args, 4)) {
+                    free(ident_text);
+                    ast_free(left);
+                    parser_error(p, dot_line, dot_col, "memory allocation failed");
+                    return NULL;
+                }
+
+                /* Check for zero-arg call: immediate ')' */
+                if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                      p->current.value[0] == ')')) {
+                    /* Parse first argument */
+                    AstNode *arg = parse_assignment(p);
+                    if (!arg) {
+                        free(ident_text);
+                        ptr_array_destroy(&args);
+                        ast_free(left);
+                        return NULL;
+                    }
+                    if (!ptr_array_push(&args, arg)) {
+                        ast_free(arg);
+                        free(ident_text);
+                        ptr_array_destroy(&args);
+                        ast_free(left);
+                        parser_error(p, dot_line, dot_col, "memory allocation failed");
+                        return NULL;
+                    }
+
+                    /* Parse additional comma-separated arguments */
+                    while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+                           p->current.value[0] == ',') {
+                        advance(p); /* consume ',' */
+                        arg = parse_assignment(p);
+                        if (!arg) {
+                            free(ident_text);
+                            free_expr_array(&args);
+                            ast_free(left);
+                            return NULL;
+                        }
+                        if (!ptr_array_push(&args, arg)) {
+                            ast_free(arg);
+                            free(ident_text);
+                            free_expr_array(&args);
+                            ast_free(left);
+                            parser_error(p, dot_line, dot_col, "memory allocation failed");
+                            return NULL;
+                        }
+                    }
+                }
+
+                /* Expect closing ')' */
+                if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+                    p->current.value[0] != ')') {
+                    parser_error(p, p->current.line, p->current.col,
+                                 "expected ')' after arguments");
+                    free(ident_text);
+                    free_expr_array(&args);
+                    ast_free(left);
+                    return NULL;
+                }
+                advance(p); /* consume ')' */
+
+                /* Build AST_METHOD_CALL node:
+                 * left = receiver, value = method name, children = args */
+                size_t arg_count = args.count;
+                AstNode **children = NULL;
+                if (arg_count > 0) {
+                    children = (AstNode **)ptr_array_release(&args);
+                } else {
+                    ptr_array_destroy(&args);
+                }
+
+                AstNode *node = malloc(sizeof(AstNode));
+                if (!node) {
+                    free(ident_text);
+                    for (size_t i = 0; i < arg_count; i++)
+                        ast_free(children[i]);
+                    if (children)
+                        ptr_array_free_raw((void *)children);
+                    ast_free(left);
+                    parser_error(p, dot_line, dot_col, "memory allocation failed");
+                    return NULL;
+                }
+                node->type = AST_METHOD_CALL;
+                node->value = ident_text; /* takes ownership */
+                node->left = left;
+                node->right = NULL;
+                node->grouped = false;
+                node->line = ident_line;
+                node->children = children;
+                node->child_count = arg_count;
+                node->params = NULL;
+                node->param_count = 0;
+                left = node;
+                continue;
+            }
+
+            /* Property access: build AST_INDEX with string key.
+             * expr.ident desugars to expr["ident"]. */
+            AstNode *key = make_leaf(AST_STRING, ident_text, ident_len, ident_line);
+            free(ident_text);
+            if (!key) {
+                ast_free(left);
+                parser_error(p, dot_line, dot_col, "memory allocation failed");
+                return NULL;
+            }
+
+            AstNode *node = malloc(sizeof(AstNode));
+            if (!node) {
+                ast_free(left);
+                ast_free(key);
+                parser_error(p, dot_line, dot_col, "memory allocation failed");
+                return NULL;
+            }
+            node->type = AST_INDEX;
+            node->value = NULL;
+            node->left = left;
+            node->right = key;
+            node->grouped = false;
+            node->line = dot_line;
+            node->children = NULL;
+            node->child_count = 0;
+            node->params = NULL;
+            node->param_count = 0;
+            left = node;
+            continue;
+        }
+
         /* Infix meta-operator: expr @op expr → AST_VECTORIZE.
          * The precedence of @op mirrors the inner operator's precedence.
          * For custom function identifiers, use precedence 6 (same as +/-). */
@@ -2580,6 +2754,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "REDUCE";
     case AST_VECTORIZE:
         return "VECTORIZE";
+    case AST_METHOD_CALL:
+        return "METHOD_CALL";
     default:
         return "UNKNOWN";
     }
@@ -3128,6 +3304,58 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    /* AST_METHOD_CALL: [METHOD_CALL [receiver] method arg1 arg2 ...]
+     * left = receiver expression, value = method name, children = arguments. */
+    if (node->type == AST_METHOD_CALL) {
+        char *recv_str = ast_format_node(node->left);
+        if (!recv_str)
+            return NULL;
+
+        /* Format argument children. */
+        PtrArray arg_strs;
+        if (!ptr_array_init(&arg_strs, node->child_count)) {
+            free(recv_str);
+            return NULL;
+        }
+
+        size_t total_len = 1 + strlen(type_str) + 1 + strlen(recv_str) + 1 +
+                           strlen(node->value); /* "[METHOD_CALL [recv] name" */
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < arg_strs.count; j++)
+                    free(arg_strs.items[j]);
+                ptr_array_destroy(&arg_strs);
+                free(recv_str);
+                return NULL;
+            }
+            ptr_array_push(&arg_strs, str);
+            total_len += 1 + strlen(str); /* " arg" */
+        }
+        total_len += 1 + 1; /* "]" + NUL */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < arg_strs.count; i++)
+                free(arg_strs.items[i]);
+            ptr_array_destroy(&arg_strs);
+            free(recv_str);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s %s", type_str, recv_str,
+                                node->value);
+        free(recv_str);
+        for (size_t i = 0; i < arg_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)arg_strs.items[i]);
+            free(arg_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&arg_strs);
+        return buf;
+    }
+
     return NULL;
 }
 
@@ -3262,6 +3490,12 @@ bool parser_is_complete(const char *input) {
 
     if (strstr(msg, "expected ':'") != NULL) {
         /* Map key without colon - incomplete */
+        return false;
+    }
+
+    /* Trailing dot at EOF: "expected identifier after '.'" (exact match).
+     * The hard-error variant appends ", got <TYPE>" and is NOT incomplete. */
+    if (strcmp(msg, "expected identifier after '.'") == 0) {
         return false;
     }
 

@@ -440,7 +440,7 @@ static bool read_ident(Tokenizer *tok, Token *out, size_t start_pos, size_t star
  */
 static bool is_solo_symbol(char c) {
     return c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '+' ||
-           c == '-' || c == '/' || c == '%' || c == ',' || c == ':';
+           c == '-' || c == '/' || c == '%' || c == ',' || c == ':' || c == '.';
 }
 
 /*
@@ -463,6 +463,14 @@ static bool read_operator(Tokenizer *tok, Token *out, size_t start_pos, size_t s
      * two-character operator token. Peek ahead before the solo check. */
     if (tok->input[tok->pos] == '+' && tok->pos + 1 < tok->input_len &&
         tok->input[tok->pos + 1] == '+') {
+        tok->pos += 2;
+        tok->col += 2;
+    }
+    /* Special case: .. (range operator).
+     * '.' is a solo symbol, but '..' must be emitted as a single
+     * two-character operator token. Peek ahead before the solo check. */
+    else if (tok->input[tok->pos] == '.' && tok->pos + 1 < tok->input_len &&
+             tok->input[tok->pos + 1] == '.') {
         tok->pos += 2;
         tok->col += 2;
     } else if (is_solo_symbol(tok->input[tok->pos])) {
@@ -542,6 +550,11 @@ static bool read_meta(Tokenizer *tok, Token *out, size_t start_pos, size_t start
     } else if (is_symbol_char(c)) {
         /* Special case: ++ (concatenation) after @ */
         if (c == '+' && tok->pos + 1 < tok->input_len && tok->input[tok->pos + 1] == '+') {
+            tok->pos += 2;
+            tok->col += 2;
+        }
+        /* Special case: .. (range) after @ */
+        else if (c == '.' && tok->pos + 1 < tok->input_len && tok->input[tok->pos + 1] == '.') {
             tok->pos += 2;
             tok->col += 2;
         } else if (is_solo_symbol(c)) {

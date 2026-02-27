@@ -38,6 +38,8 @@ typedef enum {
     AST_MAP,       /* map literal: {key: value, ...} — children are alternating key/value pairs */
     AST_REDUCE,    /* reduction: @op expr — value=op/name, left=operand */
     AST_VECTORIZE, /* vectorize: expr @op expr — value=op/name, left=lhs, right=rhs */
+    AST_METHOD_CALL, /* method call: expr.name(args) — left=receiver, value=method name,
+                        children=args */
 } AstNodeType;
 
 typedef struct AstNode {
