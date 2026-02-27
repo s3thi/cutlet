@@ -1034,6 +1034,8 @@ static void compile_function(Compiler *c, const AstNode *node) {
         if (!fn->name) {
             chunk_free(body_chunk);
             free(body_chunk);
+            /* Unlink from GC object list before freeing (error path). */
+            gc_unlink((Obj *)fn);
             free(fn);
             return;
         }
@@ -1053,6 +1055,8 @@ static void compile_function(Compiler *c, const AstNode *node) {
             free(fn->name);
             chunk_free(body_chunk);
             free(body_chunk);
+            /* Unlink from GC object list before freeing (error path). */
+            gc_unlink((Obj *)fn);
             free(fn);
             return;
         }
@@ -1066,6 +1070,8 @@ static void compile_function(Compiler *c, const AstNode *node) {
                 free(fn->name);
                 chunk_free(body_chunk);
                 free(body_chunk);
+                /* Unlink from GC object list before freeing (error path). */
+                gc_unlink((Obj *)fn);
                 free(fn);
                 return;
             }

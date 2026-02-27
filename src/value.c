@@ -80,6 +80,8 @@ void obj_upvalue_free(ObjUpvalue *uv) {
         /* If the upvalue is closed, free the captured value. */
         if (uv->location == &uv->closed)
             value_free(&uv->closed);
+        /* Unlink from GC object list before freeing. */
+        gc_unlink((Obj *)uv);
         free(uv);
     }
 }
@@ -100,6 +102,8 @@ ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
         if (!cl->upvalues) {
             if (fn)
                 fn->refcount--;
+            /* Unlink from GC object list before freeing (error path). */
+            gc_unlink((Obj *)cl);
             free(cl);
             return NULL;
         }
@@ -128,6 +132,8 @@ void obj_closure_free(ObjClosure *cl) {
             if (cl->function->refcount == 0)
                 obj_function_free(cl->function);
         }
+        /* Unlink from GC object list before freeing. */
+        gc_unlink((Obj *)cl);
         free(cl);
     }
 }
@@ -147,6 +153,8 @@ void obj_function_free(ObjFunction *fn) {
         chunk_free(fn->chunk);
         free(fn->chunk);
     }
+    /* Unlink from GC object list before freeing. */
+    gc_unlink((Obj *)fn);
     free(fn);
 }
 
@@ -187,6 +195,8 @@ ObjArray *obj_array_clone_deep(const ObjArray *src) {
     if (src->count > 0) {
         clone->data = malloc(src->count * sizeof(Value));
         if (!clone->data) {
+            /* Unlink from GC object list before freeing (error path). */
+            gc_unlink((Obj *)clone);
             free(clone);
             return NULL;
         }
@@ -218,6 +228,8 @@ static void obj_array_free(ObjArray *arr) {
         value_free(&arr->data[i]);
     }
     free(arr->data);
+    /* Unlink from GC object list before freeing. */
+    gc_unlink((Obj *)arr);
     free(arr);
 }
 
@@ -337,6 +349,8 @@ ObjMap *obj_map_clone_deep(const ObjMap *src) {
     if (src->count > 0) {
         clone->entries = malloc(src->count * sizeof(MapEntry));
         if (!clone->entries) {
+            /* Unlink from GC object list before freeing (error path). */
+            gc_unlink((Obj *)clone);
             free(clone);
             return NULL;
         }
@@ -372,6 +386,8 @@ static void obj_map_free(ObjMap *m) {
         value_free(&m->entries[i].value);
     }
     free(m->entries);
+    /* Unlink from GC object list before freeing. */
+    gc_unlink((Obj *)m);
     free(m);
 }
 
