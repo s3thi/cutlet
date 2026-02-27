@@ -1,6 +1,8 @@
 # Build outputs
 build/
 build-sanitize/
+build-gc-stress/
+build-gc-stress-asan/
 *.o
 *.a
 *.so
