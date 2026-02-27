@@ -20,13 +20,12 @@
  */
 
 #include "gc.h"
+#include "chunk.h"
+#include "value.h"
 #include <stdlib.h>
 
-/* chunk.h and value.h will be needed once free_object_contents()
- * is activated in Step 3 (Obj header embedded in all struct types). */
-
 /* Initial GC threshold: 1 MiB before first collection attempt. */
-#define GC_INITIAL_THRESHOLD (1024 * 1024)
+#define GC_INITIAL_THRESHOLD ((size_t)1024 * 1024)
 
 /* Module-level GC state. Access serialized by eval_lock in runtime. */
 static GC gc;
@@ -88,72 +87,67 @@ void gc_free_object(Obj *obj) {
  * Free the internal contents of an object based on its type.
  * Does NOT free the object struct itself — the caller handles that.
  *
- * IMPORTANT: This function casts (Obj*) to the concrete type (e.g.,
- * ObjArray*). This only works correctly once the Obj header is embedded
- * as the first field of each concrete struct (Step 3). Until then,
- * this is a no-op stub — the casts would produce wrong field offsets.
+ * Casts (Obj*) to the concrete type (e.g., ObjArray*). This works
+ * because the Obj header is the first field of every concrete struct,
+ * so the cast produces correct field offsets.
  *
- * The full implementation is commented out below and will be activated
- * in Step 3 when the Obj header is embedded in all five struct types.
+ * This duplicates some logic from the existing obj_*_free() functions
+ * in value.c. Both coexist during the transition: refcount-based
+ * obj_*_free() handles normal lifetime, while free_object_contents()
+ * handles gc_free_all() at shutdown. Once refcounting is removed
+ * (GC task 5), obj_*_free() will be replaced entirely.
  */
 static void free_object_contents(Obj *obj) {
-    /*
-     * TODO(Step 3): Activate once Obj is embedded as first field.
-     * Until then, gc_free_all() only frees the object structs, not
-     * their internal contents (name, data, entries, etc.). This is
-     * acceptable because:
-     * - The GC tests allocate raw objects that have no content to free.
-     * - Real objects are still freed via the existing refcount-based
-     *   obj_*_free() functions during normal execution.
-     */
-    (void)obj; /* Suppress unused parameter warning. */
-
-    /* Planned implementation for reference (activated in Step 3):
-     *
-     * switch (obj->type) {
-     * case OBJ_FUNCTION: {
-     *     ObjFunction *fn = (ObjFunction *)obj;
-     *     free(fn->name);
-     *     if (fn->params) {
-     *         for (int i = 0; i < fn->arity; i++)
-     *             free(fn->params[i]);
-     *         free((void *)fn->params);
-     *     }
-     *     if (fn->chunk) {
-     *         chunk_free(fn->chunk);
-     *         free(fn->chunk);
-     *     }
-     *     break;
-     * }
-     * case OBJ_CLOSURE: {
-     *     ObjClosure *cl = (ObjClosure *)obj;
-     *     free((void *)cl->upvalues);
-     *     break;
-     * }
-     * case OBJ_ARRAY: {
-     *     ObjArray *arr = (ObjArray *)obj;
-     *     for (size_t i = 0; i < arr->count; i++)
-     *         value_free(&arr->data[i]);
-     *     free(arr->data);
-     *     break;
-     * }
-     * case OBJ_MAP: {
-     *     ObjMap *m = (ObjMap *)obj;
-     *     for (size_t i = 0; i < m->count; i++) {
-     *         value_free(&m->entries[i].key);
-     *         value_free(&m->entries[i].value);
-     *     }
-     *     free(m->entries);
-     *     break;
-     * }
-     * case OBJ_UPVALUE: {
-     *     ObjUpvalue *uv = (ObjUpvalue *)obj;
-     *     if (uv->location == &uv->closed)
-     *         value_free(&uv->closed);
-     *     break;
-     * }
-     * }
-     */
+    switch (obj->type) {
+    case OBJ_FUNCTION: {
+        ObjFunction *fn = (ObjFunction *)obj;
+        free(fn->name);
+        if (fn->params) {
+            for (int i = 0; i < fn->arity; i++)
+                free(fn->params[i]);
+            free((void *)fn->params);
+        }
+        if (fn->chunk) {
+            chunk_free(fn->chunk);
+            free(fn->chunk);
+        }
+        /* Do NOT free the ObjFunction struct itself — the caller does that. */
+        break;
+    }
+    case OBJ_CLOSURE: {
+        ObjClosure *cl = (ObjClosure *)obj;
+        /* Free the upvalue pointer array, but NOT the upvalues themselves.
+         * Upvalues are separate objects on the GC list and will be freed
+         * when their own turn comes in the gc_free_all() walk. */
+        free((void *)cl->upvalues);
+        break;
+    }
+    case OBJ_ARRAY: {
+        ObjArray *arr = (ObjArray *)obj;
+        for (size_t i = 0; i < arr->count; i++)
+            value_free(&arr->data[i]);
+        free(arr->data);
+        break;
+    }
+    case OBJ_MAP: {
+        ObjMap *m = (ObjMap *)obj;
+        for (size_t i = 0; i < m->count; i++) {
+            value_free(&m->entries[i].key);
+            value_free(&m->entries[i].value);
+        }
+        free(m->entries);
+        break;
+    }
+    case OBJ_UPVALUE: {
+        ObjUpvalue *uv = (ObjUpvalue *)obj;
+        /* If the upvalue is closed (location points to &closed),
+         * free the captured value. Open upvalues don't own their
+         * location's value — it belongs to the stack. */
+        if (uv->location == &uv->closed)
+            value_free(&uv->closed);
+        break;
+    }
+    }
 }
 
 void gc_free_all(void) {

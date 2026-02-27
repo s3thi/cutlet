@@ -15,6 +15,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "gc.h"
+
 /* Forward declaration of Chunk (defined in chunk.h).
  * Needed here because ObjFunction owns a compiled Chunk. */
 typedef struct Chunk Chunk;
@@ -63,6 +65,7 @@ typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
 /*
  * ObjFunction - represents a user-defined or native function.
  *
+ * obj:           GC object header (must be first field for Obj* casting).
  * refcount:      Reference count for shared ownership (closures, clones).
  * name:          Function name (heap-allocated, NULL for anonymous functions).
  * arity:         Number of parameters.
@@ -72,6 +75,7 @@ typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
  * native:        Native function pointer (NULL for user-defined functions).
  */
 typedef struct {
+    Obj obj;
     size_t refcount;
     char *name;
     int arity;
@@ -87,12 +91,14 @@ typedef struct {
  * Reference-counted for structural sharing (value semantics with COW).
  * Mutation operations check refcount and deep-clone if shared.
  *
+ * obj:      GC object header (must be first field for Obj* casting).
  * refcount: Number of Value references pointing to this ObjArray.
  * data:     Owned array of Values (each element is a full Value).
  * count:    Number of elements currently stored.
  * capacity: Allocated capacity of the data array.
  */
 typedef struct {
+    Obj obj;
     size_t refcount;
     Value *data;
     size_t count;
@@ -134,12 +140,16 @@ struct Value {
  * When closed (variable goes out of scope), the value is copied into
  * `closed` and `location` is redirected to `&closed`.
  *
+ * obj:      GC object header (must be first field for Obj* casting).
  * refcount: Reference count (multiple closures can share an upvalue).
  * location: Points to the stack slot (open) or &closed (closed).
  * closed:   Holds the value after the upvalue is closed.
  * next:     Linked list pointer for the VM's open-upvalue list.
+ *           NOTE: This is distinct from Obj.next (GC object list).
+ *           Both linked-list pointers coexist.
  */
 struct ObjUpvalue {
+    Obj obj;
     size_t refcount;
     Value *location;
     Value closed;
@@ -152,12 +162,14 @@ struct ObjUpvalue {
  * Every user-defined function at runtime is represented as a closure,
  * even if it captures nothing (upvalue_count == 0).
  *
+ * obj:           GC object header (must be first field for Obj* casting).
  * refcount:      Reference count for shared ownership.
  * function:      The underlying compiled function (refcounted, not owned uniquely).
  * upvalues:      Array of pointers to captured upvalues (NULL entries until filled).
  * upvalue_count: Length of the upvalues array.
  */
 struct ObjClosure {
+    Obj obj;
     size_t refcount;
     ObjFunction *function;
     ObjUpvalue **upvalues;
@@ -173,8 +185,11 @@ typedef struct {
 /* Heap-allocated backing store for maps. Reference-counted.
  * Entries are stored in a dense array in insertion order.
  * Lookup is O(n) linear scan — sufficient for typical shell-script
- * map sizes. Can be upgraded to a hash index later without API changes. */
+ * map sizes. Can be upgraded to a hash index later without API changes.
+ *
+ * obj: GC object header (must be first field for Obj* casting). */
 struct ObjMap {
+    Obj obj;           /* GC object header. */
     size_t refcount;   /* Reference count (1 on creation). */
     MapEntry *entries; /* Owned array of key-value pairs. */
     size_t count;      /* Number of live entries. */
