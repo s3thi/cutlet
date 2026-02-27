@@ -477,7 +477,7 @@ TEST(test_disassemble_closure_no_upvalues) {
     chunk_write(inner, OP_NOTHING, 1);
     chunk_write(inner, OP_RETURN, 1);
 
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("my_closure");
     fn->arity = 0;
     fn->params = NULL;
@@ -515,7 +515,7 @@ TEST(test_disassemble_closure_with_upvalues) {
     chunk_write(inner, OP_NOTHING, 1);
     chunk_write(inner, OP_RETURN, 1);
 
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("capturing");
     fn->arity = 0;
     fn->params = NULL;
@@ -567,7 +567,7 @@ TEST(test_obj_upvalue_new) {
 
 TEST(test_obj_closure_new) {
     /* Create an ObjClosure wrapping a simple ObjFunction. */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("test_fn");
     fn->arity = 0;
     fn->params = NULL;
@@ -593,7 +593,7 @@ TEST(test_obj_closure_new) {
 
 TEST(test_closure_value_format_named) {
     /* value_format for VAL_CLOSURE with a named function shows "<fn name>". */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("greet");
     fn->arity = 0;
     fn->params = NULL;
@@ -609,12 +609,15 @@ TEST(test_closure_value_format_named) {
     ASSERT(strcmp(fmt, "<fn greet>") == 0, "should format as <fn greet>");
     free(fmt);
     value_free(&v);
+    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
+     * We still hold the test's reference, so free it explicitly. */
+    obj_function_free(fn);
     PASS();
 }
 
 TEST(test_closure_value_format_anonymous) {
     /* value_format for VAL_CLOSURE with anonymous function shows "<fn>". */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = NULL;
     fn->arity = 0;
     fn->params = NULL;
@@ -630,12 +633,15 @@ TEST(test_closure_value_format_anonymous) {
     ASSERT(strcmp(fmt, "<fn>") == 0, "should format as <fn>");
     free(fmt);
     value_free(&v);
+    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
+     * We still hold the test's reference, so free it explicitly. */
+    obj_function_free(fn);
     PASS();
 }
 
 TEST(test_closure_clone_refcount) {
     /* Clone a VAL_CLOSURE, verify refcount is 2. Free clone, verify refcount is 1. */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("cloned_fn");
     fn->arity = 0;
     fn->params = NULL;
@@ -659,12 +665,15 @@ TEST(test_closure_clone_refcount) {
     ASSERT(cl->refcount == 1, "refcount should be 1 after freeing clone");
 
     value_free(&v);
+    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
+     * We still hold the test's reference, so free it explicitly. */
+    obj_function_free(fn);
     PASS();
 }
 
 TEST(test_closure_is_truthy) {
     /* Closures are always truthy. */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = NULL;
     fn->arity = 0;
     fn->params = NULL;
@@ -677,12 +686,15 @@ TEST(test_closure_is_truthy) {
     Value v = make_closure(cl);
     ASSERT(is_truthy(&v) == true, "closure should be truthy");
     value_free(&v);
+    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
+     * We still hold the test's reference, so free it explicitly. */
+    obj_function_free(fn);
     PASS();
 }
 
 TEST(test_function_refcount_clone) {
     /* VAL_FUNCTION clone should increment refcount (not deep-copy). */
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("native_fn");
     fn->arity = 0;
     fn->params = NULL;

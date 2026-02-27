@@ -1238,7 +1238,7 @@ TEST(test_str_compose_concat) {
  * Caller gets a fully heap-allocated ObjFunction suitable for
  * make_function() (which takes ownership). */
 static ObjFunction *test_make_obj_function(const char *name, int arity, const char **param_names) {
-    ObjFunction *fn = calloc(1, sizeof(ObjFunction));
+    ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = name ? strdup(name) : NULL;
     fn->arity = arity;
     if (arity > 0 && param_names) {

@@ -1742,11 +1742,16 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 ObjArray *mask = idx_val.array;
                 /* Mask must be same length as source array. */
                 if (mask->count != src->count) {
+                    /* Save counts before freeing — the arrays may be
+                     * deallocated by value_free, so we cannot dereference
+                     * src/mask pointers after the free calls. */
+                    size_t mask_count = mask->count;
+                    size_t src_count = src->count;
                     value_free(&arr_val);
                     value_free(&idx_val);
                     return vm_runtime_error(vm,
                                             "mask length (%zu) does not match array length (%zu)",
-                                            mask->count, src->count);
+                                            mask_count, src_count);
                 }
                 /* Validate all mask elements are booleans. */
                 for (size_t i = 0; i < mask->count; i++) {
