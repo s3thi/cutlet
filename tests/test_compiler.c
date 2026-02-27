@@ -7,6 +7,7 @@
 
 #include "../src/chunk.h"
 #include "../src/compiler.h"
+#include "../src/gc.h"
 #include "../src/parser.h"
 #include "../src/value.h"
 #include <stdio.h>
@@ -1036,6 +1037,11 @@ TEST(test_compile_zip_map_prefix_error) {
  * ============================================================ */
 
 int main(void) {
+    /* Initialize GC state so gc_alloc() (called internally by the
+     * compiler for ObjString and ObjFunction allocations) has a proper
+     * threshold and doesn't trigger premature collections. */
+    gc_init();
+
     printf("Running compiler tests...\n\n");
 
     printf("Literals:\n");

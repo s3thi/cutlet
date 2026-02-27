@@ -8,9 +8,8 @@
  * that the GC can walk all live objects via a single linked list.
  *
  * This is the structural foundation for mark-and-sweep GC.
- * gc_collect() marks all reachable objects and clears marks afterward.
- * Sweep (actual freeing of unreachable objects) is implemented in
- * a later GC task.
+ * gc_collect() marks all reachable objects, sweeps (frees) unreachable
+ * ones, and updates the allocation threshold for the next cycle.
  *
  * Refcounting remains the primary lifetime management mechanism
  * during the transition period. The GC list exists alongside it.
@@ -113,9 +112,12 @@ void gc_free_object(Obj *obj);
 void gc_free_all(void);
 
 /*
- * Run a garbage collection cycle. Marks all reachable objects via
- * gc_mark_roots(), then clears all is_marked flags. No objects are
- * freed yet (sweep is task 4).
+ * Run a full mark-and-sweep garbage collection cycle:
+ *   1. gc_mark_roots() marks all reachable objects.
+ *   2. gc_sweep() frees unmarked objects, clears marks on survivors.
+ *   3. Updates next_gc threshold based on surviving bytes.
+ *
+ * When GC_LOG is defined, prints collection stats to stderr.
  */
 void gc_collect(void);
 

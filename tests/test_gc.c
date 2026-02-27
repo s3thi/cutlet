@@ -221,17 +221,25 @@ TEST(test_gc_mark_simple_object) {
 }
 
 /* ============================================================
- * test_gc_mark_clears_after_collect: collect resets all marks
+ * test_gc_mark_clears_after_collect: gc_collect frees
+ * unreachable objects.
  *
- * gc_collect() marks reachable objects then clears all marks
- * (since there's no sweep yet). With no VM active, no objects
- * are reachable, so all marks should be false after collect.
+ * gc_collect() marks reachable objects then sweeps: unmarked
+ * (unreachable) objects are freed and marks on survivors are
+ * cleared. With no VM active and no globals, all objects are
+ * unreachable and should be swept.
+ *
+ * Note: previously this test verified that marks were cleared
+ * (before sweep existed). Now it verifies that unreachable
+ * objects are freed by collect.
  * ============================================================ */
 
 TEST(test_gc_mark_clears_after_collect) {
-    gc_init();
+    /* Use runtime_init so gc_collect can call runtime_mark_globals. */
+    runtime_init();
+    gc_set_vm(NULL);
 
-    /* Allocate several objects of different types. */
+    /* Allocate several objects of different types — none are rooted. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ObjMap *m = (ObjMap *)gc_alloc(OBJ_MAP, sizeof(ObjMap));
@@ -239,20 +247,16 @@ TEST(test_gc_mark_clears_after_collect) {
     ASSERT(arr != NULL, "arr alloc should succeed");
     ASSERT(fn != NULL, "fn alloc should succeed");
     ASSERT(m != NULL, "map alloc should succeed");
+    ASSERT(count_gc_objects() == 3, "should have 3 objects before collect");
 
-    /* Manually set marks to true to simulate a previous partial mark. */
-    arr->obj.is_marked = true;
-    fn->obj.is_marked = true;
-    m->obj.is_marked = true;
-
-    /* gc_collect() should mark roots (none active) then clear all marks. */
+    /* gc_collect() marks roots (none) then sweeps — all 3 unreachable
+     * objects should be freed. Do not access arr/fn/m after this. */
     gc_collect();
 
-    ASSERT(arr->obj.is_marked == false, "arr is_marked should be false after collect");
-    ASSERT(fn->obj.is_marked == false, "fn is_marked should be false after collect");
-    ASSERT(m->obj.is_marked == false, "map is_marked should be false after collect");
+    ASSERT(count_gc_objects() == 0, "all unreachable objects should be freed after collect");
+    ASSERT(gc_get_bytes_allocated() == 0, "bytes_allocated should be 0 after sweeping all");
 
-    gc_free_all();
+    runtime_destroy();
     PASS();
 }
 
@@ -453,12 +457,16 @@ TEST(test_gc_mark_closure_traces_function_and_upvalues) {
  * GC_STRESS (compile-time flag), gc_collect is called on every
  * gc_alloc — this test verifies that the basic code path works
  * even without that flag, by calling gc_collect explicitly.
+ *
+ * With sweep active, unreachable objects are freed by collect.
  * ============================================================ */
 
 TEST(test_gc_stress_mode) {
-    gc_init();
+    /* Use runtime_init so gc_collect can call runtime_mark_globals. */
+    runtime_init();
+    gc_set_vm(NULL);
 
-    /* Allocate a mix of object types. */
+    /* Allocate a mix of object types — none are rooted. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ObjMap *m = (ObjMap *)gc_alloc(OBJ_MAP, sizeof(ObjMap));
@@ -470,55 +478,52 @@ TEST(test_gc_stress_mode) {
     ASSERT(m != NULL, "map alloc should succeed");
     ASSERT(cl != NULL, "closure alloc should succeed");
     ASSERT(uv != NULL, "upvalue alloc should succeed");
+    ASSERT(count_gc_objects() == 5, "should have 5 objects before collect");
 
-    /* Call gc_collect — should mark roots (none) and clear all marks.
+    /* Call gc_collect — should mark roots (none) and sweep all.
      * The key assertion is that this doesn't crash or trigger any
-     * assertion failures. */
+     * assertion failures. All unreachable objects are freed. */
     gc_collect();
 
-    /* All objects should still exist (no sweep yet) and marks cleared. */
-    ASSERT(count_gc_objects() == 5, "all 5 objects should still exist");
-    ASSERT(arr->obj.is_marked == false, "arr mark should be cleared");
-    ASSERT(fn->obj.is_marked == false, "fn mark should be cleared");
-    ASSERT(m->obj.is_marked == false, "map mark should be cleared");
-    ASSERT(cl->obj.is_marked == false, "closure mark should be cleared");
-    ASSERT(uv->obj.is_marked == false, "upvalue mark should be cleared");
+    /* All objects were unreachable, so all should be freed. */
+    ASSERT(count_gc_objects() == 0, "all unreachable objects should be swept");
 
     /* Allocate more objects after collect — verify no corruption. */
     ObjArray *arr2 = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(arr2 != NULL, "post-collect alloc should succeed");
-    ASSERT(count_gc_objects() == 6, "should have 6 objects total");
+    ASSERT(count_gc_objects() == 1, "should have 1 object after post-collect alloc");
 
-    gc_free_all();
+    runtime_destroy();
     PASS();
 }
 
 /* ============================================================
  * test_gc_set_vm_null_safe: gc_mark_roots with no VM active
- * should not crash. With gc_vm == NULL, only globals would be
- * marked (but runtime_mark_globals is not yet implemented).
+ * should not crash. With gc_vm == NULL, only globals are
+ * marked. Unreachable objects are swept.
  * ============================================================ */
 
 TEST(test_gc_set_vm_null_safe) {
-    gc_init();
+    /* Use runtime_init so gc_collect can call runtime_mark_globals. */
+    runtime_init();
 
     /* Ensure gc_vm is NULL (default after gc_init or explicit set). */
     gc_set_vm(NULL);
 
-    /* Allocate some objects — they should NOT be marked since
-     * there's no VM and no globals marking yet. */
+    /* Allocate an object — it's unreachable (no VM, no globals). */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(arr != NULL, "arr alloc should succeed");
+    ASSERT(count_gc_objects() == 1, "should have 1 object before collect");
 
-    /* gc_collect calls gc_mark_roots which should be a no-op
-     * when gc_vm is NULL (no VM roots to walk). Should not crash. */
+    /* gc_collect calls gc_mark_roots (no-op when gc_vm is NULL and
+     * no globals), then sweeps. The unreachable object should be freed.
+     * Should not crash. */
     gc_collect();
 
-    /* Object should have is_marked == false because it's unreachable
-     * and gc_collect clears marks after marking. */
-    ASSERT(arr->obj.is_marked == false, "unreachable object should not be marked after collect");
+    /* Object was unreachable — it should be freed by sweep. */
+    ASSERT(count_gc_objects() == 0, "unreachable object should be freed after collect");
 
-    gc_free_all();
+    runtime_destroy();
     PASS();
 }
 

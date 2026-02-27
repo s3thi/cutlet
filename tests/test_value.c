@@ -1045,6 +1045,11 @@ TEST(test_make_error_uses_error_field) {
  * ============================================================ */
 
 int main(void) {
+    /* Initialize GC state so gc_alloc() (called internally by
+     * obj_array_new, obj_string_new, etc.) has a proper threshold
+     * and doesn't trigger premature collections. */
+    gc_init();
+
     printf("Running value tests...\n\n");
 
     printf("Array formatting:\n");

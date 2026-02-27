@@ -6,8 +6,8 @@
  * of all heap-allocated objects, enabling future mark-and-sweep
  * collection.
  *
- * gc_collect() marks all reachable objects and clears marks afterward.
- * Sweep (actual freeing of unreachable objects) is task 4.
+ * gc_collect() marks all reachable objects, sweeps (frees) unreachable
+ * ones, and updates the allocation threshold for the next cycle.
  *
  * Design notes:
  * - Module-level static GC state (like var_table in runtime.c).
@@ -24,6 +24,7 @@
 #include "runtime.h"
 #include "value.h"
 #include "vm.h"
+#include <stdio.h>
 #include <stdlib.h>
 
 /* Initial GC threshold: 1 MiB before first collection attempt. */
@@ -48,11 +49,17 @@ void *gc_alloc(ObjType type, size_t size) {
     /* In GC_STRESS mode, trigger a collection on every allocation.
      * This is a development-time check that helps catch missing GC
      * roots — if an object isn't properly rooted, a stress-mode
-     * collection during allocation will clear its mark and (once
-     * sweep is added) free it prematurely. */
+     * collection during allocation will free it prematurely. */
 #ifdef GC_STRESS
     gc_collect();
 #endif
+
+    /* Automatic GC triggering: when the heap has grown past the
+     * threshold, run a collection to reclaim unreachable objects.
+     * The threshold is adjusted after each collection in gc_collect(). */
+    if (gc.bytes_allocated > gc.next_gc) {
+        gc_collect();
+    }
 
     void *ptr = calloc(1, size);
     if (!ptr)
@@ -343,26 +350,46 @@ void gc_mark_roots(void) {
 }
 
 /*
- * gc_collect - run a garbage collection cycle.
+ * gc_collect - run a full mark-and-sweep garbage collection cycle.
  *
- * Marks all reachable objects via gc_mark_roots(), then clears
- * all is_marked flags on the object list. No objects are freed
- * yet (sweep is task 4).
+ * 1. Marks all reachable objects via gc_mark_roots().
+ * 2. Sweeps the object list via gc_sweep(), freeing unmarked objects
+ *    and clearing is_marked on survivors.
+ * 3. Updates the next_gc threshold based on surviving bytes: at least
+ *    1024 bytes, otherwise double the current allocation.
  *
- * TODO: sweep phase — see gc-sweep task.
+ * When GC_LOG is defined, prints collection stats to stderr.
  */
 void gc_collect(void) {
+#ifdef GC_LOG
+    size_t bytes_before = gc.bytes_allocated;
+
+    /* Count objects before sweep for logging. */
+    size_t obj_count_before = 0;
+    for (Obj *o = gc.objects; o != NULL; o = o->next)
+        obj_count_before++;
+#endif
+
     /* Mark all objects reachable from roots. */
     gc_mark_roots();
 
-    /* Clear all marks on the object list.
-     * This is temporary: once sweep is added (task 4), surviving
-     * objects' marks are cleared during sweep instead of here. */
-    Obj *obj = gc.objects;
-    while (obj) {
-        obj->is_marked = false;
-        obj = obj->next;
-    }
+    /* Sweep: free unreachable objects, clear marks on survivors. */
+    gc_sweep();
+
+    /* Update the collection threshold based on surviving bytes.
+     * Minimum threshold is 1024 bytes to avoid thrashing on small heaps. */
+    gc.next_gc = gc.bytes_allocated < 1024 ? 1024 : gc.bytes_allocated * 2;
+
+#ifdef GC_LOG
+    size_t obj_count_after = 0;
+    for (Obj *o = gc.objects; o != NULL; o = o->next)
+        obj_count_after++;
+
+    size_t objects_freed = obj_count_before - obj_count_after;
+    size_t bytes_freed = bytes_before - gc.bytes_allocated;
+    fprintf(stderr, "-- gc collected %zu objects, %zu bytes. %zu remaining.\n", objects_freed,
+            bytes_freed, gc.bytes_allocated);
+#endif
 }
 
 /* ---- Sweep phase ---- */

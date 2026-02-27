@@ -6,6 +6,7 @@
  */
 
 #include "../src/chunk.h"
+#include "../src/gc.h"
 #include "../src/value.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -747,6 +748,10 @@ TEST(test_disassemble_zip_map) {
  * ============================================================ */
 
 int main(void) {
+    /* Initialize GC state so gc_alloc() has a proper threshold and
+     * doesn't trigger premature collections during non-GC tests. */
+    gc_init();
+
     printf("Running chunk tests...\n\n");
 
     printf("Initialization:\n");
