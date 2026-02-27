@@ -15,8 +15,8 @@
  * - gc_free_all() frees object contents then the struct itself.
  * - free_object_contents() is the type-specific content destructor.
  *   It duplicates some logic from obj_*_free() in value.c, which
- *   is acceptable during the transition. Once refcounting is removed
- *   (GC task 5), obj_*_free() will be replaced entirely.
+ *   Refcounting has been removed (GC task 5). The GC sweep's
+ *   free_object_contents() is the sole content destructor.
  */
 
 #include "gc.h"
@@ -388,11 +388,8 @@ void gc_free_object(Obj *obj) {
  * because the Obj header is the first field of every concrete struct,
  * so the cast produces correct field offsets.
  *
- * This duplicates some logic from the existing obj_*_free() functions
- * in value.c. Both coexist during the transition: refcount-based
- * obj_*_free() handles normal lifetime, while free_object_contents()
- * handles gc_free_all() at shutdown. Once refcounting is removed
- * (GC task 5), obj_*_free() will be replaced entirely.
+ * This is the sole content destructor now that refcounting has been
+ * removed (GC task 5). Called by both gc_sweep() and gc_free_all().
  */
 static void free_object_contents(Obj *obj) {
     switch (obj->type) {

@@ -284,12 +284,12 @@ TEST(test_gc_mark_reachable_from_array) {
     /* Allocate a function and a closure wrapping it. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ASSERT(fn != NULL, "fn alloc should succeed");
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     ObjClosure *cl = (ObjClosure *)gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     ASSERT(cl != NULL, "closure alloc should succeed");
-    cl->refcount = 1;
+
     cl->function = fn;
     cl->upvalues = NULL;
     cl->upvalue_count = 0;
@@ -316,7 +316,7 @@ TEST(test_gc_mark_reachable_from_array) {
 
     /* Clean up: free data array manually, then gc_free_all frees the objects.
      * We must zero out arr->data first so gc_free_all doesn't try to
-     * value_free the closure element (which would decrement refcount). */
+     * value_free the closure element. */
     memset(&arr->data[0], 0, sizeof(Value));
     free(arr->data);
     arr->data = NULL;
@@ -346,12 +346,12 @@ TEST(test_gc_mark_reachable_from_map) {
     /* Allocate a function and closure for the map value. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ASSERT(fn != NULL, "fn alloc should succeed");
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     ObjClosure *cl = (ObjClosure *)gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     ASSERT(cl != NULL, "closure alloc should succeed");
-    cl->refcount = 1;
+
     cl->function = fn;
     cl->upvalues = NULL;
     cl->upvalue_count = 0;
@@ -382,7 +382,7 @@ TEST(test_gc_mark_reachable_from_map) {
     ASSERT(cl->obj.is_marked == true, "closure value should be marked");
 
     /* Clean up: zero out entries to prevent gc_free_all from
-     * value_free-ing the references (which would affect refcounts). */
+     * value_free-ing the references. */
     memset(&m->entries[0].key, 0, sizeof(Value));
     memset(&m->entries[0].value, 0, sizeof(Value));
     free(m->entries);
@@ -412,18 +412,17 @@ TEST(test_gc_mark_closure_traces_function_and_upvalues) {
     /* Allocate a function. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ASSERT(fn != NULL, "fn alloc should succeed");
-    fn->refcount = 1;
+
     fn->upvalue_count = 1;
 
     /* Allocate an ObjArray that will be the closed-over value. */
     ObjArray *closed_arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(closed_arr != NULL, "closed_arr alloc should succeed");
-    closed_arr->refcount = 1;
 
     /* Allocate an upvalue and close it with the array value. */
     ObjUpvalue *uv = (ObjUpvalue *)gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
     ASSERT(uv != NULL, "upvalue alloc should succeed");
-    uv->refcount = 1;
+
     /* Set up the closed value as a VAL_ARRAY. */
     memset(&uv->closed, 0, sizeof(Value));
     uv->closed.type = VAL_ARRAY;
@@ -434,7 +433,7 @@ TEST(test_gc_mark_closure_traces_function_and_upvalues) {
     /* Allocate a closure wrapping the function, with one upvalue. */
     ObjClosure *cl = (ObjClosure *)gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     ASSERT(cl != NULL, "closure alloc should succeed");
-    cl->refcount = 1;
+
     cl->function = fn;
     cl->upvalue_count = 1;
     cl->upvalues = (ObjUpvalue **)malloc(sizeof(ObjUpvalue *));
@@ -564,7 +563,6 @@ TEST(test_gc_mark_roots_marks_stack) {
     /* Create a GC-tracked array to put on the VM stack. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(arr != NULL, "arr alloc should succeed");
-    arr->refcount = 1;
 
     /* Set up a minimal VM with the array value on the stack. */
     VM vm;
@@ -606,12 +604,12 @@ TEST(test_gc_mark_roots_marks_frame_closures) {
     /* Create a GC-tracked function and closure. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ASSERT(fn != NULL, "fn alloc should succeed");
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     ObjClosure *cl = (ObjClosure *)gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     ASSERT(cl != NULL, "closure alloc should succeed");
-    cl->refcount = 1;
+
     cl->function = fn;
     cl->upvalues = NULL;
     cl->upvalue_count = 0;
@@ -653,7 +651,7 @@ TEST(test_gc_mark_roots_marks_open_upvalues) {
     /* Create a GC-tracked upvalue. */
     ObjUpvalue *uv = (ObjUpvalue *)gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
     ASSERT(uv != NULL, "upvalue alloc should succeed");
-    uv->refcount = 1;
+
     uv->next = NULL;
     /* Mark it as open: location points to some stack slot (not &closed). */
     memset(&uv->closed, 0, sizeof(Value));
@@ -708,7 +706,6 @@ TEST(test_gc_mark_roots_marks_globals) {
     /* Allocate a GC-tracked array. */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(arr != NULL, "arr alloc should succeed");
-    arr->refcount = 1;
 
     /* Build a VAL_ARRAY value referencing the GC-tracked object. */
     Value val;
@@ -717,11 +714,11 @@ TEST(test_gc_mark_roots_marks_globals) {
     val.array = arr;
 
     /* Store the value in a global variable. runtime_var_define
-     * clones the value, so arr's refcount will be bumped. */
+     * clones the value (shallow copy — same pointer). */
     RuntimeVarStatus st = runtime_var_define("test_arr", &val);
     ASSERT(st == RUNTIME_VAR_OK, "runtime_var_define should succeed");
 
-    /* The clone inside var_table also points to arr (refcount 2).
+    /* The clone inside var_table also points to arr (shared pointer).
      * Call gc_mark_roots — runtime_mark_globals should mark arr. */
     gc_unsuppress();
     gc_mark_roots();
@@ -750,7 +747,7 @@ TEST(test_gc_mark_native_function_null_chunk) {
      * all fields, so chunk is already NULL. */
     ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     ASSERT(fn != NULL, "fn alloc should succeed");
-    fn->refcount = 1;
+
     fn->chunk = NULL; /* Explicitly: this is a native function. */
 
     /* Mark the native function — should not crash or dereference
@@ -784,7 +781,6 @@ TEST(test_gc_mark_stack_allocated_script_objects) {
      * on the GC list (gc_alloc was not called). */
     ObjFunction script_fn = {
         .obj = {.type = OBJ_FUNCTION},
-        .refcount = 1,
         .name = NULL,
         .arity = 0,
         .upvalue_count = 0,
@@ -795,7 +791,6 @@ TEST(test_gc_mark_stack_allocated_script_objects) {
 
     ObjClosure script_closure = {
         .obj = {.type = OBJ_CLOSURE},
-        .refcount = 1,
         .function = &script_fn,
         .upvalues = NULL,
         .upvalue_count = 0,
@@ -919,7 +914,6 @@ TEST(test_gc_collect_full_cycle) {
     /* Allocate a GC-tracked array that will be reachable via a global. */
     ObjArray *reachable = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(reachable != NULL, "reachable alloc should succeed");
-    reachable->refcount = 1;
 
     /* Store the reachable array in a global variable. */
     Value val;
@@ -1011,7 +1005,6 @@ TEST(test_gc_threshold_grows) {
     /* Allocate a reachable object (stored in a global). */
     ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     ASSERT(arr != NULL, "arr alloc should succeed");
-    arr->refcount = 1;
 
     Value val;
     memset(&val, 0, sizeof(Value));

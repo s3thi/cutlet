@@ -44,12 +44,7 @@ Value make_bool(bool b) { return (Value){.type = VAL_BOOL, .boolean = b}; }
 
 Value make_nothing(void) { return (Value){.type = VAL_NOTHING}; }
 
-Value make_function(ObjFunction *fn) {
-    /* Ensure refcount starts at 1 for the owning Value. */
-    if (fn)
-        fn->refcount = 1;
-    return (Value){.type = VAL_FUNCTION, .function = fn};
-}
+Value make_function(ObjFunction *fn) { return (Value){.type = VAL_FUNCTION, .function = fn}; }
 
 Value make_native(const char *name, int arity, NativeFn fn) {
     ObjFunction *obj = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
@@ -61,7 +56,7 @@ Value make_native(const char *name, int arity, NativeFn fn) {
     obj->params = NULL; /* Natives don't expose parameter names. */
     obj->chunk = NULL;  /* No compiled body — dispatch via native pointer. */
     obj->native = fn;
-    /* refcount is set to 1 by make_function. */
+    /* Wrap in a Value via make_function. */
     return make_function(obj);
 }
 
@@ -82,44 +77,25 @@ ObjUpvalue *obj_upvalue_new(Value *slot) {
     ObjUpvalue *uv = gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
     if (!uv)
         return NULL;
-    uv->refcount = 1;
     uv->location = slot;
     /* closed is zero-initialized by calloc (VAL_NUMBER 0.0). */
     uv->next = NULL;
     return uv;
 }
 
-void obj_upvalue_free(ObjUpvalue *uv) {
-    if (!uv)
-        return;
-    if (uv->refcount > 0)
-        uv->refcount--;
-    if (uv->refcount == 0) {
-        /* If the upvalue is closed, free the captured value. */
-        if (uv->location == &uv->closed)
-            value_free(&uv->closed);
-        /* Unlink from GC object list before freeing. */
-        gc_unlink((Obj *)uv);
-        free(uv);
-    }
-}
+/* obj_upvalue_free() removed — the GC sweep handles upvalue cleanup
+ * via free_object_contents() in gc.c. */
 
 ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
     ObjClosure *cl = gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     if (!cl)
         return NULL;
-    cl->refcount = 1;
     cl->function = fn;
     cl->upvalue_count = upvalue_count;
-    /* Increment the function's refcount — the closure holds a reference. */
-    if (fn)
-        fn->refcount++;
     /* Allocate upvalue pointer array (all NULL initially). */
     if (upvalue_count > 0) {
         cl->upvalues = (ObjUpvalue **)calloc((size_t)upvalue_count, sizeof(ObjUpvalue *));
         if (!cl->upvalues) {
-            if (fn)
-                fn->refcount--;
             /* Unlink from GC object list before freeing (error path). */
             gc_unlink((Obj *)cl);
             free(cl);
@@ -131,50 +107,11 @@ ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
     return cl;
 }
 
-void obj_closure_free(ObjClosure *cl) {
-    if (!cl)
-        return;
-    if (cl->refcount > 0)
-        cl->refcount--;
-    if (cl->refcount == 0) {
-        /* Release each upvalue reference. */
-        for (int i = 0; i < cl->upvalue_count; i++) {
-            if (cl->upvalues[i])
-                obj_upvalue_free(cl->upvalues[i]);
-        }
-        free((void *)cl->upvalues);
-        /* Decrement the function's refcount; free if last reference. */
-        if (cl->function) {
-            if (cl->function->refcount > 0)
-                cl->function->refcount--;
-            if (cl->function->refcount == 0)
-                obj_function_free(cl->function);
-        }
-        /* Unlink from GC object list before freeing. */
-        gc_unlink((Obj *)cl);
-        free(cl);
-    }
-}
+/* obj_closure_free() removed — the GC sweep handles closure cleanup
+ * via free_object_contents() in gc.c. */
 
-/* Free an ObjFunction and all its owned data (unconditionally). */
-void obj_function_free(ObjFunction *fn) {
-    if (!fn)
-        return;
-    free(fn->name);
-    if (fn->params) {
-        for (int i = 0; i < fn->arity; i++) {
-            free(fn->params[i]);
-        }
-        free((void *)fn->params);
-    }
-    if (fn->chunk) {
-        chunk_free(fn->chunk);
-        free(fn->chunk);
-    }
-    /* Unlink from GC object list before freeing. */
-    gc_unlink((Obj *)fn);
-    free(fn);
-}
+/* obj_function_free() removed — the GC sweep handles function cleanup
+ * via free_object_contents() in gc.c. */
 
 /* ---- ObjString utilities ---- */
 
@@ -258,7 +195,6 @@ ObjArray *obj_array_new(void) {
     ObjArray *arr = gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
     if (!arr)
         return NULL;
-    arr->refcount = 1;
     arr->data = NULL;
     arr->count = 0;
     arr->capacity = 0;
@@ -304,28 +240,11 @@ ObjArray *obj_array_clone_deep(const ObjArray *src) {
     return clone;
 }
 
-void obj_array_ensure_owned(Value *v) {
-    if (!v || v->type != VAL_ARRAY || !v->array)
-        return;
-    if (v->array->refcount <= 1)
-        return; /* Already sole owner — no copy needed. */
-    /* Detach: decrement the shared refcount and replace with a deep clone. */
-    v->array->refcount--;
-    v->array = obj_array_clone_deep(v->array);
-}
+/* obj_array_ensure_owned() removed — arrays now have reference semantics.
+ * No COW detach is needed; mutations are visible through all references. */
 
-/* Free an ObjArray's elements and backing storage (unconditionally). */
-static void obj_array_free(ObjArray *arr) {
-    if (!arr)
-        return;
-    for (size_t i = 0; i < arr->count; i++) {
-        value_free(&arr->data[i]);
-    }
-    free(arr->data);
-    /* Unlink from GC object list before freeing. */
-    gc_unlink((Obj *)arr);
-    free(arr);
-}
+/* obj_array_free() removed — the GC sweep handles array cleanup
+ * via free_object_contents() in gc.c. */
 
 /* ---- Value equality (used by map key lookup and VM equality ops) ----
  * For VAL_STRING: O(1) pointer comparison thanks to string interning.
@@ -395,7 +314,6 @@ ObjMap *obj_map_new(void) {
     ObjMap *m = gc_alloc(OBJ_MAP, sizeof(ObjMap));
     if (!m)
         return NULL;
-    m->refcount = 1;
     m->entries = NULL;
     m->count = 0;
     m->capacity = 0;
@@ -465,73 +383,29 @@ ObjMap *obj_map_clone_deep(const ObjMap *src) {
     return clone;
 }
 
-void obj_map_ensure_owned(Value *v) {
-    if (!v || v->type != VAL_MAP || !v->map)
-        return;
-    if (v->map->refcount <= 1)
-        return; /* Already sole owner — no copy needed. */
-    /* Detach: decrement the shared refcount and replace with a deep clone. */
-    v->map->refcount--;
-    v->map = obj_map_clone_deep(v->map);
-}
+/* obj_map_ensure_owned() removed — maps now have reference semantics.
+ * No COW detach is needed; mutations are visible through all references. */
 
 Value make_map(ObjMap *m) { return (Value){.type = VAL_MAP, .map = m}; }
 
-/* Free an ObjMap's entries and backing storage (unconditionally). */
-static void obj_map_free(ObjMap *m) {
-    if (!m)
-        return;
-    for (size_t i = 0; i < m->count; i++) {
-        value_free(&m->entries[i].key);
-        value_free(&m->entries[i].value);
-    }
-    free(m->entries);
-    /* Unlink from GC object list before freeing. */
-    gc_unlink((Obj *)m);
-    free(m);
-}
+/* obj_map_free() removed — the GC sweep handles map cleanup
+ * via free_object_contents() in gc.c. */
 
 void value_free(Value *v) {
     if (!v)
         return;
-    /* With string interning (gc-sweep step 5), multiple Values may
-     * share the same ObjString pointer. value_free must NOT free the
-     * ObjString or its chars — the GC sweep handles that. Just null
-     * out the pointer to release this Value's reference. */
-    if (v->type == VAL_STRING) {
-        v->string = NULL;
-    }
-    /* Free error message for VAL_ERROR (plain heap-allocated char*). */
+    /* Only VAL_ERROR has non-GC heap data that needs freeing. */
     if (v->type == VAL_ERROR && v->error) {
         free(v->error);
         v->error = NULL;
     }
-    if (v->type == VAL_FUNCTION && v->function) {
-        /* Decrement refcount; only free when no references remain. */
-        if (v->function->refcount > 0)
-            v->function->refcount--;
-        if (v->function->refcount == 0)
-            obj_function_free(v->function);
-        v->function = NULL;
-    }
-    if (v->type == VAL_CLOSURE && v->closure) {
-        obj_closure_free(v->closure);
-        v->closure = NULL;
-    }
-    if (v->type == VAL_ARRAY && v->array) {
-        if (v->array->refcount > 0)
-            v->array->refcount--;
-        if (v->array->refcount == 0)
-            obj_array_free(v->array);
-        v->array = NULL;
-    }
-    if (v->type == VAL_MAP && v->map) {
-        if (v->map->refcount > 0)
-            v->map->refcount--;
-        if (v->map->refcount == 0)
-            obj_map_free(v->map);
-        v->map = NULL;
-    }
+    /* GC-managed types: null out the pointer. The GC handles freeing.
+     * We null the pointer to prevent dangling references in debug builds. */
+    v->function = NULL;
+    v->closure = NULL;
+    v->array = NULL;
+    v->map = NULL;
+    v->string = NULL;
 }
 
 char *value_format(const Value *v) {
@@ -744,53 +618,14 @@ bool value_clone(Value *out, const Value *src) {
     if (!out || !src)
         return false;
     *out = *src;
-    if (src->type == VAL_STRING) {
-        /* With string interning, all identical strings share one ObjString*.
-         * Just copy the pointer — no allocation or intern-table lookup needed.
-         * The GC keeps the ObjString alive as long as it's reachable. */
-        out->string = src->string;
-    } else {
-        out->string = NULL;
-    }
+    /* For VAL_ERROR, deep-copy the error message (not GC-managed). */
     if (src->type == VAL_ERROR) {
-        const char *s = src->error ? src->error : "";
-        out->error = strdup(s);
+        out->error = strdup(src->error ? src->error : "");
         if (!out->error)
             return false;
-    } else {
-        out->error = NULL;
     }
-    if (src->type == VAL_FUNCTION) {
-        /* Shared ownership via refcount — no deep copy needed. */
-        out->function = src->function;
-        if (out->function)
-            out->function->refcount++;
-    } else {
-        out->function = NULL;
-    }
-    if (src->type == VAL_CLOSURE) {
-        /* Shared ownership via refcount — closures share upvalues. */
-        out->closure = src->closure;
-        if (out->closure)
-            out->closure->refcount++;
-    } else {
-        out->closure = NULL;
-    }
-    if (src->type == VAL_ARRAY) {
-        /* Shared ownership via refcount — structural sharing (COW). */
-        out->array = src->array;
-        if (out->array)
-            out->array->refcount++;
-    } else {
-        out->array = NULL;
-    }
-    if (src->type == VAL_MAP) {
-        /* Shared ownership via refcount — structural sharing (COW). */
-        out->map = src->map;
-        if (out->map)
-            out->map->refcount++;
-    } else {
-        out->map = NULL;
-    }
+    /* All other types: shallow copy is sufficient.
+     * GC-managed pointers (function, closure, array, map, string)
+     * are shared references — the GC keeps them alive. */
     return true;
 }

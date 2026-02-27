@@ -1038,7 +1038,7 @@ say(len(xs))
 say(push(xs, 4))
 say(pop(xs))' "3
 [1, 2, 3, 4]
-[1, 2]"
+[1, 2, 3]"
 
 # Array equality via cutlet run
 test_run_file "array equality" 'say([1, 2, 3] == [1, 2, 3])

@@ -655,7 +655,7 @@ TEST(test_value_equal_maps_empty) {
 }
 
 TEST(test_value_equal_maps_same_backing) {
-    /* Same ObjMap (refcount shared) → trivially true. */
+    /* Same ObjMap (pointer shared) → trivially true. */
     ObjMap *m = obj_map_new();
     Value ka = make_string(strdup("a"));
     Value v1 = make_number(1);

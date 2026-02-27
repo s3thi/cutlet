@@ -31,8 +31,8 @@ typedef enum {
     VAL_ERROR,
     VAL_FUNCTION, /* Native functions (say, etc.) */
     VAL_CLOSURE,  /* User-defined functions wrapped in a closure */
-    VAL_ARRAY,    /* Heap-allocated array with reference-counted backing store */
-    VAL_MAP,      /* Heap-allocated map with reference-counted backing store */
+    VAL_ARRAY,    /* Heap-allocated array (GC-managed, reference semantics) */
+    VAL_MAP,      /* Heap-allocated map (GC-managed, reference semantics) */
 } ValueType;
 
 /* Forward declaration for the Value type (needed by NativeFn). */
@@ -67,17 +67,17 @@ typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
  * ObjFunction - represents a user-defined or native function.
  *
  * obj:           GC object header (must be first field for Obj* casting).
- * refcount:      Reference count for shared ownership (closures, clones).
  * name:          Function name (heap-allocated, NULL for anonymous functions).
  * arity:         Number of parameters.
  * upvalue_count: Number of upvalues this function captures (0 until capture is implemented).
  * params:        Parameter names (heap-allocated array of heap-allocated strings).
  * chunk:         Compiled body bytecode (heap-allocated, NULL for native functions).
  * native:        Native function pointer (NULL for user-defined functions).
+ *
+ * Lifetime managed by the GC (mark-and-sweep). No reference counting.
  */
 typedef struct {
     Obj obj;
-    size_t refcount;
     char *name;
     int arity;
     int upvalue_count;
@@ -109,18 +109,19 @@ typedef struct ObjString {
 /*
  * ObjArray - heap-allocated backing store for arrays.
  *
- * Reference-counted for structural sharing (value semantics with COW).
- * Mutation operations check refcount and deep-clone if shared.
+ * Arrays have reference semantics: multiple Values can point to the
+ * same ObjArray, and mutations through one reference are visible
+ * through all references.
  *
  * obj:      GC object header (must be first field for Obj* casting).
- * refcount: Number of Value references pointing to this ObjArray.
  * data:     Owned array of Values (each element is a full Value).
  * count:    Number of elements currently stored.
  * capacity: Allocated capacity of the data array.
+ *
+ * Lifetime managed by the GC (mark-and-sweep). No reference counting.
  */
 typedef struct {
     Obj obj;
-    size_t refcount;
     Value *data;
     size_t count;
     size_t capacity;
@@ -139,10 +140,10 @@ typedef struct ObjMap ObjMap;
  * - VAL_BOOL: boolean field holds the value.
  * - VAL_NOTHING: no payload.
  * - VAL_ERROR: error field holds a heap-allocated error message (char*).
- * - VAL_FUNCTION: function field holds a refcounted ObjFunction (natives).
- * - VAL_CLOSURE: closure field holds a refcounted ObjClosure (user functions).
- * - VAL_ARRAY: array field holds a refcounted ObjArray.
- * - VAL_MAP: map field holds a refcounted ObjMap.
+ * - VAL_FUNCTION: function field holds a GC-managed ObjFunction (natives).
+ * - VAL_CLOSURE: closure field holds a GC-managed ObjClosure (user functions).
+ * - VAL_ARRAY: array field holds a GC-managed ObjArray.
+ * - VAL_MAP: map field holds a GC-managed ObjMap.
  *
  * Note: string and error are separate fields. VAL_STRING uses ObjString*
  * (GC-tracked), while VAL_ERROR uses a plain char* (heap-allocated). */
@@ -153,10 +154,10 @@ struct Value {
     bool boolean;
     ObjString *string;     /* owned; non-NULL only for VAL_STRING */
     char *error;           /* owned; non-NULL only for VAL_ERROR */
-    ObjFunction *function; /* refcounted; non-NULL only for VAL_FUNCTION */
-    ObjClosure *closure;   /* refcounted; non-NULL only for VAL_CLOSURE */
-    ObjArray *array;       /* refcounted; non-NULL only for VAL_ARRAY */
-    ObjMap *map;           /* refcounted; non-NULL only for VAL_MAP */
+    ObjFunction *function; /* GC-managed; non-NULL only for VAL_FUNCTION */
+    ObjClosure *closure;   /* GC-managed; non-NULL only for VAL_CLOSURE */
+    ObjArray *array;       /* GC-managed; non-NULL only for VAL_ARRAY */
+    ObjMap *map;           /* GC-managed; non-NULL only for VAL_MAP */
 };
 
 /*
@@ -167,16 +168,16 @@ struct Value {
  * `closed` and `location` is redirected to `&closed`.
  *
  * obj:      GC object header (must be first field for Obj* casting).
- * refcount: Reference count (multiple closures can share an upvalue).
  * location: Points to the stack slot (open) or &closed (closed).
  * closed:   Holds the value after the upvalue is closed.
  * next:     Linked list pointer for the VM's open-upvalue list.
  *           NOTE: This is distinct from Obj.next (GC object list).
  *           Both linked-list pointers coexist.
+ *
+ * Lifetime managed by the GC (mark-and-sweep). No reference counting.
  */
 struct ObjUpvalue {
     Obj obj;
-    size_t refcount;
     Value *location;
     Value closed;
     struct ObjUpvalue *next;
@@ -189,14 +190,14 @@ struct ObjUpvalue {
  * even if it captures nothing (upvalue_count == 0).
  *
  * obj:           GC object header (must be first field for Obj* casting).
- * refcount:      Reference count for shared ownership.
- * function:      The underlying compiled function (refcounted, not owned uniquely).
+ * function:      The underlying compiled function (GC-managed, shared).
  * upvalues:      Array of pointers to captured upvalues (NULL entries until filled).
  * upvalue_count: Length of the upvalues array.
+ *
+ * Lifetime managed by the GC (mark-and-sweep). No reference counting.
  */
 struct ObjClosure {
     Obj obj;
-    size_t refcount;
     ObjFunction *function;
     ObjUpvalue **upvalues;
     int upvalue_count;
@@ -208,15 +209,16 @@ typedef struct {
     Value value; /* Owned value. */
 } MapEntry;
 
-/* Heap-allocated backing store for maps. Reference-counted.
+/* Heap-allocated backing store for maps. Reference semantics.
  * Entries are stored in a dense array in insertion order.
  * Lookup is O(n) linear scan — sufficient for typical shell-script
  * map sizes. Can be upgraded to a hash index later without API changes.
  *
+ * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ *
  * obj: GC object header (must be first field for Obj* casting). */
 struct ObjMap {
     Obj obj;           /* GC object header. */
-    size_t refcount;   /* Reference count (1 on creation). */
     MapEntry *entries; /* Owned array of key-value pairs. */
     size_t count;      /* Number of live entries. */
     size_t capacity;   /* Allocated capacity of entries array. */
@@ -246,7 +248,7 @@ Value make_nothing(void);
 /* Create an error Value with a formatted message. */
 Value make_error(const char *fmt, ...);
 
-/* Create a function Value. Sets fn->refcount = 1 if not already set. */
+/* Create a function Value. Wraps an ObjFunction in a Value. */
 Value make_function(ObjFunction *fn);
 
 /*
@@ -264,25 +266,16 @@ Value make_array(ObjArray *arr);
 
 /*
  * Allocate a new ObjUpvalue pointing to the given stack slot.
- * Returns NULL on allocation failure. Initial refcount is 1.
+ * Returns NULL on allocation failure. Lifetime managed by GC.
  */
 ObjUpvalue *obj_upvalue_new(Value *slot);
 
-/* Decrement an upvalue's refcount; free when it reaches 0. */
-void obj_upvalue_free(ObjUpvalue *uv);
-
 /*
  * Allocate a new ObjClosure wrapping the given function.
- * Increments fn->refcount. The upvalue pointer array is allocated
- * with all entries set to NULL. Returns NULL on allocation failure.
+ * The upvalue pointer array is allocated with all entries set to NULL.
+ * Returns NULL on allocation failure. Lifetime managed by GC.
  */
 ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count);
-
-/* Decrement a closure's refcount; free when it reaches 0. */
-void obj_closure_free(ObjClosure *cl);
-
-/* Free an ObjFunction when its refcount reaches 0. Exposed for tests. */
-void obj_function_free(ObjFunction *fn);
 
 /*
  * Allocate a new ObjString, copying `chars` (length bytes + null terminator).
@@ -298,22 +291,16 @@ ObjString *obj_string_new(const char *chars, size_t length);
  */
 ObjString *obj_string_take(char *chars, size_t length);
 
-/* Allocate a new empty ObjArray with refcount 1. Returns NULL on failure. */
+/* Allocate a new empty ObjArray. Returns NULL on failure. */
 ObjArray *obj_array_new(void);
 
 /* Append a value to an ObjArray, growing if needed. Takes ownership of v. */
 void obj_array_push(ObjArray *arr, Value v);
 
-/* Create a full independent deep copy of an ObjArray (refcount 1). */
+/* Create a full independent deep copy of an ObjArray. */
 ObjArray *obj_array_clone_deep(const ObjArray *src);
 
-/*
- * Copy-on-write helper: if the array's refcount > 1, replace it with
- * a deep clone so the caller can safely mutate it.
- */
-void obj_array_ensure_owned(Value *v);
-
-/* Allocate a new empty ObjMap with refcount 1. Returns NULL on failure. */
+/* Allocate a new empty ObjMap. Returns NULL on failure. */
 ObjMap *obj_map_new(void);
 
 /* Insert or update a key-value pair in a map. Clones key and value. */
@@ -325,14 +312,8 @@ Value *obj_map_get(const ObjMap *m, const Value *key);
 /* Return true if key exists in the map. */
 bool obj_map_has(const ObjMap *m, const Value *key);
 
-/* Create a full independent deep copy of an ObjMap (refcount 1). */
+/* Create a full independent deep copy of an ObjMap. */
 ObjMap *obj_map_clone_deep(const ObjMap *src);
-
-/*
- * Copy-on-write helper: if the map's refcount > 1, replace it with
- * a deep clone so the caller can safely mutate it.
- */
-void obj_map_ensure_owned(Value *v);
 
 /* Create a map Value (takes ownership of the ObjMap reference). */
 Value make_map(ObjMap *m);
@@ -349,13 +330,11 @@ bool value_equal(const Value *a, const Value *b);
 /* ---- Value utilities ---- */
 
 /*
- * Free any heap-allocated memory in a Value.
+ * Release a Value's resources.
  * Safe to call on zero-initialized Values.
- * For VAL_STRING: no-op (just nulls the pointer). The GC manages
- *   ObjString lifetime; interned strings are shared across Values.
- * For VAL_FUNCTION: decrements refcount; frees ObjFunction when 0.
- * For VAL_CLOSURE: decrements refcount; frees ObjClosure when 0.
- * For VAL_ARRAY: decrements refcount; frees ObjArray + elements when 0.
+ * For GC-managed types (STRING, FUNCTION, CLOSURE, ARRAY, MAP):
+ *   no-op — just nulls the pointer. The GC manages object lifetime.
+ * For VAL_ERROR: frees the heap-allocated error message.
  */
 void value_free(Value *v);
 
@@ -387,11 +366,9 @@ bool is_truthy(const Value *v);
 
 /*
  * Clone a Value.
- * For VAL_STRING: copies the ObjString* pointer directly (no allocation).
- *   Interned strings are shared and the GC manages their lifetime.
- * For VAL_FUNCTION: increments refcount (shared, not deep-copied).
- * For VAL_CLOSURE: increments closure refcount (shared upvalues).
- * For VAL_ARRAY: increments refcount (shallow copy, structural sharing).
+ * For GC-managed types (STRING, FUNCTION, CLOSURE, ARRAY, MAP):
+ *   copies the pointer — the GC keeps the object alive.
+ * For VAL_ERROR: deep-copies the error message string.
  * Returns true on success, false on allocation failure.
  */
 bool value_clone(Value *out, const Value *src);

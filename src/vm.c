@@ -235,8 +235,8 @@ static Value native_len(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
- * push(arr, val) — return a new array with val appended.
- * Does not mutate the original array (value semantics).
+ * push(arr, val) — append val to arr in-place (reference semantics).
+ * Returns the mutated array.
  */
 static Value native_push(int argc, Value *args, EvalContext *ctx) {
     (void)argc; /* Arity is checked by the VM before calling. */
@@ -247,24 +247,20 @@ static Value native_push(int argc, Value *args, EvalContext *ctx) {
                           value_type_name(args[0].type));
     }
 
-    /* Deep clone the input array so we don't mutate the original. */
-    ObjArray *new_arr = obj_array_clone_deep(args[0].array);
-    if (!new_arr)
-        return make_error("memory allocation failed");
-    gc_pin((Obj *)new_arr);
-
-    /* Clone the value to append (new_arr takes ownership of the clone). */
+    /* Mutate the array in-place (reference semantics). */
     Value elem;
     value_clone(&elem, &args[1]);
-    obj_array_push(new_arr, elem);
+    obj_array_push(args[0].array, elem);
 
-    gc_unpin();
-    return make_array(new_arr);
+    /* Return a Value pointing to the same array. */
+    Value result;
+    value_clone(&result, &args[0]);
+    return result;
 }
 
 /*
- * pop(arr) — return a new array without the last element.
- * Does not mutate the original array (value semantics).
+ * pop(arr) — remove the last element from arr in-place (reference semantics).
+ * Returns the mutated array (without the removed element).
  * Errors on empty arrays.
  */
 static Value native_pop(int argc, Value *args, EvalContext *ctx) {
@@ -280,20 +276,15 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
         return make_error("pop() on empty array");
     }
 
-    /* Build a new array with all elements except the last. */
-    ObjArray *new_arr = obj_array_new();
-    if (!new_arr)
-        return make_error("memory allocation failed");
-    gc_pin((Obj *)new_arr);
+    /* Remove the last element in-place (reference semantics).
+     * Free the removed element's resources. */
+    value_free(&src->data[src->count - 1]);
+    src->count--;
 
-    for (size_t i = 0; i < src->count - 1; i++) {
-        Value elem;
-        value_clone(&elem, &src->data[i]);
-        obj_array_push(new_arr, elem);
-    }
-
-    gc_unpin();
-    return make_array(new_arr);
+    /* Return a Value pointing to the same (now shorter) array. */
+    Value result;
+    value_clone(&result, &args[0]);
+    return result;
 }
 
 /*
@@ -438,7 +429,7 @@ static const char *value_type_name(ValueType type) {
  * Find or create an ObjUpvalue for the given stack slot.
  * Walks the VM's open-upvalue linked list (sorted by slot address,
  * descending) looking for an existing upvalue pointing to `slot`.
- * If found, increments its refcount and returns it.
+ * If found, returns it directly (GC manages lifetime, no refcount).
  * If not found, creates a new ObjUpvalue and inserts it into the
  * list at the correct position (maintaining descending order).
  * Returns NULL on allocation failure.
@@ -454,9 +445,9 @@ static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
         curr = curr->next;
     }
 
-    /* If we found an existing upvalue for this exact slot, reuse it. */
+    /* If we found an existing upvalue for this exact slot, reuse it.
+     * No refcount bump needed — GC manages upvalue lifetime. */
     if (curr != NULL && curr->location == slot) {
-        curr->refcount++;
         return curr;
     }
 
@@ -637,7 +628,6 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
      * — marking them is harmless. */
     ObjFunction script_fn = {
         .obj = {.type = OBJ_FUNCTION},
-        .refcount = 1,
         .name = NULL,
         .arity = 0,
         .upvalue_count = 0,
@@ -652,7 +642,6 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
      * The .obj.type must be OBJ_CLOSURE for correct GC mark tracing. */
     ObjClosure script_closure = {
         .obj = {.type = OBJ_CLOSURE},
-        .refcount = 1,
         .function = &script_fn,
         .upvalues = NULL,
         .upvalue_count = 0,
@@ -1486,7 +1475,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_DUP: {
-            /* Clone TOS and push the clone. Ownership is shared via refcount. */
+            /* Clone TOS and push the clone. GC-managed types share the pointer. */
             Value top;
             if (!vm_peek(vm, 0, &top)) {
                 return vm_runtime_error(vm, "stack underflow");
@@ -1646,11 +1635,10 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     cl->upvalues[i] = capture_upvalue(vm, &frame->slots[index]);
                 } else {
                     /* Copy an upvalue from the enclosing closure.
-                     * The enclosing closure must have upvalues for this path. */
+                     * The enclosing closure must have upvalues for this path.
+                     * No refcount bump needed — GC manages upvalue lifetime. */
                     if (frame->closure->upvalues != NULL) {
                         cl->upvalues[i] = frame->closure->upvalues[index];
-                        if (cl->upvalues[i])
-                            cl->upvalues[i]->refcount++;
                     } else {
                         cl->upvalues[i] = NULL;
                     }
@@ -2006,7 +1994,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
              *
              * Stack in:  [..., value, container, index]   (TOS = index)
              * Pop index, pop container. Peek value (now at TOS).
-             * COW the container if refcount > 1, set element, push modified container.
+             * Set element in-place (reference semantics), push container.
              * Stack out: [..., value, modified_container]
              *
              * The compiler follows this with SET_GLOBAL/LOCAL to write the
@@ -2046,9 +2034,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     value_free(&idx_val);
                     return vm_runtime_error(vm, "invalid map key type: %s", kt);
                 }
-                /* COW: ensure we own the backing store before mutating. */
-                obj_map_ensure_owned(&arr_val);
-                /* Insert or update the key-value pair. */
+                /* Insert or update the key-value pair (reference semantics). */
                 obj_map_set(arr_val.map, &idx_val, &val);
                 gc_unpin();
                 gc_unpin();
@@ -2094,9 +2080,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 value_free(&idx_val);
                 return vm_runtime_error(vm, "index out of bounds");
             }
-            /* COW: ensure we own the backing store before mutating. */
-            obj_array_ensure_owned(&arr_val);
-            /* Free old element and clone the new value into the slot. */
+            /* Free old element and clone the new value into the slot (reference semantics). */
             value_free(&arr_val.array->data[(size_t)int_idx]);
             Value cloned_val;
             if (!value_clone(&cloned_val, &val)) {

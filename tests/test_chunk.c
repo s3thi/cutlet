@@ -484,7 +484,7 @@ TEST(test_disassemble_closure_no_upvalues) {
     fn->params = NULL;
     fn->chunk = inner;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     int fn_idx = chunk_add_constant(&outer, make_function(fn));
@@ -522,7 +522,7 @@ TEST(test_disassemble_closure_with_upvalues) {
     fn->params = NULL;
     fn->chunk = inner;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 2;
 
     int fn_idx = chunk_add_constant(&outer, make_function(fn));
@@ -557,11 +557,11 @@ TEST(test_obj_upvalue_new) {
     Value slot = make_number(99.0);
     ObjUpvalue *uv = obj_upvalue_new(&slot);
     ASSERT(uv != NULL, "upvalue should be allocated");
-    ASSERT(uv->refcount == 1, "initial refcount should be 1");
     ASSERT(uv->location == &slot, "location should point to the slot");
     ASSERT(uv->location->number == 99.0, "should read value through location");
     ASSERT(uv->next == NULL, "next should be NULL");
-    obj_upvalue_free(uv);
+    /* GC manages upvalue lifetime — no manual free needed in tests
+     * that call gc_free_all() at teardown. */
     value_free(&slot);
     PASS();
 }
@@ -574,7 +574,7 @@ TEST(test_obj_closure_new) {
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     /* Mark fn so it survives GC triggered by obj_closure_new's
@@ -584,16 +584,10 @@ TEST(test_obj_closure_new) {
 
     ObjClosure *cl = obj_closure_new(fn, 0);
     ASSERT(cl != NULL, "closure should be allocated");
-    ASSERT(cl->refcount == 1, "closure initial refcount should be 1");
     ASSERT(cl->function == fn, "closure should reference the function");
     ASSERT(cl->upvalue_count == 0, "upvalue_count should be 0");
-    /* obj_closure_new increments fn->refcount */
-    ASSERT(fn->refcount == 2, "function refcount should be 2 after closure creation");
-
-    obj_closure_free(cl);
-    /* After closure free, fn refcount should be decremented back to 1 */
-    ASSERT(fn->refcount == 1, "function refcount should be 1 after closure free");
-    obj_function_free(fn);
+    /* GC manages lifetime — no manual free needed. gc_free_all() at
+     * teardown will clean up both closure and function. */
     PASS();
 }
 
@@ -605,7 +599,7 @@ TEST(test_closure_value_format_named) {
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
@@ -617,9 +611,8 @@ TEST(test_closure_value_format_named) {
     ASSERT(strcmp(fmt, "<fn greet>") == 0, "should format as <fn greet>");
     free(fmt);
     value_free(&v);
-    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
-     * We still hold the test's reference, so free it explicitly. */
-    obj_function_free(fn);
+    /* GC manages closure and function lifetime. gc_free_all() at
+     * teardown will clean up. */
     PASS();
 }
 
@@ -631,7 +624,7 @@ TEST(test_closure_value_format_anonymous) {
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
@@ -643,43 +636,38 @@ TEST(test_closure_value_format_anonymous) {
     ASSERT(strcmp(fmt, "<fn>") == 0, "should format as <fn>");
     free(fmt);
     value_free(&v);
-    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
-     * We still hold the test's reference, so free it explicitly. */
-    obj_function_free(fn);
+    /* GC manages closure and function lifetime. gc_free_all() at
+     * teardown will clean up. */
     PASS();
 }
 
 TEST(test_closure_clone_refcount) {
-    /* Clone a VAL_CLOSURE, verify refcount is 2. Free clone, verify refcount is 1. */
+    /* Clone a VAL_CLOSURE — both values should share the same ObjClosure pointer.
+     * No refcount: GC manages lifetime. */
     ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("cloned_fn");
     fn->arity = 0;
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
     fn->obj.is_marked = true;
     ObjClosure *cl = obj_closure_new(fn, 0);
     Value v = make_closure(cl);
-    ASSERT(cl->refcount == 1, "initial closure refcount should be 1");
 
     Value cloned;
     bool ok = value_clone(&cloned, &v);
     ASSERT(ok, "clone should succeed");
     ASSERT(cloned.type == VAL_CLOSURE, "cloned type should be VAL_CLOSURE");
     ASSERT(cloned.closure == cl, "cloned should share same ObjClosure");
-    ASSERT(cl->refcount == 2, "refcount should be 2 after clone");
 
     value_free(&cloned);
-    ASSERT(cl->refcount == 1, "refcount should be 1 after freeing clone");
-
     value_free(&v);
-    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
-     * We still hold the test's reference, so free it explicitly. */
-    obj_function_free(fn);
+    /* GC manages closure and function lifetime. gc_free_all() at
+     * teardown will clean up. */
     PASS();
 }
 
@@ -691,7 +679,7 @@ TEST(test_closure_is_truthy) {
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     /* Protect fn from GC during obj_closure_new (see test_obj_closure_new). */
@@ -700,35 +688,33 @@ TEST(test_closure_is_truthy) {
     Value v = make_closure(cl);
     ASSERT(is_truthy(&v) == true, "closure should be truthy");
     value_free(&v);
-    /* value_free freed the closure, decrementing fn->refcount from 2 to 1.
-     * We still hold the test's reference, so free it explicitly. */
-    obj_function_free(fn);
+    /* GC manages closure and function lifetime. gc_free_all() at
+     * teardown will clean up. */
     PASS();
 }
 
 TEST(test_function_refcount_clone) {
-    /* VAL_FUNCTION clone should increment refcount (not deep-copy). */
+    /* VAL_FUNCTION clone should share the same ObjFunction pointer.
+     * No refcount: GC manages lifetime. */
     ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("native_fn");
     fn->arity = 0;
     fn->params = NULL;
     fn->chunk = NULL;
     fn->native = NULL;
-    fn->refcount = 1;
+
     fn->upvalue_count = 0;
 
     Value v = make_function(fn);
-    ASSERT(fn->refcount == 1, "initial refcount should be 1");
 
     Value cloned;
     bool ok = value_clone(&cloned, &v);
     ASSERT(ok, "clone should succeed");
-    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
+    ASSERT(cloned.function == fn, "cloned should share same ObjFunction");
 
     value_free(&cloned);
-    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
-
     value_free(&v);
+    /* GC manages function lifetime. gc_free_all() at teardown cleans up. */
     PASS();
 }
 

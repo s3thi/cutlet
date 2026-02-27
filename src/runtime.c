@@ -170,9 +170,8 @@ bool runtime_init(void) {
 }
 
 /* Clears the variable environment and sweeps remaining GC objects.
- * var_table_clear() frees globals (which may gc_unlink some objects via
- * refcount-driven obj_*_free). gc_free_all() then sweeps any remaining
- * objects still on the GC list (e.g., future reference cycles).
+ * var_table_clear() frees Value wrappers in globals (nulling pointers).
+ * gc_free_all() then frees all GC-managed objects and their contents.
  * The eval lock lives for the process lifetime. */
 void runtime_destroy(void) {
     var_table_clear();
