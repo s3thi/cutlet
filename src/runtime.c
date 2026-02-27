@@ -14,6 +14,7 @@
  */
 
 #include "runtime.h"
+#include "gc.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -155,8 +156,12 @@ void (*runtime_test_on_lock_exit)(void) = NULL;
 
 /* Called exactly once by pthread_once. */
 static void runtime_init_impl(void) {
-    if (pthread_rwlock_init(&eval_lock, NULL) == 0)
+    if (pthread_rwlock_init(&eval_lock, NULL) == 0) {
         init_ok = true;
+        /* Initialize GC state after the lock is ready.
+         * GC state is protected by eval_lock (no separate sync needed). */
+        gc_init();
+    }
 }
 
 bool runtime_init(void) {
@@ -164,9 +169,15 @@ bool runtime_init(void) {
     return init_ok;
 }
 
-/* Clears the variable environment. The eval lock lives for the process
- * lifetime, so this remains safe to call any time. */
-void runtime_destroy(void) { var_table_clear(); }
+/* Clears the variable environment and sweeps remaining GC objects.
+ * var_table_clear() frees globals (which may gc_unlink some objects via
+ * refcount-driven obj_*_free). gc_free_all() then sweeps any remaining
+ * objects still on the GC list (e.g., future reference cycles).
+ * The eval lock lives for the process lifetime. */
+void runtime_destroy(void) {
+    var_table_clear();
+    gc_free_all();
+}
 
 void runtime_eval_lock(void) {
     /* Lazy init: safe to call even if runtime_init() was never called
