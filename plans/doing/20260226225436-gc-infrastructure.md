@@ -194,7 +194,7 @@ Run the full test suite:
 
 - [x] **Step 1**: Write tests for GC infrastructure — `tests/test_gc.c` created with 5 tests (test_gc_init, test_gc_alloc_single, test_gc_alloc_multiple, test_gc_free_object, test_gc_free_all). All pass.
 - [x] **Step 2**: Implement gc.h and gc.c — `src/gc.h` with ObjType enum, Obj struct, GC struct, function declarations, OBJ_TYPE macro, and test accessors. `src/gc.c` with gc_init, gc_alloc, gc_unlink, gc_free_object, gc_free_all (with no-op free_object_contents stub until Obj header is embedded), gc_collect no-op stub, and test accessors. Makefile updated with gc.c in LIB_SRCS and test_gc build/run targets (including sanitizer builds).
-- [ ] **Step 3**: Embed Obj header in all five heap object types
+- [x] **Step 3**: Embed Obj header in all five heap object types — Added `Obj obj` as first field of ObjFunction, ObjArray, ObjUpvalue, ObjClosure, ObjMap in `src/value.h`. Activated `free_object_contents()` in `src/gc.c` with type-dispatched content destructors. Fixed pre-existing implicit-widening lint warning in GC_INITIAL_THRESHOLD.
 - [ ] **Step 4**: Route all allocations through gc_alloc()
 - [ ] **Step 5**: Update free functions to unlink from GC list
 - [ ] **Step 6**: Initialize and tear down GC in runtime lifecycle
