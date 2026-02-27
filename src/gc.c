@@ -147,6 +147,13 @@ static void free_object_contents(Obj *obj) {
             value_free(&uv->closed);
         break;
     }
+    case OBJ_STRING: {
+        ObjString *s = (ObjString *)obj;
+        /* Free the owned character buffer. The ObjString struct itself
+         * is freed by the caller (gc_free_all walk). */
+        free(s->chars);
+        break;
+    }
     }
 }
 

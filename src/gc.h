@@ -4,7 +4,7 @@
  * Provides the Obj base header, object type tags, a global object
  * tracking list, and allocation/deallocation primitives. Every
  * heap-allocated object (ObjFunction, ObjClosure, ObjArray, ObjMap,
- * ObjUpvalue) will eventually embed an Obj as its first field so
+ * ObjUpvalue, ObjString) will eventually embed an Obj as its first field so
  * that the GC can walk all live objects via a single linked list.
  *
  * This is the structural foundation for mark-and-sweep GC.
@@ -28,6 +28,7 @@ typedef enum {
     OBJ_ARRAY,
     OBJ_MAP,
     OBJ_UPVALUE,
+    OBJ_STRING,
 } ObjType;
 
 /*

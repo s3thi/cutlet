@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "gc.h"
 
@@ -84,6 +85,26 @@ typedef struct {
     Chunk *chunk;
     NativeFn native;
 } ObjFunction;
+
+/*
+ * ObjString - GC-tracked string object.
+ *
+ * Wraps a heap-allocated char* with a precomputed FNV-1a hash and
+ * cached length. Allocated via gc_alloc(OBJ_STRING, ...) so it
+ * appears on the GC object list.
+ *
+ * obj:    GC object header (must be first field for Obj* casting).
+ * chars:  Null-terminated heap-allocated character data.
+ * length: Number of characters (excluding the null terminator).
+ * hash:   Precomputed FNV-1a hash of chars (for fast comparison and
+ *         future use in string interning / hash tables).
+ */
+typedef struct ObjString {
+    Obj obj;
+    char *chars;
+    size_t length;
+    uint32_t hash;
+} ObjString;
 
 /*
  * ObjArray - heap-allocated backing store for arrays.
@@ -250,6 +271,20 @@ void obj_closure_free(ObjClosure *cl);
 
 /* Free an ObjFunction when its refcount reaches 0. Exposed for tests. */
 void obj_function_free(ObjFunction *fn);
+
+/*
+ * Allocate a new ObjString, copying `chars` (length bytes + null terminator).
+ * Computes FNV-1a hash. Returns NULL on allocation failure.
+ * The caller retains ownership of the original `chars` buffer.
+ */
+ObjString *obj_string_new(const char *chars, size_t length);
+
+/*
+ * Allocate a new ObjString, taking ownership of `chars` (must be heap-allocated).
+ * Computes FNV-1a hash. Returns NULL on allocation failure.
+ * On success, the ObjString owns `chars` — the caller must not free it.
+ */
+ObjString *obj_string_take(char *chars, size_t length);
 
 /* Allocate a new empty ObjArray with refcount 1. Returns NULL on failure. */
 ObjArray *obj_array_new(void);

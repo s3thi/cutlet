@@ -158,6 +158,53 @@ void obj_function_free(ObjFunction *fn) {
     free(fn);
 }
 
+/* ---- ObjString utilities ---- */
+
+/*
+ * Compute FNV-1a hash over `length` bytes of `data`.
+ * Same algorithm as runtime.c's fnv1a(), but takes an explicit length
+ * instead of relying on null termination. This allows hashing strings
+ * that may contain embedded nulls in the future, and avoids depending
+ * on the runtime module.
+ */
+static uint32_t fnv1a_hash(const char *data, size_t length) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= (uint8_t)data[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+ObjString *obj_string_new(const char *chars, size_t length) {
+    ObjString *str = gc_alloc(OBJ_STRING, sizeof(ObjString));
+    if (!str)
+        return NULL;
+    /* Allocate a new buffer and copy the input chars + null terminator. */
+    char *buf = malloc(length + 1);
+    if (!buf) {
+        gc_free_object((Obj *)str);
+        return NULL;
+    }
+    memcpy(buf, chars, length);
+    buf[length] = '\0';
+    str->chars = buf;
+    str->length = length;
+    str->hash = fnv1a_hash(chars, length);
+    return str;
+}
+
+ObjString *obj_string_take(char *chars, size_t length) {
+    ObjString *str = gc_alloc(OBJ_STRING, sizeof(ObjString));
+    if (!str)
+        return NULL;
+    /* Take ownership of the caller's buffer — no copy needed. */
+    str->chars = chars;
+    str->length = length;
+    str->hash = fnv1a_hash(chars, length);
+    return str;
+}
+
 /* ---- ObjArray utilities ---- */
 
 ObjArray *obj_array_new(void) {
