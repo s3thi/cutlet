@@ -240,8 +240,10 @@ TEST(test_obj_array_clone_deep) {
     ASSERT(strcmp(clone->data[0].string->chars, "hello") == 0, "first element value");
     ASSERT(clone->data[1].number == 99, "second element value");
 
-    /* Modifying clone's string shouldn't affect original (different ObjString*). */
-    ASSERT(clone->data[0].string != arr->data[0].string, "strings should be independent copies");
+    /* With string interning, cloned strings share the same ObjString pointer
+     * (identical content = same interned object). This is the correct behavior. */
+    ASSERT(clone->data[0].string == arr->data[0].string,
+           "interned strings should share the same ObjString pointer");
 
     /* Clean up: free both arrays manually. */
     Value v1 = make_array(arr);
@@ -784,9 +786,10 @@ TEST(test_obj_map_clone_deep) {
     ASSERT(result->number == 99, "value should be 99");
     value_free(&lookup);
 
-    /* Keys should be independent copies. */
-    ASSERT(clone->entries[0].key.string != m->entries[0].key.string,
-           "key strings should be independent copies");
+    /* With string interning, cloned string keys share the same ObjString pointer
+     * (identical content = same interned object). This is the correct behavior. */
+    ASSERT(clone->entries[0].key.string == m->entries[0].key.string,
+           "interned string keys should share the same ObjString pointer");
 
     Value mv1 = make_map(m);
     Value mv2 = make_map(clone);
@@ -890,8 +893,10 @@ TEST(test_make_string_returns_val_string) {
 
 TEST(test_value_clone_string_independent) {
     /*
-     * Cloning a VAL_STRING value should produce an independent copy.
-     * Freeing the original should not affect the clone's string data.
+     * With string interning, cloning a VAL_STRING produces a Value
+     * that shares the same ObjString pointer (identical content is
+     * deduplicated). value_free for strings is a no-op (GC manages
+     * the ObjString lifetime), so the clone remains valid.
      */
     gc_init();
     Value original = make_string(strdup("original"));
@@ -899,10 +904,14 @@ TEST(test_value_clone_string_independent) {
     bool ok = value_clone(&clone, &original);
     ASSERT(ok, "clone should succeed");
     ASSERT(clone.type == VAL_STRING, "clone type should be VAL_STRING");
-    ASSERT(clone.string != original.string, "clone should have a different ObjString");
+    /* With interning, value_clone via obj_string_new returns the same
+     * interned ObjString for identical content. */
+    ASSERT(clone.string == original.string,
+           "interned clone should share the same ObjString pointer");
     ASSERT(strcmp(clone.string->chars, "original") == 0, "clone chars should match");
 
-    /* Free the original — clone should remain valid. */
+    /* Free the original — clone should remain valid because value_free
+     * for strings is now a no-op (GC handles lifetime). */
     value_free(&original);
     ASSERT(strcmp(clone.string->chars, "original") == 0,
            "clone chars should still be valid after freeing original");

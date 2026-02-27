@@ -26,6 +26,7 @@
 #include "vm.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Initial GC threshold: 1 MiB before first collection attempt. */
 #define GC_INITIAL_THRESHOLD ((size_t)1024 * 1024)
@@ -38,11 +39,177 @@ static GC gc;
  * Used by gc_mark_roots() to walk the VM's stack and call frames. */
 static VM *gc_vm;
 
+/* ---- String intern table ----
+ *
+ * Open-addressing hash table of ObjString* pointers (weak references).
+ * Deduplicates strings so that identical content always maps to the
+ * same ObjString instance. This enables O(1) string equality via
+ * pointer comparison.
+ *
+ * Entries are weak references: the intern table does NOT keep strings
+ * alive. gc_sweep() removes dead (unmarked) entries before freeing
+ * the ObjString. A tombstone sentinel marks deleted slots so that
+ * probe chains remain intact across removals. */
+
+#define INTERN_INIT_CAP 64
+#define INTERN_MAX_LOAD 0.75
+
+/* Tombstone sentinel: marks a deleted slot in the intern table.
+ * Must be a unique address that can never be a valid ObjString*.
+ * We use the address of a static char as the sentinel value. */
+static char intern_tombstone_storage;
+#define INTERN_TOMBSTONE ((ObjString *)&intern_tombstone_storage)
+
+static ObjString **intern_table = NULL;
+static size_t intern_cap = 0;
+static size_t intern_count = 0; /* live entries (excludes tombstones) */
+/* intern_used tracks slots that are non-NULL (live + tombstones).
+ * This is the count used for load factor calculation, because
+ * tombstones still occupy probe chain positions. */
+static size_t intern_used = 0;
+
+/*
+ * intern_find - look up a string in the intern table by content.
+ *
+ * Uses open addressing with linear probing. Skips tombstones during
+ * the probe walk (they don't terminate the chain). Returns the
+ * matching ObjString* if found, NULL otherwise.
+ *
+ * Parameters:
+ *   chars  - the character data to look up
+ *   length - number of bytes in chars
+ *   hash   - precomputed FNV-1a hash of chars
+ */
+static ObjString *intern_find(const char *chars, size_t length, uint32_t hash) {
+    if (intern_cap == 0)
+        return NULL;
+
+    size_t index = hash & (intern_cap - 1);
+    for (;;) {
+        ObjString *entry = intern_table[index];
+        if (entry == NULL) {
+            /* Empty slot: end of probe chain — string not found. */
+            return NULL;
+        }
+        if (entry != INTERN_TOMBSTONE && entry->hash == hash && entry->length == length &&
+            memcmp(entry->chars, chars, length) == 0) {
+            /* Match: same hash, same length, same content. */
+            return entry;
+        }
+        /* Slot is occupied by a different string or a tombstone — continue probing. */
+        index = (index + 1) & (intern_cap - 1);
+    }
+}
+
+/*
+ * intern_grow - resize the intern table when load factor is exceeded.
+ *
+ * Allocates a new table with double the capacity, re-inserts all live
+ * entries (skipping tombstones), then frees the old table. Tombstones
+ * are discarded during regrow, which reclaims their slots.
+ */
+static void intern_grow(void) {
+    size_t new_cap = intern_cap == 0 ? INTERN_INIT_CAP : intern_cap * 2;
+    ObjString **new_table = (ObjString **)calloc(new_cap, sizeof(ObjString *));
+    if (!new_table)
+        return; /* OOM — keep the old table and hope for the best. */
+
+    /* Re-insert all live entries into the new table. */
+    for (size_t i = 0; i < intern_cap; i++) {
+        ObjString *entry = intern_table[i];
+        if (entry == NULL || entry == INTERN_TOMBSTONE)
+            continue;
+        size_t index = entry->hash & (new_cap - 1);
+        while (new_table[index] != NULL)
+            index = (index + 1) & (new_cap - 1);
+        new_table[index] = entry;
+    }
+
+    free((void *)intern_table);
+    intern_table = new_table;
+    intern_cap = new_cap;
+    /* After regrow, used == count because tombstones are discarded. */
+    intern_used = intern_count;
+}
+
+/*
+ * intern_add - insert an ObjString into the intern table.
+ *
+ * Grows the table if the load factor (based on used slots, including
+ * tombstones) exceeds INTERN_MAX_LOAD. Finds a free slot via linear
+ * probing. Reuses tombstone slots when encountered during the probe.
+ */
+static void intern_add(ObjString *str) {
+    /* Grow before inserting if load factor is too high. */
+    if (intern_cap == 0 || (double)(intern_used + 1) / (double)intern_cap > INTERN_MAX_LOAD) {
+        intern_grow();
+    }
+
+    size_t index = str->hash & (intern_cap - 1);
+    for (;;) {
+        ObjString *entry = intern_table[index];
+        if (entry == NULL) {
+            /* Empty slot — insert here. Both count and used increase. */
+            intern_table[index] = str;
+            intern_count++;
+            intern_used++;
+            return;
+        }
+        if (entry == INTERN_TOMBSTONE) {
+            /* Tombstone slot — reuse it. count increases, used stays
+             * the same (tombstone was already counted as used). */
+            intern_table[index] = str;
+            intern_count++;
+            return;
+        }
+        /* Slot occupied by a live entry — continue probing. */
+        index = (index + 1) & (intern_cap - 1);
+    }
+}
+
+/*
+ * intern_remove - remove an ObjString from the intern table.
+ *
+ * Replaces the string's slot with a tombstone so that probe chains
+ * for other entries that hash to nearby slots remain intact.
+ * Called by gc_sweep() before freeing a dead OBJ_STRING.
+ */
+static void intern_remove(ObjString *str) {
+    if (intern_cap == 0)
+        return;
+
+    size_t index = str->hash & (intern_cap - 1);
+    for (;;) {
+        ObjString *entry = intern_table[index];
+        if (entry == NULL) {
+            /* End of probe chain — string not in table (shouldn't happen
+             * for properly managed strings, but safe to handle). */
+            return;
+        }
+        if (entry == str) {
+            /* Found the exact pointer — replace with tombstone. */
+            intern_table[index] = INTERN_TOMBSTONE;
+            intern_count--;
+            /* intern_used stays the same: tombstone still occupies the slot. */
+            return;
+        }
+        index = (index + 1) & (intern_cap - 1);
+    }
+}
+
 void gc_init(void) {
     gc.objects = NULL;
     gc.bytes_allocated = 0;
     gc.next_gc = GC_INITIAL_THRESHOLD;
     gc.sweeping = false;
+
+    /* Reset the string intern table. Free any existing table from a
+     * previous cycle (e.g. if gc_init is called again in tests). */
+    free((void *)intern_table);
+    intern_table = NULL;
+    intern_cap = 0;
+    intern_count = 0;
+    intern_used = 0;
 }
 
 void *gc_alloc(ObjType type, size_t size) {
@@ -198,6 +365,15 @@ void gc_free_all(void) {
     }
     gc.objects = NULL;
     gc.bytes_allocated = 0;
+
+    /* Free the intern table array and reset state.
+     * All ObjStrings have already been freed above, so the table
+     * only holds dangling pointers at this point — just free the array. */
+    free((void *)intern_table);
+    intern_table = NULL;
+    intern_cap = 0;
+    intern_count = 0;
+    intern_used = 0;
 }
 
 /*
@@ -443,6 +619,12 @@ void gc_sweep(void) {
             else
                 gc.bytes_allocated = 0;
 
+            /* If the object is an interned string, remove it from the
+             * intern table BEFORE freeing. This prevents the table from
+             * holding dangling pointers to freed ObjStrings. */
+            if (unreached->type == OBJ_STRING)
+                intern_remove((ObjString *)unreached);
+
             /* Free type-specific internal allocations (name, data,
              * entries, etc.) then the object struct itself. */
             free_object_contents(unreached);
@@ -452,6 +634,27 @@ void gc_sweep(void) {
 
     gc.sweeping = false;
 }
+
+/* ---- String intern public API ---- */
+
+/*
+ * gc_intern_find - public wrapper around intern_find().
+ *
+ * Called by obj_string_new() and obj_string_take() in value.c to check
+ * whether a string with the given content already exists in the intern
+ * table. Returns the existing ObjString* if found, NULL otherwise.
+ */
+ObjString *gc_intern_find(const char *chars, size_t length, uint32_t hash) {
+    return intern_find(chars, length, hash);
+}
+
+/*
+ * gc_intern_add - public wrapper around intern_add().
+ *
+ * Called by obj_string_new() and obj_string_take() in value.c after
+ * allocating a new ObjString to register it in the intern table.
+ */
+void gc_intern_add(ObjString *str) { intern_add(str); }
 
 /* ---- Test/inspection accessors ---- */
 

@@ -20,6 +20,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* Object type tags for GC-tracked heap objects. */
 typedef enum {
@@ -185,6 +186,26 @@ void gc_mark_roots(void);
  * Implemented in gc-sweep task step 2.
  */
 void gc_sweep(void);
+
+/* ---- String intern table ---- */
+
+/* Forward declaration of ObjString (defined in value.h). */
+struct ObjString;
+
+/*
+ * Look up a string in the intern table by content.
+ * Returns the existing ObjString* if a match (same hash, length,
+ * and chars) is found, NULL otherwise. Used by obj_string_new()
+ * and obj_string_take() to avoid creating duplicate ObjStrings.
+ */
+struct ObjString *gc_intern_find(const char *chars, size_t length, uint32_t hash);
+
+/*
+ * Add an ObjString to the intern table. Must be called after
+ * allocating a new ObjString that is not yet in the table.
+ * The table grows automatically when the load factor is exceeded.
+ */
+void gc_intern_add(struct ObjString *str);
 
 /* ---- Test/inspection accessors ---- */
 

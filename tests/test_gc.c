@@ -1116,25 +1116,35 @@ TEST(test_intern_dead_strings_swept) {
     ObjString *s1 = obj_string_new("ephemeral", 9);
     ASSERT(s1 != NULL, "s1 should be non-NULL");
 
-    /* Save the pointer value for comparison after GC. */
-    ObjString *old_ptr = s1;
-
     /* Make the string unreachable: we don't store it in any root.
      * Force a GC cycle — sweep should free the unreachable string
      * and remove it from the intern table. */
-    (void)old_ptr; /* Prevent "unused" warning; we compare below. */
     gc_collect();
 
     /* After sweep, s1 is dangling — do NOT dereference it.
-     * Create a new string with the same content. If the intern table
-     * was properly cleaned, this should be a fresh ObjString. */
+     *
+     * Allocate a dummy object to prevent calloc from reusing the
+     * same address as s1. Without this, the pointer comparison below
+     * may falsely pass or fail depending on allocator behavior.
+     * The dummy is an ObjArray (different type) just to occupy the
+     * memory region where s1 used to live. */
+    ObjArray *dummy = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(dummy != NULL, "dummy alloc should succeed");
+
+    /* Create a new string with the same content. If the intern table
+     * was properly cleaned, this should be a fresh ObjString (not
+     * a dangling pointer to the freed s1). */
     ObjString *s2 = obj_string_new("ephemeral", 9);
     ASSERT(s2 != NULL, "s2 should be non-NULL");
 
-    /* The new string must NOT be the old (swept) pointer. If the
-     * intern table still held the dead entry, it would return the
-     * freed pointer — which would be a use-after-free bug. */
-    ASSERT(s2 != old_ptr, "new string after sweep should be a fresh ObjString");
+    /* Verify the new string is valid and usable. If the intern table
+     * still held a dead entry, gc_intern_find would return the freed
+     * pointer — a use-after-free bug. With the dummy allocation
+     * occupying the old address, we can also check that s2 is
+     * genuinely different from s1's old address. */
+    ASSERT(s2 != s1, "new string after sweep should be a fresh ObjString");
+    ASSERT(strcmp(s2->chars, "ephemeral") == 0, "new string should have correct content");
+    ASSERT(s2->length == 9, "new string should have correct length");
 
     runtime_destroy();
     PASS();

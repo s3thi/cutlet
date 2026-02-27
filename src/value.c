@@ -195,6 +195,17 @@ static uint32_t fnv1a_hash(const char *data, size_t length) {
 }
 
 ObjString *obj_string_new(const char *chars, size_t length) {
+    /* Compute hash first so we can check the intern table. */
+    uint32_t hash = fnv1a_hash(chars, length);
+
+    /* Check intern table: if an identical string already exists, return it
+     * directly — no new allocation needed. This is the core deduplication
+     * mechanism: identical content always maps to the same ObjString*. */
+    ObjString *interned = gc_intern_find(chars, length, hash);
+    if (interned != NULL)
+        return interned;
+
+    /* No match in the intern table — allocate a new ObjString. */
     ObjString *str = gc_alloc(OBJ_STRING, sizeof(ObjString));
     if (!str)
         return NULL;
@@ -208,18 +219,36 @@ ObjString *obj_string_new(const char *chars, size_t length) {
     buf[length] = '\0';
     str->chars = buf;
     str->length = length;
-    str->hash = fnv1a_hash(chars, length);
+    str->hash = hash;
+
+    /* Register in the intern table for future lookups. */
+    gc_intern_add(str);
     return str;
 }
 
 ObjString *obj_string_take(char *chars, size_t length) {
+    /* Compute hash on the input buffer so we can check the intern table. */
+    uint32_t hash = fnv1a_hash(chars, length);
+
+    /* Check the intern table: if an identical string exists, free the
+     * caller's buffer (we don't need it) and return the interned one. */
+    ObjString *interned = gc_intern_find(chars, length, hash);
+    if (interned != NULL) {
+        free(chars); /* Caller's buffer is redundant — discard it. */
+        return interned;
+    }
+
+    /* No match — allocate a new ObjString that takes ownership of chars. */
     ObjString *str = gc_alloc(OBJ_STRING, sizeof(ObjString));
     if (!str)
         return NULL;
     /* Take ownership of the caller's buffer — no copy needed. */
     str->chars = chars;
     str->length = length;
-    str->hash = fnv1a_hash(chars, length);
+    str->hash = hash;
+
+    /* Register in the intern table for future lookups. */
+    gc_intern_add(str);
     return str;
 }
 
@@ -470,14 +499,11 @@ static void obj_map_free(ObjMap *m) {
 void value_free(Value *v) {
     if (!v)
         return;
-    /* Free ObjString for VAL_STRING: release the GC-tracked object and
-     * its owned char buffer. For now (before full GC sweep), manually
-     * free the chars and unlink from the GC object list. */
-    if (v->type == VAL_STRING && v->string) {
-        free(v->string->chars);
-        v->string->chars = NULL;
-        gc_unlink((Obj *)v->string);
-        free(v->string);
+    /* With string interning (gc-sweep step 5), multiple Values may
+     * share the same ObjString pointer. value_free must NOT free the
+     * ObjString or its chars — the GC sweep handles that. Just null
+     * out the pointer to release this Value's reference. */
+    if (v->type == VAL_STRING) {
         v->string = NULL;
     }
     /* Free error message for VAL_ERROR (plain heap-allocated char*). */
