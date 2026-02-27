@@ -1001,6 +1001,177 @@ TEST(test_gc_threshold_grows) {
 }
 
 /* ============================================================
+ * String interning tests
+ *
+ * These tests verify the string interning semantics described in
+ * the gc-sweep plan (step 5-6). Since interning isn't implemented
+ * yet, most will FAIL — they're written ahead of implementation.
+ *
+ * String interning guarantees: two calls to obj_string_new() with
+ * the same content return the same ObjString* pointer. This enables
+ * O(1) pointer equality for strings and eliminates duplicate storage.
+ * ============================================================ */
+
+/* test_intern_same_content_same_pointer: two obj_string_new calls
+ * with identical content should return the same ObjString pointer
+ * (once interning is implemented). */
+TEST(test_intern_same_content_same_pointer) {
+    gc_init();
+
+    ObjString *s1 = obj_string_new("hello", 5);
+    ObjString *s2 = obj_string_new("hello", 5);
+    ASSERT(s1 != NULL, "s1 should be non-NULL");
+    ASSERT(s2 != NULL, "s2 should be non-NULL");
+
+    /* With interning, both should be the exact same pointer. */
+    ASSERT(s1 == s2, "same content should yield same ObjString pointer");
+
+    gc_free_all();
+    PASS();
+}
+
+/* test_intern_different_content_different_pointer: two obj_string_new
+ * calls with different content should return different ObjString
+ * pointers. */
+TEST(test_intern_different_content_different_pointer) {
+    gc_init();
+
+    ObjString *s1 = obj_string_new("hello", 5);
+    ObjString *s2 = obj_string_new("world", 5);
+    ASSERT(s1 != NULL, "s1 should be non-NULL");
+    ASSERT(s2 != NULL, "s2 should be non-NULL");
+
+    /* Different content must always produce different pointers. */
+    ASSERT(s1 != s2, "different content should yield different ObjString pointers");
+
+    gc_free_all();
+    PASS();
+}
+
+/* test_intern_string_take_deduplicates: obj_string_take with content
+ * matching an existing interned string should free the input buffer
+ * and return the existing ObjString pointer.
+ *
+ * We can't directly verify the buffer was freed, but we verify that
+ * the returned pointer matches the pre-existing interned string. */
+TEST(test_intern_string_take_deduplicates) {
+    gc_init();
+
+    /* Create the first string via obj_string_new (becomes interned). */
+    ObjString *s1 = obj_string_new("dedup", 5);
+    ASSERT(s1 != NULL, "s1 should be non-NULL");
+
+    /* Allocate a buffer with matching content and call obj_string_take.
+     * If interning works, this buffer should be freed and s1 returned. */
+    char *buf = strdup("dedup");
+    ASSERT(buf != NULL, "strdup should succeed");
+    ObjString *s2 = obj_string_take(buf, 5);
+    ASSERT(s2 != NULL, "s2 should be non-NULL");
+
+    /* With interning, obj_string_take should return the existing string. */
+    ASSERT(s1 == s2, "obj_string_take should return existing interned string");
+
+    gc_free_all();
+    PASS();
+}
+
+/* test_intern_value_equal_pointer_compare: two VAL_STRING values
+ * with the same content should be equal via value_equal(), and
+ * with interning they should share the same ObjString pointer
+ * (enabling O(1) pointer comparison). */
+TEST(test_intern_value_equal_pointer_compare) {
+    gc_init();
+
+    /* Create two string values with the same content. */
+    Value v1 = make_string_copy("compare", 7);
+    Value v2 = make_string_copy("compare", 7);
+    ASSERT(v1.type == VAL_STRING, "v1 should be VAL_STRING");
+    ASSERT(v2.type == VAL_STRING, "v2 should be VAL_STRING");
+
+    /* value_equal should return true (works even without interning
+     * because of the strcmp fallback, but with interning the pointer
+     * comparison fast path handles it). */
+    ASSERT(value_equal(&v1, &v2), "same-content strings should be value_equal");
+
+    /* With interning, the ObjString pointers should be identical —
+     * this is the key invariant that makes pointer comparison valid. */
+    ASSERT(v1.string == v2.string, "same-content string Values should share ObjString pointer");
+
+    gc_free_all();
+    PASS();
+}
+
+/* test_intern_dead_strings_swept: create a string, make it
+ * unreachable, trigger GC. After sweep, the string should be
+ * removed from the intern table. Creating a new string with the
+ * same content should produce a *new* ObjString, not the old one.
+ *
+ * Requires runtime_init() because gc_collect calls runtime_mark_globals. */
+TEST(test_intern_dead_strings_swept) {
+    /* runtime_init calls gc_init internally. */
+    runtime_init();
+    gc_set_vm(NULL);
+
+    /* Create a string — it's only referenced by our local pointer. */
+    ObjString *s1 = obj_string_new("ephemeral", 9);
+    ASSERT(s1 != NULL, "s1 should be non-NULL");
+
+    /* Save the pointer value for comparison after GC. */
+    ObjString *old_ptr = s1;
+
+    /* Make the string unreachable: we don't store it in any root.
+     * Force a GC cycle — sweep should free the unreachable string
+     * and remove it from the intern table. */
+    (void)old_ptr; /* Prevent "unused" warning; we compare below. */
+    gc_collect();
+
+    /* After sweep, s1 is dangling — do NOT dereference it.
+     * Create a new string with the same content. If the intern table
+     * was properly cleaned, this should be a fresh ObjString. */
+    ObjString *s2 = obj_string_new("ephemeral", 9);
+    ASSERT(s2 != NULL, "s2 should be non-NULL");
+
+    /* The new string must NOT be the old (swept) pointer. If the
+     * intern table still held the dead entry, it would return the
+     * freed pointer — which would be a use-after-free bug. */
+    ASSERT(s2 != old_ptr, "new string after sweep should be a fresh ObjString");
+
+    runtime_destroy();
+    PASS();
+}
+
+/* test_intern_clone_shares_pointer: value_clone of a VAL_STRING
+ * should return a Value pointing to the same ObjString pointer
+ * (no new allocation needed — interned strings are shared).
+ *
+ * This test will fail until step 6 changes value_clone to share
+ * the pointer instead of deep-copying. */
+TEST(test_intern_clone_shares_pointer) {
+    gc_init();
+
+    /* Create a string value. */
+    Value src = make_string_copy("shared", 6);
+    ASSERT(src.type == VAL_STRING, "src should be VAL_STRING");
+    ASSERT(src.string != NULL, "src.string should be non-NULL");
+
+    /* Clone the value. */
+    Value cloned;
+    memset(&cloned, 0, sizeof(Value));
+    bool ok = value_clone(&cloned, &src);
+    ASSERT(ok, "value_clone should succeed");
+    ASSERT(cloned.type == VAL_STRING, "cloned should be VAL_STRING");
+    ASSERT(cloned.string != NULL, "cloned.string should be non-NULL");
+
+    /* With interning, value_clone should share the pointer — no
+     * new ObjString allocation. Before step 6, value_clone deep-copies
+     * so this assertion will fail. */
+    ASSERT(src.string == cloned.string, "value_clone of VAL_STRING should share ObjString pointer");
+
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -1043,6 +1214,14 @@ int main(void) {
     RUN_TEST(test_gc_collect_full_cycle);
     RUN_TEST(test_gc_auto_trigger);
     RUN_TEST(test_gc_threshold_grows);
+
+    printf("\nString interning:\n");
+    RUN_TEST(test_intern_same_content_same_pointer);
+    RUN_TEST(test_intern_different_content_different_pointer);
+    RUN_TEST(test_intern_string_take_deduplicates);
+    RUN_TEST(test_intern_value_equal_pointer_compare);
+    RUN_TEST(test_intern_dead_strings_swept);
+    RUN_TEST(test_intern_clone_shares_pointer);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
