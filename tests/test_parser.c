@@ -2759,6 +2759,114 @@ TEST(test_in_keyword_reserved) {
 }
 
 /* ============================================================
+ * Dot access parsing
+ * ============================================================ */
+
+/* obj.name → [INDEX [IDENT obj] [STRING name]] (sugar for bracket indexing) */
+TEST(test_dot_access_basic) {
+    ASSERT(ast_matches("obj.name", "AST [INDEX [IDENT obj] [STRING name]]"), "obj.name");
+    PASS();
+}
+
+/* obj.name = "alice" → [INDEX_ASSIGN [IDENT obj] [STRING name] [STRING alice]] */
+TEST(test_dot_access_assign) {
+    ASSERT(ast_matches("obj.name = \"alice\"",
+                       "AST [INDEX_ASSIGN [IDENT obj] [STRING name] [STRING alice]]"),
+           "obj.name = \"alice\"");
+    PASS();
+}
+
+/* a.b.c → [INDEX [INDEX [IDENT a] [STRING b]] [STRING c]] (chaining) */
+TEST(test_dot_access_chained) {
+    ASSERT(ast_matches("a.b.c", "AST [INDEX [INDEX [IDENT a] [STRING b]] [STRING c]]"), "a.b.c");
+    PASS();
+}
+
+/* (obj).name → [INDEX [IDENT obj] [STRING name]] (dot on grouped expression) */
+TEST(test_dot_access_grouped) {
+    ASSERT(ast_matches("(obj).name", "AST [INDEX [IDENT obj] [STRING name]]"), "(obj).name");
+    PASS();
+}
+
+/* arr[0].name → [INDEX [INDEX [IDENT arr] [NUMBER 0]] [STRING name]] (dot after bracket) */
+TEST(test_dot_access_after_bracket) {
+    ASSERT(ast_matches("arr[0].name", "AST [INDEX [INDEX [IDENT arr] [NUMBER 0]] [STRING name]]"),
+           "arr[0].name");
+    PASS();
+}
+
+/* ============================================================
+ * Method call parsing
+ * ============================================================ */
+
+/* obj.method() → [METHOD_CALL [IDENT obj] method] (no args) */
+TEST(test_method_call_no_args) {
+    ASSERT(ast_matches("obj.method()", "AST [METHOD_CALL [IDENT obj] method]"), "obj.method()");
+    PASS();
+}
+
+/* obj.method(a) → [METHOD_CALL [IDENT obj] method [IDENT a]] (one arg) */
+TEST(test_method_call_one_arg) {
+    ASSERT(ast_matches("obj.method(a)", "AST [METHOD_CALL [IDENT obj] method [IDENT a]]"),
+           "obj.method(a)");
+    PASS();
+}
+
+/* obj.method(a, b) → [METHOD_CALL [IDENT obj] method [IDENT a] [IDENT b]] (multiple args) */
+TEST(test_method_call_multi_args) {
+    ASSERT(
+        ast_matches("obj.method(a, b)", "AST [METHOD_CALL [IDENT obj] method [IDENT a] [IDENT b]]"),
+        "obj.method(a, b)");
+    PASS();
+}
+
+/* a.b.c() → [METHOD_CALL [INDEX [IDENT a] [STRING b]] c] (chained dot then method call) */
+TEST(test_method_call_chained_dot) {
+    ASSERT(ast_matches("a.b.c()", "AST [METHOD_CALL [INDEX [IDENT a] [STRING b]] c]"), "a.b.c()");
+    PASS();
+}
+
+/* a.b().c → [INDEX [METHOD_CALL [IDENT a] b] [STRING c]] (method call then dot) */
+TEST(test_method_call_then_dot) {
+    ASSERT(ast_matches("a.b().c", "AST [INDEX [METHOD_CALL [IDENT a] b] [STRING c]]"), "a.b().c");
+    PASS();
+}
+
+/* ============================================================
+ * Dot access error cases
+ * ============================================================ */
+
+/* obj. (at EOF) → parse error */
+TEST(test_dot_access_eof_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("obj.", &node, &err), "obj. at EOF should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* obj.42 → parse error (number after dot, not an identifier) */
+TEST(test_dot_access_number_error) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("obj.42", &node, &err), "obj.42 should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* parser_is_complete: trailing dot is incomplete (REPL should wait for more input) */
+TEST(test_is_incomplete_dot_eof) {
+    ASSERT(!parser_is_complete("obj."), "trailing dot should be incomplete");
+    PASS();
+}
+
+/* parser_is_complete: obj.42 is a hard error, not incomplete */
+TEST(test_is_complete_dot_number_error) {
+    ASSERT(parser_is_complete("obj.42"), "dot-number is a hard error, not incomplete");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3190,6 +3298,28 @@ int main(void) {
     RUN_TEST(test_not_prefix_in);
     RUN_TEST(test_in_chained_error);
     RUN_TEST(test_in_keyword_reserved);
+
+    printf("\nDot access parsing:\n");
+    RUN_TEST(test_dot_access_basic);
+    RUN_TEST(test_dot_access_assign);
+    RUN_TEST(test_dot_access_chained);
+    RUN_TEST(test_dot_access_grouped);
+    RUN_TEST(test_dot_access_after_bracket);
+
+    printf("\nMethod call parsing:\n");
+    RUN_TEST(test_method_call_no_args);
+    RUN_TEST(test_method_call_one_arg);
+    RUN_TEST(test_method_call_multi_args);
+    RUN_TEST(test_method_call_chained_dot);
+    RUN_TEST(test_method_call_then_dot);
+
+    printf("\nDot access error cases:\n");
+    RUN_TEST(test_dot_access_eof_error);
+    RUN_TEST(test_dot_access_number_error);
+
+    printf("\nparser_is_complete() - dot access:\n");
+    RUN_TEST(test_is_incomplete_dot_eof);
+    RUN_TEST(test_is_complete_dot_number_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

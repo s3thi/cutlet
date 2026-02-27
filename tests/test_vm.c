@@ -3385,6 +3385,101 @@ TEST(test_in_compound_not_in_and_in) {
 }
 
 /* ============================================================
+ * Dot access (get)
+ * ============================================================ */
+
+TEST(test_dot_get_basic) { assert_vm_string("{name: \"alice\"}.name", "alice", "dot get basic"); }
+
+TEST(test_dot_get_second_key) { assert_vm_number("{a: 1, b: 2}.b", 2.0, "dot get second key"); }
+
+TEST(test_dot_get_missing_key) {
+    assert_vm_nothing("{a: 1}.z", "dot get missing key returns nothing");
+}
+
+TEST(test_dot_get_variable) {
+    assert_vm_number("my m = {x: 10}\nm.x", 10.0, "dot get via variable");
+}
+
+/* ============================================================
+ * Dot access (set)
+ * ============================================================ */
+
+TEST(test_dot_set_overwrite) {
+    assert_vm_string("my obj = {name: \"old\"}\nobj.name = \"new\"\nobj.name", "new",
+                     "dot set overwrite");
+}
+
+TEST(test_dot_set_new_key) {
+    assert_vm_number("my obj = {a: 1}\nobj.b = 2\nobj.b", 2.0, "dot set new key");
+}
+
+TEST(test_dot_set_overwrite_number) {
+    assert_vm_number("my obj = {a: 1}\nobj.a = 2\nobj.a", 2.0, "dot set overwrite number");
+}
+
+/* ============================================================
+ * Chained dot access
+ * ============================================================ */
+
+TEST(test_dot_chain_two) {
+    assert_vm_number("{a: {b: 42}}.a.b", 42.0, "chained dot access two levels");
+}
+
+TEST(test_dot_chain_three) {
+    assert_vm_string("{a: {b: {c: \"deep\"}}}.a.b.c", "deep", "chained dot access three levels");
+}
+
+TEST(test_dot_chain_variable) {
+    assert_vm_number("my m = {a: {b: 99}}\nm.a.b", 99.0, "chained dot via variable");
+}
+
+/* ============================================================
+ * Method calls
+ * ============================================================ */
+
+TEST(test_method_call_no_arg) {
+    assert_vm_string("my obj = {greet: fn(self) is \"hello\" end}\nobj.greet()", "hello",
+                     "method call no args");
+}
+
+TEST(test_method_call_self_access) {
+    assert_vm_string(
+        "my obj = {name: \"alice\", get_name: fn(self) is self.name end}\nobj.get_name()", "alice",
+        "method accesses self");
+}
+
+TEST(test_method_call_with_arg) {
+    assert_vm_number("my obj = {x: 10, add: fn(self, n) is self.x + n end}\nobj.add(5)", 15.0,
+                     "method with argument");
+}
+
+TEST(test_method_call_multi_fields) {
+    assert_vm_number("my obj = {x: 1, y: 2, sum: fn(self) is self.x + self.y end}\nobj.sum()", 3.0,
+                     "method accessing multiple fields");
+}
+
+TEST(test_method_call_chained_self) {
+    assert_vm_number("my inner = {val: 42, get: fn(self) is self.val end}\n"
+                     "my outer = {inner: inner}\n"
+                     "outer.inner.get()",
+                     42.0, "chained dot then method call, self is inner");
+}
+
+/* ============================================================
+ * Method call edge cases
+ * ============================================================ */
+
+TEST(test_method_call_missing_key) {
+    assert_vm_error("my obj = {name: \"test\"}\nobj.missing()", "call nothing");
+}
+
+TEST(test_method_call_not_callable) {
+    assert_vm_error("my obj = {x: 42}\nobj.x()", "call non-function");
+}
+
+TEST(test_dot_on_non_map) { assert_vm_error("42.name", "dot on non-map"); }
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4092,6 +4187,39 @@ int main(void) {
     RUN_TEST(test_in_empty_string_in_empty_string);
     RUN_TEST(test_in_composable_with_keys);
     RUN_TEST(test_in_compound_not_in_and_in);
+
+    /* ---- Dot access (get) ---- */
+    printf("\nDot access (get):\n");
+    RUN_TEST(test_dot_get_basic);
+    RUN_TEST(test_dot_get_second_key);
+    RUN_TEST(test_dot_get_missing_key);
+    RUN_TEST(test_dot_get_variable);
+
+    /* ---- Dot access (set) ---- */
+    printf("\nDot access (set):\n");
+    RUN_TEST(test_dot_set_overwrite);
+    RUN_TEST(test_dot_set_new_key);
+    RUN_TEST(test_dot_set_overwrite_number);
+
+    /* ---- Chained dot access ---- */
+    printf("\nChained dot access:\n");
+    RUN_TEST(test_dot_chain_two);
+    RUN_TEST(test_dot_chain_three);
+    RUN_TEST(test_dot_chain_variable);
+
+    /* ---- Method calls ---- */
+    printf("\nMethod calls:\n");
+    RUN_TEST(test_method_call_no_arg);
+    RUN_TEST(test_method_call_self_access);
+    RUN_TEST(test_method_call_with_arg);
+    RUN_TEST(test_method_call_multi_fields);
+    RUN_TEST(test_method_call_chained_self);
+
+    /* ---- Method call edge cases ---- */
+    printf("\nMethod call edge cases:\n");
+    RUN_TEST(test_method_call_missing_key);
+    RUN_TEST(test_method_call_not_callable);
+    RUN_TEST(test_dot_on_non_map);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
