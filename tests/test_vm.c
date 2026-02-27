@@ -1278,25 +1278,22 @@ TEST(test_fn_format_anonymous) {
     PASS();
 }
 
-/* Clone a function: deep copy with independent ownership */
+/* Clone a function: shared pointer (GC handles lifetime) */
 TEST(test_fn_clone_independence) {
-    /* VAL_FUNCTION clone uses shared ownership via refcount (not deep copy). */
+    /* VAL_FUNCTION clone shares the same ObjFunction pointer (reference semantics). */
     const char *params[] = {"x", "y"};
     ObjFunction *fn = test_make_obj_function("add", 2, params);
     Value orig = make_function(fn);
-    ASSERT(fn->refcount == 1, "initial refcount should be 1");
     Value cloned;
     bool ok = value_clone(&cloned, &orig);
     ASSERT(ok, "clone succeeds");
     ASSERT(cloned.type == VAL_FUNCTION, "clone is function");
     ASSERT(cloned.function == orig.function, "clone shares same ObjFunction pointer");
-    ASSERT(fn->refcount == 2, "refcount should be 2 after clone");
     ASSERT(strcmp(cloned.function->name, "add") == 0, "clone name correct");
     ASSERT(cloned.function->arity == 2, "clone arity correct");
     ASSERT(strcmp(cloned.function->params[0], "x") == 0, "clone param 0");
     ASSERT(strcmp(cloned.function->params[1], "y") == 0, "clone param 1");
     value_free(&cloned);
-    ASSERT(fn->refcount == 1, "refcount should be 1 after freeing clone");
     value_free(&orig);
     PASS();
 }
@@ -2534,9 +2531,25 @@ TEST(test_index_assign_eval) {
     assert_vm_formatted("my xs = [10, 20, 30]\nxs[0] = 99\nxs", "[99, 20, 30]", "index assign");
 }
 
-/* COW: my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs => [1, 2] */
-TEST(test_index_assign_cow) {
-    assert_vm_formatted("my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs", "[1, 2]", "COW index assign");
+/* Reference semantics: my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs => [99, 2]
+ * Mutating through one reference is visible through the other. */
+TEST(test_index_assign_ref_semantics) {
+    assert_vm_formatted("my xs = [1, 2]\nmy ys = xs\nys[0] = 99\nxs", "[99, 2]",
+                        "array ref semantics index assign");
+}
+
+/* Reference semantics: push through one reference mutates the shared array.
+ * my a = [1, 2]\nmy b = a\npush(b, 3)\na => [1, 2, 3] */
+TEST(test_push_ref_semantics) {
+    assert_vm_formatted("my a = [1, 2]\nmy b = a\npush(b, 3)\na", "[1, 2, 3]",
+                        "push ref semantics visible through other ref");
+}
+
+/* Reference semantics: pop through one reference mutates the shared array.
+ * my a = [1, 2, 3]\nmy b = a\npop(b)\na => [1, 2] */
+TEST(test_pop_ref_semantics) {
+    assert_vm_formatted("my a = [1, 2, 3]\nmy b = a\npop(b)\na", "[1, 2]",
+                        "pop ref semantics visible through other ref");
 }
 
 /* Nested indexing: [[1, 2], [3, 4]][1][0] => 3 */
@@ -2643,14 +2656,14 @@ TEST(test_push_basic) { assert_vm_formatted("push([1, 2], 3)", "[1, 2, 3]", "pus
 /* push([], "a") => ["a"] */
 TEST(test_push_empty) { assert_vm_formatted("push([], \"a\")", "[a]", "push onto empty"); }
 
-/* push does not mutate the original */
-TEST(test_push_no_mutate) {
-    assert_vm_formatted("my xs = [1, 2]\npush(xs, 3)\nxs", "[1, 2]", "push no mutate");
+/* push() mutates the array in-place (reference semantics). */
+TEST(test_push_mutates) {
+    assert_vm_formatted("my xs = [1, 2]\npush(xs, 3)\nxs", "[1, 2, 3]", "push mutates in-place");
 }
 
-/* push returns new array with element appended */
-TEST(test_push_returns_new) {
-    assert_vm_formatted("push([10, 20], 30)", "[10, 20, 30]", "push returns new");
+/* push returns the mutated array with element appended */
+TEST(test_push_returns_array) {
+    assert_vm_formatted("push([10, 20], 30)", "[10, 20, 30]", "push returns array");
 }
 
 /* push(42, 1) => error (first arg must be array) */
@@ -2665,9 +2678,9 @@ TEST(test_pop_single) { assert_vm_formatted("pop([1])", "[]", "pop single"); }
 /* pop([]) => error */
 TEST(test_pop_empty_error) { assert_vm_error("pop([])", "pop empty"); }
 
-/* pop does not mutate the original */
-TEST(test_pop_no_mutate) {
-    assert_vm_formatted("my xs = [1, 2, 3]\npop(xs)\nxs", "[1, 2, 3]", "pop no mutate");
+/* pop() mutates the array in-place (reference semantics). */
+TEST(test_pop_mutates) {
+    assert_vm_formatted("my xs = [1, 2, 3]\npop(xs)\nxs", "[1, 2]", "pop mutates in-place");
 }
 
 /* pop(42) => error (must be array) */
@@ -3087,10 +3100,18 @@ TEST(test_map_index_set_new_key) {
     assert_vm_formatted("my m = {a: 1}\nm[\"b\"] = 2\nm", "{a: 1, b: 2}", "map index set new key");
 }
 
-/* COW: my m1 = {a: 1}\nmy m2 = m1\nm2["a"] = 99\nm1 => {a: 1} */
-TEST(test_map_index_set_cow) {
-    assert_vm_formatted("my m1 = {a: 1}\nmy m2 = m1\nm2[\"a\"] = 99\nm1", "{a: 1}",
-                        "map COW index set");
+/* Reference semantics: my m1 = {a: 1}\nmy m2 = m1\nm2["a"] = 99\nm1 => {a: 99}
+ * Mutating through one reference is visible through the other. */
+TEST(test_map_index_set_ref_semantics) {
+    assert_vm_formatted("my m1 = {a: 1}\nmy m2 = m1\nm2[\"a\"] = 99\nm1", "{a: 99}",
+                        "map ref semantics index set");
+}
+
+/* Reference semantics: inserting a new key via one reference is visible
+ * through the other. my m1 = {a: 1}\nmy m2 = m1\nm2["b"] = 2\nm1 => {a: 1, b: 2} */
+TEST(test_map_insert_ref_semantics) {
+    assert_vm_formatted("my m1 = {a: 1}\nmy m2 = m1\nm2[\"b\"] = 2\nm1", "{a: 1, b: 2}",
+                        "map ref semantics insert new key");
 }
 
 /* ============================================================
@@ -3973,7 +3994,9 @@ int main(void) {
     RUN_TEST(test_index_non_array);
     RUN_TEST(test_index_non_integer);
     RUN_TEST(test_index_assign_eval);
-    RUN_TEST(test_index_assign_cow);
+    RUN_TEST(test_index_assign_ref_semantics);
+    RUN_TEST(test_push_ref_semantics);
+    RUN_TEST(test_pop_ref_semantics);
     RUN_TEST(test_index_nested);
     RUN_TEST(test_index_assign_returns_value);
 
@@ -4004,13 +4027,13 @@ int main(void) {
     RUN_TEST(test_len_bool_error);
     RUN_TEST(test_push_basic);
     RUN_TEST(test_push_empty);
-    RUN_TEST(test_push_no_mutate);
-    RUN_TEST(test_push_returns_new);
+    RUN_TEST(test_push_mutates);
+    RUN_TEST(test_push_returns_array);
     RUN_TEST(test_push_non_array_error);
     RUN_TEST(test_pop_basic);
     RUN_TEST(test_pop_single);
     RUN_TEST(test_pop_empty_error);
-    RUN_TEST(test_pop_no_mutate);
+    RUN_TEST(test_pop_mutates);
     RUN_TEST(test_pop_non_array_error);
     RUN_TEST(test_len_push_compose);
 
@@ -4126,7 +4149,8 @@ int main(void) {
     printf("\nMap indexing (write):\n");
     RUN_TEST(test_map_index_set_existing);
     RUN_TEST(test_map_index_set_new_key);
-    RUN_TEST(test_map_index_set_cow);
+    RUN_TEST(test_map_index_set_ref_semantics);
+    RUN_TEST(test_map_insert_ref_semantics);
 
     /* ---- Map projection ---- */
     printf("\nMap projection:\n");

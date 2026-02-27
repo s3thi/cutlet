@@ -852,7 +852,7 @@ Closures work with all the features you'd expect: capture parameters (not just `
 
 ## 12. Arrays
 
-Arrays are ordered, indexable collections of values. They use value semantics with copy-on-write for efficiency.
+Arrays are ordered, indexable collections of values. They use reference semantics -- assigning an array to another variable shares the same backing data, and mutations through one reference are visible through all references.
 
 Array literals use square brackets:
 
@@ -915,13 +915,13 @@ xs[0] = 99
 xs                      # => [99, 20, 30, 40, 50]
 ```
 
-Copy-on-write: assigning an array shares the backing store. Mutation triggers a copy, so the original is never changed.
+Reference semantics: assigning an array to another variable shares the same backing data. Mutations through one reference are visible through all references.
 
 ```cutlet
 my ys = xs
 ys[0] = 1
 ys                      # => [1, 20, 30, 40, 50]
-xs                      # => [99, 20, 30, 40, 50] (unchanged)
+xs                      # => [1, 20, 30, 40, 50] (same array — mutation visible)
 ```
 
 Nested indexing chains:
@@ -958,14 +958,14 @@ len([])                 # => 0
 len("hello")            # => 5
 ```
 
-`push()` returns a new array with an element appended:
+`push()` appends an element to the array in-place and returns the array:
 
 ```cutlet
 push([1, 2], 3)         # => [1, 2, 3]
 push([], "a")           # => [a]
 ```
 
-`pop()` returns a new array without the last element:
+`pop()` removes the last element from the array in-place and returns the array:
 
 ```cutlet
 pop([1, 2, 3])          # => [1, 2]
@@ -973,12 +973,12 @@ pop([1])                # => []
 # pop([])              # => ERR pop() on empty array
 ```
 
-`push()` and `pop()` do NOT mutate — they return new arrays:
+`push()` and `pop()` mutate the array in-place:
 
 ```cutlet
 my nums = [1, 2]
 push(nums, 3)
-nums                    # => [1, 2] (unchanged)
+nums                    # => [1, 2, 3] (mutated)
 ```
 
 Equality is structural and recursive:
@@ -1003,7 +1003,7 @@ Building an array in a loop:
 my squares = []
 my i = 1
 while i <= 5 do
-  squares = push(squares, i ** 2)
+  push(squares, i ** 2)
   i = i + 1
 end
 squares                 # => [1, 4, 9, 16, 25]
@@ -1011,7 +1011,7 @@ squares                 # => [1, 4, 9, 16, 25]
 
 ## 13. Maps (dictionaries)
 
-Maps are key-value collections. They use value semantics with copy-on-write, just like arrays.
+Maps are key-value collections. They use reference semantics, just like arrays -- assigning a map to another variable shares the same backing data, and mutations through one reference are visible through all references.
 
 Map literals use curly braces. Bare identifiers become string keys:
 
@@ -1094,7 +1094,7 @@ has_key(m2, "a")            # => true  (key exists)
 has_key(m2, "b")            # => false (key absent)
 ```
 
-Index assignment. COW: the original is never changed:
+Index assignment. Reference semantics: mutations are visible through all references.
 
 ```cutlet
 my m3 = {x: 10}
@@ -1102,7 +1102,7 @@ my m4 = m3
 m4["x"] = 99
 m4["y"] = 20
 m4                          # => {x: 99, y: 20}
-m3                          # => {x: 10} (unchanged)
+m3                          # => {x: 99, y: 20} (same map — mutation visible)
 ```
 
 Map projection: index with an array of keys to select a sub-map:

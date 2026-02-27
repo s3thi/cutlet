@@ -1,8 +1,9 @@
 /*
  * test_value.c - Tests for Value types: ObjArray, ObjMap, ObjString
  *
- * Tests array creation, formatting, cloning (refcounting),
- * truthiness, and copy-on-write via obj_array_ensure_owned.
+ * Tests array creation, formatting, cloning (shared pointer),
+ * truthiness, and reference semantics (mutations visible through
+ * all references to the same object).
  * Also tests ObjString GC-tracked string type (GC Task 2).
  */
 
@@ -54,7 +55,6 @@ TEST(test_empty_array_format) {
     ObjArray *arr = obj_array_new();
     ASSERT(arr != NULL, "obj_array_new should succeed");
     ASSERT(arr->count == 0, "empty array count should be 0");
-    ASSERT(arr->refcount == 1, "initial refcount should be 1");
 
     Value v = make_array(arr);
     ASSERT(v.type == VAL_ARRAY, "type should be VAL_ARRAY");
@@ -126,29 +126,25 @@ TEST(test_nested_array_format) {
 }
 
 /* ============================================================
- * Clone and refcount tests
+ * Clone and reference sharing tests
  * ============================================================ */
 
-TEST(test_array_clone_refcount) {
-    /* Clone a VAL_ARRAY → refcount is 2. Free clone → refcount is 1. */
+TEST(test_array_clone_shares_pointer) {
+    /* Clone a VAL_ARRAY → both Values point to the same ObjArray.
+     * Under reference semantics, clone is just a pointer copy. */
     ObjArray *arr = obj_array_new();
     obj_array_push(arr, make_number(42));
 
     Value v = make_array(arr);
-    ASSERT(arr->refcount == 1, "initial refcount should be 1");
 
     Value cloned;
     bool ok = value_clone(&cloned, &v);
     ASSERT(ok, "clone should succeed");
     ASSERT(cloned.type == VAL_ARRAY, "cloned type should be VAL_ARRAY");
-    ASSERT(cloned.array == arr, "cloned should share same ObjArray");
-    ASSERT(arr->refcount == 2, "refcount should be 2 after clone");
+    ASSERT(cloned.array == arr, "cloned should share same ObjArray pointer");
 
     value_free(&cloned);
-    ASSERT(arr->refcount == 1, "refcount should be 1 after freeing clone");
-
     value_free(&v);
-    /* After freeing original, arr is freed (refcount 0). Can't check further. */
     PASS();
 }
 
@@ -176,27 +172,15 @@ TEST(test_array_truthy_empty) {
 }
 
 /* ============================================================
- * Copy-on-write (ensure_owned) tests
+ * Array reference semantics tests
+ *
+ * With reference semantics, cloning an array creates a second
+ * reference to the same backing ObjArray. Mutations through
+ * one reference are visible through the other.
  * ============================================================ */
 
-TEST(test_ensure_owned_refcount_one) {
-    /* obj_array_ensure_owned with refcount 1 → no-op. */
-    ObjArray *arr = obj_array_new();
-    obj_array_push(arr, make_number(10));
-    Value v = make_array(arr);
-    ASSERT(arr->refcount == 1, "refcount should be 1");
-
-    ObjArray *before = v.array;
-    obj_array_ensure_owned(&v);
-    ASSERT(v.array == before, "should be same pointer (no-op)");
-    ASSERT(v.array->refcount == 1, "refcount should still be 1");
-
-    value_free(&v);
-    PASS();
-}
-
-TEST(test_ensure_owned_refcount_two) {
-    /* obj_array_ensure_owned with refcount 2 → deep clone, original refcount drops to 1. */
+TEST(test_array_ref_semantics_mutation_visible) {
+    /* Clone an array, mutate through the clone, verify original sees the change. */
     ObjArray *arr = obj_array_new();
     obj_array_push(arr, make_number(10));
     obj_array_push(arr, make_number(20));
@@ -204,17 +188,12 @@ TEST(test_ensure_owned_refcount_two) {
     Value v1 = make_array(arr);
     Value v2;
     value_clone(&v2, &v1);
-    ASSERT(arr->refcount == 2, "refcount should be 2 after clone");
+    ASSERT(v2.array == arr, "clone should share same ObjArray pointer");
 
-    obj_array_ensure_owned(&v2);
-    ASSERT(v2.array != arr, "v2 should point to a new ObjArray");
-    ASSERT(v2.array->refcount == 1, "new array refcount should be 1");
-    ASSERT(arr->refcount == 1, "original refcount should drop to 1");
-
-    /* Values should be independent copies. */
-    ASSERT(v2.array->count == 2, "new array should have 2 elements");
-    ASSERT(v2.array->data[0].number == 10, "first element should be 10");
-    ASSERT(v2.array->data[1].number == 20, "second element should be 20");
+    /* Mutate through v2. */
+    obj_array_push(v2.array, make_number(30));
+    ASSERT(v1.array->count == 3, "original should see the push (count=3)");
+    ASSERT(v1.array->data[2].number == 30, "original should see new element");
 
     value_free(&v1);
     value_free(&v2);
@@ -234,7 +213,6 @@ TEST(test_obj_array_clone_deep) {
     ObjArray *clone = obj_array_clone_deep(arr);
     ASSERT(clone != NULL, "clone should succeed");
     ASSERT(clone != arr, "clone should be a different pointer");
-    ASSERT(clone->refcount == 1, "clone refcount should be 1");
     ASSERT(clone->count == 2, "clone should have 2 elements");
     ASSERT(clone->data[0].type == VAL_STRING, "first element should be string");
     ASSERT(strcmp(clone->data[0].string->chars, "hello") == 0, "first element value");
@@ -262,7 +240,6 @@ TEST(test_empty_map_format) {
     ObjMap *m = obj_map_new();
     ASSERT(m != NULL, "obj_map_new should succeed");
     ASSERT(m->count == 0, "empty map count should be 0");
-    ASSERT(m->refcount == 1, "initial refcount should be 1");
 
     Value v = make_map(m);
     ASSERT(v.type == VAL_MAP, "type should be VAL_MAP");
@@ -393,11 +370,12 @@ TEST(test_map_has) {
 }
 
 /* ============================================================
- * Map clone and refcount tests
+ * Map clone and reference sharing tests
  * ============================================================ */
 
-TEST(test_map_clone_refcount) {
-    /* Clone a VAL_MAP → refcount is 2. Free clone → refcount is 1. */
+TEST(test_map_clone_shares_pointer) {
+    /* Clone a VAL_MAP → both Values point to the same ObjMap.
+     * Under reference semantics, clone is just a pointer copy. */
     ObjMap *m = obj_map_new();
     Value k = make_string(strdup("x"));
     Value v = make_number(42);
@@ -406,18 +384,14 @@ TEST(test_map_clone_refcount) {
     value_free(&v);
 
     Value mv = make_map(m);
-    ASSERT(m->refcount == 1, "initial refcount should be 1");
 
     Value cloned;
     bool ok = value_clone(&cloned, &mv);
     ASSERT(ok, "clone should succeed");
     ASSERT(cloned.type == VAL_MAP, "cloned type should be VAL_MAP");
-    ASSERT(cloned.map == m, "cloned should share same ObjMap");
-    ASSERT(m->refcount == 2, "refcount should be 2 after clone");
+    ASSERT(cloned.map == m, "cloned should share same ObjMap pointer");
 
     value_free(&cloned);
-    ASSERT(m->refcount == 1, "refcount should be 1 after freeing clone");
-
     value_free(&mv);
     PASS();
 }
@@ -451,57 +425,41 @@ TEST(test_map_truthy_empty) {
 }
 
 /* ============================================================
- * Map copy-on-write (ensure_owned) tests
+ * Map reference semantics tests
+ *
+ * With reference semantics, cloning a map creates a second
+ * reference to the same backing ObjMap. Mutations through
+ * one reference are visible through the other.
  * ============================================================ */
 
-TEST(test_map_ensure_owned_refcount_one) {
-    /* obj_map_ensure_owned with refcount 1 → no-op. */
+TEST(test_map_ref_semantics_mutation_visible) {
+    /* Clone a map, mutate through the clone, verify original sees the change. */
     ObjMap *m = obj_map_new();
     Value k = make_string(strdup("a"));
     Value v = make_number(10);
     obj_map_set(m, &k, &v);
     value_free(&k);
     value_free(&v);
-
-    Value mv = make_map(m);
-    ASSERT(m->refcount == 1, "refcount should be 1");
-
-    ObjMap *before = mv.map;
-    obj_map_ensure_owned(&mv);
-    ASSERT(mv.map == before, "should be same pointer (no-op)");
-    ASSERT(mv.map->refcount == 1, "refcount should still be 1");
-
-    value_free(&mv);
-    PASS();
-}
-
-TEST(test_map_ensure_owned_refcount_two) {
-    /* obj_map_ensure_owned with refcount 2 → deep clone, original refcount drops to 1. */
-    ObjMap *m = obj_map_new();
-    Value k = make_string(strdup("a"));
-    Value v = make_number(10);
-    obj_map_set(m, &k, &v);
-    value_free(&k);
-    value_free(&v);
-
-    Value k2 = make_string(strdup("b"));
-    Value v2 = make_number(20);
-    obj_map_set(m, &k2, &v2);
-    value_free(&k2);
-    value_free(&v2);
 
     Value mv1 = make_map(m);
     Value mv2;
     value_clone(&mv2, &mv1);
-    ASSERT(m->refcount == 2, "refcount should be 2 after clone");
+    ASSERT(mv2.map == m, "clone should share same ObjMap pointer");
 
-    obj_map_ensure_owned(&mv2);
-    ASSERT(mv2.map != m, "mv2 should point to a new ObjMap");
-    ASSERT(mv2.map->refcount == 1, "new map refcount should be 1");
-    ASSERT(m->refcount == 1, "original refcount should drop to 1");
+    /* Mutate through mv2 — add a new key. */
+    Value k2 = make_string(strdup("b"));
+    Value v2 = make_number(20);
+    obj_map_set(mv2.map, &k2, &v2);
+    value_free(&k2);
+    value_free(&v2);
 
-    /* Values should be independent copies. */
-    ASSERT(mv2.map->count == 2, "new map should have 2 entries");
+    /* Original should see the new key. */
+    ASSERT(mv1.map->count == 2, "original should see the new entry (count=2)");
+    Value lookup = make_string(strdup("b"));
+    Value *result = obj_map_get(mv1.map, &lookup);
+    ASSERT(result != NULL, "original should find key 'b'");
+    ASSERT(result->number == 20, "value for 'b' should be 20");
+    value_free(&lookup);
 
     value_free(&mv1);
     value_free(&mv2);
@@ -776,7 +734,6 @@ TEST(test_obj_map_clone_deep) {
     ObjMap *clone = obj_map_clone_deep(m);
     ASSERT(clone != NULL, "clone should succeed");
     ASSERT(clone != m, "clone should be a different pointer");
-    ASSERT(clone->refcount == 1, "clone refcount should be 1");
     ASSERT(clone->count == 1, "clone should have 1 entry");
 
     /* Verify the key-value pair was cloned. */
@@ -1080,16 +1037,15 @@ int main(void) {
     RUN_TEST(test_mixed_array_format);
     RUN_TEST(test_nested_array_format);
 
-    printf("\nArray clone and refcount:\n");
-    RUN_TEST(test_array_clone_refcount);
+    printf("\nArray clone and reference sharing:\n");
+    RUN_TEST(test_array_clone_shares_pointer);
 
     printf("\nArray truthiness:\n");
     RUN_TEST(test_array_truthy_nonempty);
     RUN_TEST(test_array_truthy_empty);
 
-    printf("\nArray copy-on-write (ensure_owned):\n");
-    RUN_TEST(test_ensure_owned_refcount_one);
-    RUN_TEST(test_ensure_owned_refcount_two);
+    printf("\nArray reference semantics:\n");
+    RUN_TEST(test_array_ref_semantics_mutation_visible);
 
     printf("\nArray deep clone:\n");
     RUN_TEST(test_obj_array_clone_deep);
@@ -1105,16 +1061,15 @@ int main(void) {
     RUN_TEST(test_map_set_duplicate);
     RUN_TEST(test_map_has);
 
-    printf("\nMap clone and refcount:\n");
-    RUN_TEST(test_map_clone_refcount);
+    printf("\nMap clone and reference sharing:\n");
+    RUN_TEST(test_map_clone_shares_pointer);
 
     printf("\nMap truthiness:\n");
     RUN_TEST(test_map_truthy_nonempty);
     RUN_TEST(test_map_truthy_empty);
 
-    printf("\nMap copy-on-write (ensure_owned):\n");
-    RUN_TEST(test_map_ensure_owned_refcount_one);
-    RUN_TEST(test_map_ensure_owned_refcount_two);
+    printf("\nMap reference semantics:\n");
+    RUN_TEST(test_map_ref_semantics_mutation_visible);
 
     printf("\nMap deep clone:\n");
     RUN_TEST(test_obj_map_clone_deep);

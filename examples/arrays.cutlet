@@ -24,11 +24,16 @@ say(xs[4])            # 5
 say(xs[-1])           # 5
 say(xs[-2])           # 4
 
-# Index assignment (copy-on-write)
+# Index assignment
+xs[0] = 99
+say(xs)               # [99, 2, 3, 4, 5]
+
+# Reference semantics: arrays are shared by reference.
+# Assigning to another variable shares the same array.
 my ys = xs
-ys[0] = 99
-say(ys)               # [99, 2, 3, 4, 5]
-say(xs)               # [1, 2, 3, 4, 5] (unchanged)
+ys[0] = 1
+say(ys)               # [1, 2, 3, 4, 5]
+say(xs)               # [1, 2, 3, 4, 5] (same array, mutation visible)
 
 # Nested indexing
 say(grid[1][0])       # 3
@@ -40,11 +45,13 @@ say([1, 2] ++ [3, 4]) # [1, 2, 3, 4]
 say(len(xs))          # 5
 say(len(empty))       # 0
 
-say(push(xs, 6))      # [1, 2, 3, 4, 5, 6]
-say(xs)               # [1, 2, 3, 4, 5] (push returns new array)
+# push() mutates the array in-place and returns it
+push(xs, 6)
+say(xs)               # [1, 2, 3, 4, 5, 6]
 
-say(pop(xs))          # [1, 2, 3, 4]
-say(xs)               # [1, 2, 3, 4, 5] (pop returns new array)
+# pop() mutates the array in-place and returns it
+pop(xs)
+say(xs)               # [1, 2, 3, 4, 5]
 
 # Equality (structural, recursive)
 say([1, 2, 3] == [1, 2, 3])   # true
@@ -59,7 +66,7 @@ say(not [1])          # false
 my squares = []
 my i = 1
 while i <= 5 do
-  squares = push(squares, i ** 2)
+  push(squares, i ** 2)
   i = i + 1
 end
 say(squares)          # [1, 4, 9, 16, 25]

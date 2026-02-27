@@ -6,8 +6,9 @@
 alice
 30
 nothing
-{x: 10}
 {x: 99}
+{x: 99}
+{x: 99, y: 20}
 {x: 99, y: 20}
 {name: alice, role: admin}
 {name: alice}

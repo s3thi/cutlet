@@ -211,4 +211,48 @@ Run `make test && make check`.
 
 ---
 
+## Progress
+
+### Step 1: Identify and update tests that assume value semantics ✅
+
+**Completed 2026-02-27.**
+
+Identified and updated all tests, examples, and documentation that assumed
+copy-on-write / value semantics for arrays and maps.
+
+**Tests updated (test_vm.c):**
+- `test_index_assign_cow` → renamed to `test_index_assign_ref_semantics`, expects mutation visible through other reference
+- `test_map_index_set_cow` → renamed to `test_map_index_set_ref_semantics`, expects mutation visible through other reference
+- `test_push_no_mutate` → renamed to `test_push_mutates`, expects push to mutate in-place
+- `test_pop_no_mutate` → renamed to `test_pop_mutates`, expects pop to mutate in-place
+- `test_push_returns_new` → renamed to `test_push_returns_array` (comment update only)
+- `test_fn_clone_independence` → removed refcount assertions
+- Added `test_push_ref_semantics`: push through one reference visible through another
+- Added `test_pop_ref_semantics`: pop through one reference visible through another
+- Added `test_map_insert_ref_semantics`: new key insertion visible through other reference
+
+**Tests updated (test_value.c):**
+- `test_array_clone_refcount` → renamed to `test_array_clone_shares_pointer`, removed refcount assertions
+- `test_ensure_owned_refcount_one` and `test_ensure_owned_refcount_two` → replaced with `test_array_ref_semantics_mutation_visible`
+- `test_obj_array_clone_deep` → removed refcount assertion
+- `test_map_clone_refcount` → renamed to `test_map_clone_shares_pointer`, removed refcount assertions
+- `test_map_ensure_owned_refcount_one` and `test_map_ensure_owned_refcount_two` → replaced with `test_map_ref_semantics_mutation_visible`
+- `test_obj_map_clone_deep` → removed refcount assertion
+- `test_empty_array_format` → removed refcount assertion
+- `test_empty_map_format` → removed refcount assertion
+
+**Examples updated:**
+- `examples/arrays.cutlet` + `.expected` — updated to demonstrate reference semantics, push/pop mutate in-place
+- `examples/maps.cutlet` + `.expected` — updated to demonstrate reference semantics
+
+**Documentation updated:**
+- `TUTORIAL.md` — Sections 12 (Arrays) and 13 (Maps) updated from COW to reference semantics
+
+**Also fixed:** Pre-existing clang-format issue in `src/parser.h`.
+
+**Expected failures (7 VM tests, 2 example tests):** These tests assert reference semantics
+behavior but the implementation still uses COW. They will pass once Steps 2-5 are implemented.
+
+---
+
 End of plan.
