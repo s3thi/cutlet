@@ -11,8 +11,8 @@
  * gc_collect() marks all reachable objects, sweeps (frees) unreachable
  * ones, and updates the allocation threshold for the next cycle.
  *
- * Refcounting remains the primary lifetime management mechanism
- * during the transition period. The GC list exists alongside it.
+ * The GC is the sole lifetime management mechanism for all heap
+ * objects. There is no reference counting.
  */
 
 #ifndef CUTLET_GC_H

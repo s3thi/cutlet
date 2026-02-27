@@ -905,7 +905,7 @@ static void compile_index(Compiler *c, const AstNode *node) {
  *   1. Push value first (so it stays as the expression result).
  *   2. Push array (clone from variable lookup).
  *   3. Push index.
- *   4. OP_INDEX_SET: pop index, pop array, peek value, COW, mutate.
+ *   4. OP_INDEX_SET: pop index, pop container, peek value, mutate in place.
  *      Push modified array on top.  Stack: [..., value, modified_array].
  *   5. If the array source is a variable (AST_IDENT), emit SET_GLOBAL/
  *      SET_LOCAL/SET_UPVALUE to write the modified array back.

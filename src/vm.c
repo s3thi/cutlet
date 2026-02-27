@@ -429,7 +429,7 @@ static const char *value_type_name(ValueType type) {
  * Find or create an ObjUpvalue for the given stack slot.
  * Walks the VM's open-upvalue linked list (sorted by slot address,
  * descending) looking for an existing upvalue pointing to `slot`.
- * If found, returns it directly (GC manages lifetime, no refcount).
+ * If found, returns it directly (GC manages lifetime).
  * If not found, creates a new ObjUpvalue and inserts it into the
  * list at the correct position (maintaining descending order).
  * Returns NULL on allocation failure.
@@ -445,8 +445,7 @@ static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
         curr = curr->next;
     }
 
-    /* If we found an existing upvalue for this exact slot, reuse it.
-     * No refcount bump needed — GC manages upvalue lifetime. */
+    /* If we found an existing upvalue for this exact slot, reuse it. */
     if (curr != NULL && curr->location == slot) {
         return curr;
     }
@@ -1635,8 +1634,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     cl->upvalues[i] = capture_upvalue(vm, &frame->slots[index]);
                 } else {
                     /* Copy an upvalue from the enclosing closure.
-                     * The enclosing closure must have upvalues for this path.
-                     * No refcount bump needed — GC manages upvalue lifetime. */
+                     * The enclosing closure must have upvalues for this path. */
                     if (frame->closure->upvalues != NULL) {
                         cl->upvalues[i] = frame->closure->upvalues[index];
                     } else {

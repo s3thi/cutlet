@@ -13,10 +13,8 @@
  * - Module-level static GC state (like var_table in runtime.c).
  * - gc_alloc() uses calloc for zero-initialization.
  * - gc_free_all() frees object contents then the struct itself.
- * - free_object_contents() is the type-specific content destructor.
- *   It duplicates some logic from obj_*_free() in value.c, which
- *   Refcounting has been removed (GC task 5). The GC sweep's
- *   free_object_contents() is the sole content destructor.
+ * - free_object_contents() is the sole type-specific content destructor,
+ *   called by both gc_sweep() and gc_free_all().
  */
 
 #include "gc.h"
@@ -388,8 +386,8 @@ void gc_free_object(Obj *obj) {
  * because the Obj header is the first field of every concrete struct,
  * so the cast produces correct field offsets.
  *
- * This is the sole content destructor now that refcounting has been
- * removed (GC task 5). Called by both gc_sweep() and gc_free_all().
+ * This is the sole content destructor for all GC-managed objects.
+ * Called by both gc_sweep() and gc_free_all().
  */
 static void free_object_contents(Obj *obj) {
     switch (obj->type) {

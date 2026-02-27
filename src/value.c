@@ -83,9 +83,6 @@ ObjUpvalue *obj_upvalue_new(Value *slot) {
     return uv;
 }
 
-/* obj_upvalue_free() removed — the GC sweep handles upvalue cleanup
- * via free_object_contents() in gc.c. */
-
 ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
     ObjClosure *cl = gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
     if (!cl)
@@ -106,12 +103,6 @@ ObjClosure *obj_closure_new(ObjFunction *fn, int upvalue_count) {
     }
     return cl;
 }
-
-/* obj_closure_free() removed — the GC sweep handles closure cleanup
- * via free_object_contents() in gc.c. */
-
-/* obj_function_free() removed — the GC sweep handles function cleanup
- * via free_object_contents() in gc.c. */
 
 /* ---- ObjString utilities ---- */
 
@@ -239,12 +230,6 @@ ObjArray *obj_array_clone_deep(const ObjArray *src) {
     }
     return clone;
 }
-
-/* obj_array_ensure_owned() removed — arrays now have reference semantics.
- * No COW detach is needed; mutations are visible through all references. */
-
-/* obj_array_free() removed — the GC sweep handles array cleanup
- * via free_object_contents() in gc.c. */
 
 /* ---- Value equality (used by map key lookup and VM equality ops) ----
  * For VAL_STRING: O(1) pointer comparison thanks to string interning.
@@ -383,13 +368,7 @@ ObjMap *obj_map_clone_deep(const ObjMap *src) {
     return clone;
 }
 
-/* obj_map_ensure_owned() removed — maps now have reference semantics.
- * No COW detach is needed; mutations are visible through all references. */
-
 Value make_map(ObjMap *m) { return (Value){.type = VAL_MAP, .map = m}; }
-
-/* obj_map_free() removed — the GC sweep handles map cleanup
- * via free_object_contents() in gc.c. */
 
 void value_free(Value *v) {
     if (!v)

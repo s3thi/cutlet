@@ -74,7 +74,7 @@ typedef Value (*NativeFn)(int argc, Value *args, EvalContext *ctx);
  * chunk:         Compiled body bytecode (heap-allocated, NULL for native functions).
  * native:        Native function pointer (NULL for user-defined functions).
  *
- * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ * Lifetime managed by the GC (mark-and-sweep).
  */
 typedef struct {
     Obj obj;
@@ -118,7 +118,7 @@ typedef struct ObjString {
  * count:    Number of elements currently stored.
  * capacity: Allocated capacity of the data array.
  *
- * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ * Lifetime managed by the GC (mark-and-sweep).
  */
 typedef struct {
     Obj obj;
@@ -174,7 +174,7 @@ struct Value {
  *           NOTE: This is distinct from Obj.next (GC object list).
  *           Both linked-list pointers coexist.
  *
- * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ * Lifetime managed by the GC (mark-and-sweep).
  */
 struct ObjUpvalue {
     Obj obj;
@@ -194,7 +194,7 @@ struct ObjUpvalue {
  * upvalues:      Array of pointers to captured upvalues (NULL entries until filled).
  * upvalue_count: Length of the upvalues array.
  *
- * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ * Lifetime managed by the GC (mark-and-sweep).
  */
 struct ObjClosure {
     Obj obj;
@@ -214,7 +214,7 @@ typedef struct {
  * Lookup is O(n) linear scan — sufficient for typical shell-script
  * map sizes. Can be upgraded to a hash index later without API changes.
  *
- * Lifetime managed by the GC (mark-and-sweep). No reference counting.
+ * Lifetime managed by the GC (mark-and-sweep).
  *
  * obj: GC object header (must be first field for Obj* casting). */
 struct ObjMap {

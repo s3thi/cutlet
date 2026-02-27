@@ -641,9 +641,9 @@ TEST(test_closure_value_format_anonymous) {
     PASS();
 }
 
-TEST(test_closure_clone_refcount) {
+TEST(test_closure_clone_shares_pointer) {
     /* Clone a VAL_CLOSURE — both values should share the same ObjClosure pointer.
-     * No refcount: GC manages lifetime. */
+     * GC manages lifetime. */
     ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("cloned_fn");
     fn->arity = 0;
@@ -693,9 +693,9 @@ TEST(test_closure_is_truthy) {
     PASS();
 }
 
-TEST(test_function_refcount_clone) {
+TEST(test_function_clone_shares_pointer) {
     /* VAL_FUNCTION clone should share the same ObjFunction pointer.
-     * No refcount: GC manages lifetime. */
+     * GC manages lifetime. */
     ObjFunction *fn = gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
     fn->name = strdup("native_fn");
     fn->arity = 0;
@@ -802,9 +802,9 @@ int main(void) {
     RUN_TEST(test_obj_closure_new);
     RUN_TEST(test_closure_value_format_named);
     RUN_TEST(test_closure_value_format_anonymous);
-    RUN_TEST(test_closure_clone_refcount);
+    RUN_TEST(test_closure_clone_shares_pointer);
     RUN_TEST(test_closure_is_truthy);
-    RUN_TEST(test_function_refcount_clone);
+    RUN_TEST(test_function_clone_shares_pointer);
 
     printf("\nOP_ZIP_MAP:\n");
     RUN_TEST(test_opcode_name_zip_map);
