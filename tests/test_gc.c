@@ -11,6 +11,7 @@
  */
 
 #include "../src/gc.h"
+#include "../src/runtime.h"
 #include "../src/value.h"
 #include "../src/vm.h"
 #include <stdio.h>
@@ -656,6 +657,53 @@ TEST(test_gc_mark_roots_marks_open_upvalues) {
 }
 
 /* ============================================================
+ * test_gc_mark_roots_marks_globals: define a global variable
+ * holding a GC-tracked object, then verify gc_mark_roots marks
+ * it via runtime_mark_globals.
+ *
+ * With no VM active, globals are the only root set. After
+ * gc_mark_roots, the object stored in the global should be
+ * marked. After cleanup via runtime_destroy, the global is
+ * removed and the object list is freed.
+ * ============================================================ */
+
+TEST(test_gc_mark_roots_marks_globals) {
+    /* runtime_init calls gc_init internally. */
+    runtime_init();
+
+    /* Ensure no VM is active — only globals should be roots. */
+    gc_set_vm(NULL);
+
+    /* Allocate a GC-tracked array. */
+    ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(arr != NULL, "arr alloc should succeed");
+    arr->refcount = 1;
+
+    /* Build a VAL_ARRAY value referencing the GC-tracked object. */
+    Value val;
+    memset(&val, 0, sizeof(Value));
+    val.type = VAL_ARRAY;
+    val.array = arr;
+
+    /* Store the value in a global variable. runtime_var_define
+     * clones the value, so arr's refcount will be bumped. */
+    RuntimeVarStatus st = runtime_var_define("test_arr", &val);
+    ASSERT(st == RUNTIME_VAR_OK, "runtime_var_define should succeed");
+
+    /* The clone inside var_table also points to arr (refcount 2).
+     * Call gc_mark_roots — runtime_mark_globals should mark arr. */
+    gc_mark_roots();
+
+    ASSERT(arr->obj.is_marked == true, "global variable's array should be marked by gc_mark_roots");
+
+    /* Clean up: runtime_destroy clears var_table and calls gc_free_all.
+     * We need to decrement our local reference first. */
+    arr->obj.is_marked = false; /* Reset mark so gc_free_all is clean. */
+    runtime_destroy();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -686,6 +734,7 @@ int main(void) {
     RUN_TEST(test_gc_mark_roots_marks_stack);
     RUN_TEST(test_gc_mark_roots_marks_frame_closures);
     RUN_TEST(test_gc_mark_roots_marks_open_upvalues);
+    RUN_TEST(test_gc_mark_roots_marks_globals);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

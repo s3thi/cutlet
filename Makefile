@@ -207,24 +207,24 @@ $(TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(LDFLAGS)
 
 # Build chunk test binary
-$(TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(LDFLAGS) -lm
+$(TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
 
 # Build compiler test binary
-$(TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -lm
+$(TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
 
 # Build VM test binary
 $(TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(LDFLAGS) -pthread -lm
 
 # Build value (array) test binary
-$(TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(LDFLAGS) -lm
+$(TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
 
 # Build GC infrastructure test binary
-$(TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(LDFLAGS) -lm
+$(TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c $(LDFLAGS) -pthread -lm
 
 # ---------- Formatting (clang-format) ----------
 
@@ -326,20 +326,20 @@ $(SANITIZE_TEST_PTR_ARRAY_BIN): $(TEST_PTR_ARRAY_SRC) $(SRC_DIR)/ptr_array.c | $
 $(SANITIZE_TEST_JSON_BIN): $(TEST_JSON_SRC) $(SRC_DIR)/json.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_JSON_SRC) $(SRC_DIR)/json.c $(SANITIZE_LDFLAGS)
 
-$(SANITIZE_TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SANITIZE_LDFLAGS) -lm
+$(SANITIZE_TEST_CHUNK_BIN): $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_CHUNK_SRC) $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(SANITIZE_LDFLAGS) -pthread -lm
 
-$(SANITIZE_TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS) -lm
+$(SANITIZE_TEST_COMPILER_BIN): $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_COMPILER_SRC) $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/ptr_array.c $(SRC_DIR)/runtime.c $(SANITIZE_LDFLAGS) -pthread -lm
 
 $(SANITIZE_TEST_VM_BIN): $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c | $(SANITIZE_BUILD_DIR)
 	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_VM_SRC) $(SRC_DIR)/vm.c $(SRC_DIR)/compiler.c $(SRC_DIR)/chunk.c $(SRC_DIR)/value.c $(SRC_DIR)/gc.c $(SRC_DIR)/parser.c $(SRC_DIR)/tokenizer.c $(SRC_DIR)/runtime.c $(SRC_DIR)/ptr_array.c $(SANITIZE_LDFLAGS) -pthread -lm
 
-$(SANITIZE_TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SANITIZE_LDFLAGS) -lm
+$(SANITIZE_TEST_VALUE_BIN): $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_VALUE_SRC) $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/gc.c $(SRC_DIR)/runtime.c $(SANITIZE_LDFLAGS) -pthread -lm
 
-$(SANITIZE_TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c | $(SANITIZE_BUILD_DIR)
-	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SANITIZE_LDFLAGS) -lm
+$(SANITIZE_TEST_GC_BIN): $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c | $(SANITIZE_BUILD_DIR)
+	$(CC) $(SANITIZE_CFLAGS) -o $@ $(TEST_GC_SRC) $(SRC_DIR)/gc.c $(SRC_DIR)/value.c $(SRC_DIR)/chunk.c $(SRC_DIR)/runtime.c $(SANITIZE_LDFLAGS) -pthread -lm
 
 # Run the full test suite under sanitizers.
 .PHONY: test-sanitize

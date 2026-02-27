@@ -21,6 +21,7 @@
 
 #include "gc.h"
 #include "chunk.h"
+#include "runtime.h"
 #include "value.h"
 #include "vm.h"
 #include <stdlib.h>
@@ -319,9 +320,9 @@ void gc_mark_roots(void) {
             gc_mark_object((Obj *)uv);
     }
 
-    /* TODO (Step 4): call runtime_mark_globals() here to mark
-     * all Values in the global variable table. Globals persist
+    /* Mark all Values in the global variable table. Globals persist
      * across evaluations, so this must run even when gc_vm is NULL. */
+    runtime_mark_globals();
 }
 
 /*

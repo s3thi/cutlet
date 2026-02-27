@@ -179,6 +179,22 @@ void runtime_destroy(void) {
     gc_free_all();
 }
 
+/*
+ * Mark all Values in the global variable table as GC roots.
+ *
+ * Iterates every occupied entry (name != NULL) in var_table and
+ * calls gc_mark_value() on its stored Value. This ensures that
+ * heap objects referenced by globals are not collected during GC.
+ *
+ * Called by gc_mark_roots() during the mark phase.
+ */
+void runtime_mark_globals(void) {
+    for (size_t i = 0; i < var_table_cap; i++) {
+        if (var_table[i].name != NULL)
+            gc_mark_value(&var_table[i].value);
+    }
+}
+
 void runtime_eval_lock(void) {
     /* Lazy init: safe to call even if runtime_init() was never called
      * explicitly. pthread_once guarantees this is a no-op after the

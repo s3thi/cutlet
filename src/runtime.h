@@ -84,6 +84,18 @@ RuntimeVarStatus runtime_var_define(const char *name, const Value *value);
 RuntimeVarStatus runtime_var_assign(const char *name, const Value *value);
 
 /*
+ * Mark all Values stored in global variables as GC roots.
+ *
+ * Iterates every occupied entry in the global variable hash table
+ * and calls gc_mark_value() on each stored Value. Called by
+ * gc_mark_roots() during the mark phase of garbage collection.
+ *
+ * Must be called even when no VM is active, since globals persist
+ * across evaluations and may reference heap-allocated objects.
+ */
+void runtime_mark_globals(void);
+
+/*
  * Test-only hooks.  When CUTLET_TESTING is defined, the runtime calls
  * these function pointers (if non-NULL) on lock enter and exit.
  * Tests can set them to track concurrent access.
