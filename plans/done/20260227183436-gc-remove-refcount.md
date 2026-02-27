@@ -213,6 +213,11 @@ Run `make test && make check`.
 
 ## Progress
 
+**Plan complete (2026-02-27).** All 7 steps finished. Refcounting has been fully
+removed from the Cutlet codebase. Arrays and maps now use reference semantics.
+The GC (mark-and-sweep) is the sole lifetime management mechanism for all heap
+objects. All tests pass under normal, sanitizer, and GC-stress modes.
+
 ### Step 1: Identify and update tests that assume value semantics ✅
 
 **Completed 2026-02-27.**
@@ -353,6 +358,50 @@ shallow pointer copy for GC types. No code change needed.
 for GC types — actual object cleanup happens in `gc_free_all()`.
 
 **All tests pass. Format check passes. Lint warnings are pre-existing (not in modified files).**
+
+### Step 7: Remove dead code and run full verification ✅
+
+**Completed 2026-02-27.**
+
+Final cleanup: removed dead code tombstone comments, cleaned up stale
+refcount/COW references in comments, and ran full verification.
+
+**Dead code removal:**
+- Confirmed `obj_closure_free()`, `obj_upvalue_free()`, `obj_function_free()` were
+  already removed in Step 2. Removed their tombstone comments from `value.c`.
+- Removed tombstone comments for `obj_array_free()`, `obj_map_free()`,
+  `obj_array_ensure_owned()`, `obj_map_ensure_owned()` from `value.c`.
+- `free_object_contents()` in `gc.c` is confirmed as the sole content destructor.
+  No duplicate cleanup logic exists in `value.c`.
+
+**Comment cleanup (7 files):**
+- `src/gc.h`: Replaced stale "Refcounting remains the primary mechanism during
+  transition" with "The GC is the sole lifetime management mechanism. There is
+  no reference counting."
+- `src/gc.c`: Cleaned up header comment and `free_object_contents()` doc comment.
+- `src/value.h`: Removed redundant "No reference counting." from 5 struct doc
+  comments (ObjFunction, ObjArray, ObjUpvalue, ObjClosure, ObjMap).
+- `src/value.c`: Removed 6 tombstone comments for deleted functions.
+- `src/compiler.c`: Updated OP_INDEX_SET comment — "COW, mutate" → "mutate in place".
+- `src/vm.c`: Removed 3 "no refcount" historical notes from upvalue comments.
+- `tests/test_chunk.c`: Renamed `test_closure_clone_refcount` →
+  `test_closure_clone_shares_pointer`, `test_function_refcount_clone` →
+  `test_function_clone_shares_pointer`. Updated test comments.
+
+**Full verification:**
+- `make test`: All unit tests, CLI tests, and example tests pass (0 failures).
+- `make format-check`: All files pass clang-format.
+- `make check` (lint): 11 warnings-as-errors, all pre-existing in unmodified files
+  (`main.c`, `repl.c`, `repl_server.c`, `test_repl_server.c`).
+- `make test-sanitize`: All tests pass. 903 bytes leaked in 10 allocations — all
+  pre-existing in `test_chunk.c` disassemble tests (confirmed identical before changes).
+- `make test-gc-stress`: All tests pass with 0 failures across all test binaries.
+
+**Behavioral verification:**
+- TUTORIAL.md already covers reference semantics (updated in Step 1).
+- `examples/arrays.cutlet` and `examples/maps.cutlet` already demonstrate
+  reference semantics (updated in Step 1).
+- No `.expected` file regeneration needed.
 
 ---
 
