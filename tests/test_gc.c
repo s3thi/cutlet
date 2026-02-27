@@ -12,6 +12,7 @@
 
 #include "../src/gc.h"
 #include "../src/value.h"
+#include "../src/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -492,6 +493,169 @@ TEST(test_gc_stress_mode) {
 }
 
 /* ============================================================
+ * test_gc_set_vm_null_safe: gc_mark_roots with no VM active
+ * should not crash. With gc_vm == NULL, only globals would be
+ * marked (but runtime_mark_globals is not yet implemented).
+ * ============================================================ */
+
+TEST(test_gc_set_vm_null_safe) {
+    gc_init();
+
+    /* Ensure gc_vm is NULL (default after gc_init or explicit set). */
+    gc_set_vm(NULL);
+
+    /* Allocate some objects — they should NOT be marked since
+     * there's no VM and no globals marking yet. */
+    ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(arr != NULL, "arr alloc should succeed");
+
+    /* gc_collect calls gc_mark_roots which should be a no-op
+     * when gc_vm is NULL (no VM roots to walk). Should not crash. */
+    gc_collect();
+
+    /* Object should have is_marked == false because it's unreachable
+     * and gc_collect clears marks after marking. */
+    ASSERT(arr->obj.is_marked == false, "unreachable object should not be marked after collect");
+
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_mark_roots_marks_stack: set up a mock VM with values
+ * on the stack and verify gc_mark_roots marks them.
+ *
+ * Manually constructs a VM with a stack containing an ObjArray
+ * value. Calls gc_mark_roots (via gc_collect) and verifies the
+ * array is marked (then cleared by gc_collect's clear phase).
+ * Since gc_collect clears marks, we call gc_mark_roots directly
+ * to inspect the marks before clearing.
+ * ============================================================ */
+
+TEST(test_gc_mark_roots_marks_stack) {
+    gc_init();
+
+    /* Create a GC-tracked array to put on the VM stack. */
+    ObjArray *arr = (ObjArray *)gc_alloc(OBJ_ARRAY, sizeof(ObjArray));
+    ASSERT(arr != NULL, "arr alloc should succeed");
+    arr->refcount = 1;
+
+    /* Set up a minimal VM with the array value on the stack. */
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.stack_top = vm.stack;
+    vm.frame_count = 0;
+    vm.open_upvalues = NULL;
+
+    /* Push a VAL_ARRAY onto the stack. */
+    memset(&vm.stack[0], 0, sizeof(Value));
+    vm.stack[0].type = VAL_ARRAY;
+    vm.stack[0].array = arr;
+    vm.stack_top = &vm.stack[1];
+
+    /* Register the VM and call gc_mark_roots directly. */
+    gc_set_vm(&vm);
+    gc_mark_roots();
+
+    /* The array should be marked because it's on the VM stack. */
+    ASSERT(arr->obj.is_marked == true, "stack array should be marked by gc_mark_roots");
+
+    /* Clean up: unregister VM, zero out stack to prevent double-free. */
+    gc_set_vm(NULL);
+    memset(&vm.stack[0], 0, sizeof(Value));
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_mark_roots_marks_frame_closures: set up a mock VM
+ * with a call frame closure and verify it gets marked.
+ * ============================================================ */
+
+TEST(test_gc_mark_roots_marks_frame_closures) {
+    gc_init();
+
+    /* Create a GC-tracked function and closure. */
+    ObjFunction *fn = (ObjFunction *)gc_alloc(OBJ_FUNCTION, sizeof(ObjFunction));
+    ASSERT(fn != NULL, "fn alloc should succeed");
+    fn->refcount = 1;
+    fn->upvalue_count = 0;
+
+    ObjClosure *cl = (ObjClosure *)gc_alloc(OBJ_CLOSURE, sizeof(ObjClosure));
+    ASSERT(cl != NULL, "closure alloc should succeed");
+    cl->refcount = 1;
+    cl->function = fn;
+    cl->upvalues = NULL;
+    cl->upvalue_count = 0;
+
+    /* Set up a minimal VM with one call frame using the closure. */
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.stack_top = vm.stack;
+    vm.open_upvalues = NULL;
+    vm.frame_count = 1;
+    vm.frames[0].closure = cl;
+    vm.frames[0].ip = NULL;
+    vm.frames[0].slots = vm.stack;
+
+    /* Register the VM and call gc_mark_roots directly. */
+    gc_set_vm(&vm);
+    gc_mark_roots();
+
+    /* The closure and its function should be marked. */
+    ASSERT(cl->obj.is_marked == true, "frame closure should be marked");
+    ASSERT(fn->obj.is_marked == true, "closure's function should be marked");
+
+    /* Clean up. */
+    gc_set_vm(NULL);
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
+ * test_gc_mark_roots_marks_open_upvalues: set up a mock VM
+ * with an open upvalue linked list and verify it gets marked.
+ * ============================================================ */
+
+TEST(test_gc_mark_roots_marks_open_upvalues) {
+    gc_init();
+
+    /* Create a GC-tracked upvalue. */
+    ObjUpvalue *uv = (ObjUpvalue *)gc_alloc(OBJ_UPVALUE, sizeof(ObjUpvalue));
+    ASSERT(uv != NULL, "upvalue alloc should succeed");
+    uv->refcount = 1;
+    uv->next = NULL;
+    /* Mark it as open: location points to some stack slot (not &closed). */
+    memset(&uv->closed, 0, sizeof(Value));
+    uv->location = &uv->closed; /* Reuse closed for simplicity — the key
+                                 * thing is it's in the open upvalue list. */
+
+    /* Actually, to make it an open upvalue, location should NOT point
+     * to &closed. Let's use a stack value instead. */
+    Value stack_val = {0};
+    uv->location = &stack_val;
+
+    /* Set up a minimal VM with the upvalue in the open list. */
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.stack_top = vm.stack;
+    vm.frame_count = 0;
+    vm.open_upvalues = uv;
+
+    /* Register the VM and call gc_mark_roots directly. */
+    gc_set_vm(&vm);
+    gc_mark_roots();
+
+    /* The upvalue should be marked because it's in the open upvalue list. */
+    ASSERT(uv->obj.is_marked == true, "open upvalue should be marked");
+
+    /* Clean up. */
+    gc_set_vm(NULL);
+    gc_free_all();
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -516,6 +680,12 @@ int main(void) {
     RUN_TEST(test_gc_mark_reachable_from_map);
     RUN_TEST(test_gc_mark_closure_traces_function_and_upvalues);
     RUN_TEST(test_gc_stress_mode);
+
+    printf("\nGC root marking:\n");
+    RUN_TEST(test_gc_set_vm_null_safe);
+    RUN_TEST(test_gc_mark_roots_marks_stack);
+    RUN_TEST(test_gc_mark_roots_marks_frame_closures);
+    RUN_TEST(test_gc_mark_roots_marks_open_upvalues);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

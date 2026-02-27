@@ -22,6 +22,7 @@
 #include "gc.h"
 #include "chunk.h"
 #include "value.h"
+#include "vm.h"
 #include <stdlib.h>
 
 /* Initial GC threshold: 1 MiB before first collection attempt. */
@@ -29,6 +30,11 @@
 
 /* Module-level GC state. Access serialized by eval_lock in runtime. */
 static GC gc;
+
+/* Pointer to the currently executing VM, or NULL if no evaluation is
+ * in progress. Set by gc_set_vm() at vm_execute() entry/exit.
+ * Used by gc_mark_roots() to walk the VM's stack and call frames. */
+static VM *gc_vm;
 
 void gc_init(void) {
     gc.objects = NULL;
@@ -279,23 +285,61 @@ void gc_mark_object(Obj *obj) {
     }
 }
 
+void gc_set_vm(VM *vm) { gc_vm = vm; }
+
+/*
+ * gc_mark_roots - walk all root sets and mark every directly
+ * reachable object.
+ *
+ * Root sets:
+ *   1. VM value stack (stack[0] through stack_top - 1).
+ *   2. Call frame closures (frames[0..frame_count-1].closure).
+ *   3. Open upvalue linked list (vm->open_upvalues).
+ *   4. Global variable table (via runtime_mark_globals — Step 4).
+ *
+ * If no VM is active (gc_vm == NULL), only globals are marked.
+ * The VM's stack-allocated script_fn and script_closure (frame 0)
+ * are safe to mark: gc_mark_object sets is_marked on them but
+ * sweep (task 4) only walks the GC object list, so non-list
+ * objects are never freed.
+ */
+void gc_mark_roots(void) {
+    if (gc_vm != NULL) {
+        /* Mark every Value on the VM value stack. */
+        for (Value *slot = gc_vm->stack; slot < gc_vm->stack_top; slot++)
+            gc_mark_value(slot);
+
+        /* Mark the closure in each active call frame.
+         * This includes frame 0's stack-allocated script_closure. */
+        for (int i = 0; i < gc_vm->frame_count; i++)
+            gc_mark_object((Obj *)gc_vm->frames[i].closure);
+
+        /* Mark every open upvalue on the linked list. */
+        for (ObjUpvalue *uv = gc_vm->open_upvalues; uv != NULL; uv = uv->next)
+            gc_mark_object((Obj *)uv);
+    }
+
+    /* TODO (Step 4): call runtime_mark_globals() here to mark
+     * all Values in the global variable table. Globals persist
+     * across evaluations, so this must run even when gc_vm is NULL. */
+}
+
 /*
  * gc_collect - run a garbage collection cycle.
  *
- * Currently: no root marking (gc_mark_roots is added in step 3),
- * but clears all is_marked flags on the object list so that tests
- * for the mark-then-clear contract pass. No objects are freed yet
- * (sweep is task 4).
+ * Marks all reachable objects via gc_mark_roots(), then clears
+ * all is_marked flags on the object list. No objects are freed
+ * yet (sweep is task 4).
  *
- * TODO: call gc_mark_roots() once implemented (step 3).
  * TODO: sweep phase — see gc-sweep task.
  */
 void gc_collect(void) {
+    /* Mark all objects reachable from roots. */
+    gc_mark_roots();
+
     /* Clear all marks on the object list.
-     * This is the "reset" phase: after marking roots (not yet
-     * implemented), we clear marks so objects start fresh for
-     * the next cycle. Once sweep is added, surviving objects'
-     * marks are cleared during sweep instead. */
+     * This is temporary: once sweep is added (task 4), surviving
+     * objects' marks are cleared during sweep instead of here. */
     Obj *obj = gc.objects;
     while (obj) {
         obj->is_marked = false;

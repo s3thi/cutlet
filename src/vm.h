@@ -38,7 +38,7 @@ typedef struct {
     Value *slots;        /* Pointer into VM stack: base of this frame's window. */
 } CallFrame;
 
-typedef struct {
+typedef struct VM {
     CallFrame frames[FRAMES_MAX]; /* Call frame stack. */
     int frame_count;              /* Number of active call frames. */
     Value stack[VM_STACK_MAX];    /* Value stack. */

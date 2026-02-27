@@ -139,6 +139,30 @@ void gc_mark_object(Obj *obj);
  */
 void gc_mark_value(struct Value *v);
 
+/* ---- Root marking ---- */
+
+/* Forward declaration of VM (defined in vm.h). Avoids circular includes
+ * since vm.h already includes value.h -> gc-adjacent types. */
+struct VM;
+
+/*
+ * Store a pointer to the currently executing VM so that gc_mark_roots()
+ * can walk the VM's stack, call frames, and open upvalues. Called at the
+ * start of vm_execute() (with &vm) and at the end (with NULL).
+ */
+void gc_set_vm(struct VM *vm);
+
+/*
+ * Walk all root sets and mark every directly reachable object:
+ *   - VM value stack (if a VM is active)
+ *   - Call frame closures (if a VM is active)
+ *   - Open upvalue list (if a VM is active)
+ *   - Global variable table (always — globals persist across evaluations)
+ *
+ * Called by gc_collect() at the start of each collection cycle.
+ */
+void gc_mark_roots(void);
+
 /* ---- Test/inspection accessors ---- */
 
 /* Return the head of the global object list (for test inspection). */

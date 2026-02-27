@@ -12,6 +12,7 @@
  */
 
 #include "vm.h"
+#include "gc.h"
 #include "runtime.h"
 #include <math.h>
 #include <stdarg.h>
@@ -647,9 +648,18 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
     vm.frames[vm.frame_count].slots = vm.stack;
     vm.frame_count++;
 
+    /* Register the VM with the GC so gc_mark_roots() can walk
+     * the stack, call frames, and open upvalues during collection. */
+    gc_set_vm(&vm);
+
     /* Run the dispatch loop. base_frame_count=0 means run until the
      * top-level script returns (frame_count drops back to 0). */
-    return vm_run(&vm, 0);
+    Value result = vm_run(&vm, 0);
+
+    /* Unregister the VM — evaluation is complete. */
+    gc_set_vm(NULL);
+
+    return result;
 }
 
 /*
