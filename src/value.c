@@ -291,6 +291,10 @@ bool value_equal(const Value *a, const Value *b) {
     case VAL_OBJECT_TYPE:
         /* Identity-based: only equal if pointing to the same ObjObjectType. */
         return a->object_type == b->object_type;
+    case VAL_INSTANCE:
+        /* Identity-based: only equal if pointing to the same ObjInstance.
+         * Two different instances of the same type are NOT equal. */
+        return a->instance == b->instance;
     default:
         return false;
     }
@@ -417,6 +421,28 @@ Value make_object_type(ObjObjectType *t) {
     return (Value){.type = VAL_OBJECT_TYPE, .object_type = t};
 }
 
+ObjInstance *obj_instance_new(ObjObjectType *type) {
+    if (!type)
+        return NULL;
+    ObjInstance *inst = malloc(sizeof(ObjInstance));
+    if (!inst)
+        return NULL;
+    inst->refcount = 1;
+    inst->type = type;
+    /* The instance holds a reference to its type — increment refcount. */
+    type->refcount++;
+    inst->data = obj_map_new();
+    if (!inst->data) {
+        /* Cleanup on allocation failure: undo the refcount bump. */
+        type->refcount--;
+        free(inst);
+        return NULL;
+    }
+    return inst;
+}
+
+Value make_instance(ObjInstance *inst) { return (Value){.type = VAL_INSTANCE, .instance = inst}; }
+
 /*
  * Helper: free an ObjMap that is owned by a refcount-managed struct
  * (ObjObjectType or ObjInstance). Iterates all entries, frees keys
@@ -434,6 +460,20 @@ static void free_owned_map(ObjMap *m) {
     gc_free_object((Obj *)m);
 }
 
+/*
+ * Helper: free an ObjObjectType's owned resources and the struct itself.
+ * Does NOT decrement refcount — the caller must have already determined
+ * that refcount has reached 0. Used by value_free for both VAL_OBJECT_TYPE
+ * and VAL_INSTANCE (when the instance's type reference is the last one).
+ */
+static void free_object_type(ObjObjectType *t) {
+    if (!t)
+        return;
+    free(t->name);
+    free_owned_map(t->methods);
+    free(t);
+}
+
 void value_free(Value *v) {
     if (!v)
         return;
@@ -446,11 +486,24 @@ void value_free(Value *v) {
     if (v->type == VAL_OBJECT_TYPE && v->object_type) {
         v->object_type->refcount--;
         if (v->object_type->refcount == 0) {
-            free(v->object_type->name);
-            free_owned_map(v->object_type->methods);
-            free(v->object_type);
+            free_object_type(v->object_type);
         }
         v->object_type = NULL;
+    }
+    /* VAL_INSTANCE: decrement refcount; free if it reaches zero. */
+    if (v->type == VAL_INSTANCE && v->instance) {
+        v->instance->refcount--;
+        if (v->instance->refcount == 0) {
+            /* Free the instance's data map. */
+            free_owned_map(v->instance->data);
+            /* Release the type reference; free the type if last ref. */
+            v->instance->type->refcount--;
+            if (v->instance->type->refcount == 0) {
+                free_object_type(v->instance->type);
+            }
+            free(v->instance);
+        }
+        v->instance = NULL;
     }
     /* GC-managed types: null out the pointer. The GC handles freeing.
      * We null the pointer to prevent dangling references in debug builds. */
@@ -650,6 +703,17 @@ char *value_format(const Value *v) {
         return buf;
     }
 
+    case VAL_INSTANCE: {
+        /* Format: "<Name instance>" */
+        const char *name = (v->instance && v->instance->type) ? v->instance->type->name : "?";
+        /* "<" + name + " instance>" + NUL */
+        size_t len = 1 + strlen(name) + 10 + 1;
+        char *buf = malloc(len);
+        if (buf)
+            snprintf(buf, len, "<%s instance>", name);
+        return buf;
+    }
+
     default:
         return strdup("???");
     }
@@ -673,6 +737,8 @@ bool is_truthy(const Value *v) {
         return v->map != NULL && v->map->count > 0;
     case VAL_OBJECT_TYPE: // NOLINT(bugprone-branch-clone)
         return true;
+    case VAL_INSTANCE: // NOLINT(bugprone-branch-clone)
+        return true;
     case VAL_NOTHING: // NOLINT(bugprone-branch-clone)
         return false;
     case VAL_ERROR: // NOLINT(bugprone-branch-clone)
@@ -695,6 +761,10 @@ bool value_clone(Value *out, const Value *src) {
     /* VAL_OBJECT_TYPE: increment refcount (shared ownership). */
     if (src->type == VAL_OBJECT_TYPE && out->object_type) {
         out->object_type->refcount++;
+    }
+    /* VAL_INSTANCE: increment refcount (shared ownership). */
+    if (src->type == VAL_INSTANCE && out->instance) {
+        out->instance->refcount++;
     }
     /* All other types: shallow copy is sufficient.
      * GC-managed pointers (function, closure, array, map, string)
