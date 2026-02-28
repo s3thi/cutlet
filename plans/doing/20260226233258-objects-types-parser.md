@@ -383,3 +383,35 @@ Implemented all ObjInstance functionality in `src/value.c`:
 - `free_object_type(ObjObjectType *t)`: freed from the inlined code in VAL_OBJECT_TYPE's value_free path. Now shared by both VAL_OBJECT_TYPE and VAL_INSTANCE (when instance's type ref is the last one).
 
 **Test results:** 341/353 pass (same 12 parser failures from Steps 5-7). All value, compiler, VM, GC, tokenizer, chunk tests pass. Format check passes. Commit: `c39cf5e`.
+
+### Step 5: Parse object definitions — DONE (2026-02-28)
+
+Implemented object definition parsing in `src/parser.c`:
+
+**parse_object() function:**
+- Handles `object Name [with Mixin1, Mixin2, ...] is fn... end` syntax.
+- Type name must be a non-reserved-keyword identifier.
+- Optional `with` clause parses comma-separated mixin names (each validated as non-reserved identifier).
+- Expects `is` keyword, then parses method definitions in a loop via `parse_fn()`.
+- Each method is verified to be named (anonymous functions rejected with "object methods must be named").
+- Expects closing `end` keyword.
+- Builds AST_OBJECT_DEF node: value=type name, params=mixin names, children=methods.
+
+**parse_atom() integration:**
+- Added `object` keyword handler dispatching to `parse_object()`, following the same pattern as `fn`/`if`/`while`.
+
+**AST formatting:**
+- Added AST_OBJECT_DEF branch in `ast_format_node()`:
+  - `[OBJECT_DEF Name]` for empty object
+  - `[OBJECT_DEF Name with A, B]` for mixins
+  - `[OBJECT_DEF Name [FN ...]]` for methods
+  - Combined form for mixins + methods
+
+**parser_is_complete():**
+- Added detection for `"expected 'fn' or 'end' in object body"` error message so that incomplete object bodies at EOF are recognized as incomplete input for REPL continuation.
+- The existing `"expected 'is'"` check already covers `object Foo` at EOF.
+
+**Decisions made:**
+- Added `parser_is_complete()` support in this step rather than deferring to Step 7, since the completeness tests were written in Step 1 and naturally need the parsing to exist to function.
+
+**Test results:** 349/353 pass. All 13 object definition tests pass (5 success, 2 error, 5 completeness, 1 reserved keyword). Remaining 4 failures are all `new` expression tests (Step 6). Format check passes. Commit: `d0da907`.
