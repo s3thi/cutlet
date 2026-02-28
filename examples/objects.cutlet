@@ -1,0 +1,87 @@
+# Objects: user-defined types with methods
+
+# Define an object type with methods
+object Dog is
+  fn init(self, name) is
+    self.name = name
+  end
+
+  fn speak(self) is
+    self.name ++ " says woof!"
+  end
+end
+
+# Create an instance with new
+my dog = new Dog("Rex")
+say(dog.speak())          # Rex says woof!
+
+# Access fields set by init
+say(dog.name)             # Rex
+
+# Set new fields on an instance
+dog.age = 5
+say(dog.age)              # 5
+
+# Missing fields return nothing
+say(dog.color)            # nothing
+
+# Bracket access works too
+say(dog["name"])          # Rex
+dog["color"] = "brown"
+say(dog.color)            # brown
+
+# Membership testing with 'in'
+say("name" in dog)        # true
+say("speak" in dog)       # true
+say("missing" in dog)     # false
+
+# A counter with mutable state
+object Counter is
+  fn init(self, n) is
+    self.n = n
+  end
+
+  fn inc(self) is
+    self.n = self.n + 1
+  end
+
+  fn get(self) is
+    self.n
+  end
+end
+
+my c = new Counter(0)
+c.inc()
+c.inc()
+c.inc()
+say(c.get())              # 3
+
+# Methods can call other methods on self
+object Calc is
+  fn init(self, x) is
+    self.x = x
+  end
+
+  fn double(self) is
+    self.x * 2
+  end
+
+  fn quad(self) is
+    self.double() * 2
+  end
+end
+
+say(new Calc(5).quad())   # 20
+
+# Each instance is independent
+my a = new Counter(10)
+my b = new Counter(20)
+a.inc()
+say(a.get())              # 11
+say(b.get())              # 20
+
+# Empty types work too
+object Tag is end
+my t = new Tag()
+t.label = "important"
+say(t.label)              # important

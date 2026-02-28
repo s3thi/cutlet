@@ -1265,6 +1265,15 @@ static Value vm_run(VM *vm, int base_frame_count) {
                     }
                 }
                 break;
+            case VAL_INSTANCE: {
+                /* Check instance data map first, then method table for string keys. */
+                ObjInstance *inst = haystack.instance;
+                found = obj_map_has(inst->data, &needle);
+                if (!found && needle.type == VAL_STRING) {
+                    found = obj_object_type_get_method(inst->type, needle.string->chars) != NULL;
+                }
+                break;
+            }
             case VAL_STRING:
                 if (needle.type != VAL_STRING) {
                     value_free(&needle);
@@ -2047,6 +2056,69 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 break;
             }
 
+            /* ---- Instance indexing ---- */
+            if (arr_val.type == VAL_INSTANCE) {
+                ObjInstance *inst = arr_val.instance;
+                /* Check the instance's data map first. */
+                Value *found = obj_map_get(inst->data, &idx_val);
+                if (found) {
+                    Value result;
+                    if (!value_clone(&result, found)) {
+                        gc_unpin();
+                        gc_unpin();
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        return vm_runtime_error(vm, "memory allocation failed");
+                    }
+                    gc_unpin();
+                    gc_unpin();
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, result)) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                } else if (idx_val.type == VAL_STRING) {
+                    /* Not in data — check the type's method table. */
+                    Value *method = obj_object_type_get_method(inst->type, idx_val.string->chars);
+                    if (method) {
+                        Value result;
+                        if (!value_clone(&result, method)) {
+                            gc_unpin();
+                            gc_unpin();
+                            value_free(&arr_val);
+                            value_free(&idx_val);
+                            return vm_runtime_error(vm, "memory allocation failed");
+                        }
+                        gc_unpin();
+                        gc_unpin();
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        if (!vm_push(vm, result)) {
+                            return vm_runtime_error(vm, "stack overflow");
+                        }
+                    } else {
+                        /* Not in data or methods — return nothing. */
+                        gc_unpin();
+                        gc_unpin();
+                        value_free(&arr_val);
+                        value_free(&idx_val);
+                        if (!vm_push(vm, make_nothing())) {
+                            return vm_runtime_error(vm, "stack overflow");
+                        }
+                    }
+                } else {
+                    /* Non-string key not in data — return nothing. */
+                    gc_unpin();
+                    gc_unpin();
+                    value_free(&arr_val);
+                    value_free(&idx_val);
+                    if (!vm_push(vm, make_nothing())) {
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                }
+                break;
+            }
+
             if (arr_val.type != VAL_ARRAY) {
                 const char *t = value_type_name(arr_val.type);
                 gc_unpin();
@@ -2219,6 +2291,21 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 gc_unpin();
                 value_free(&idx_val);
                 /* Push the modified map on top of the value. */
+                if (!vm_push(vm, arr_val)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                break;
+            }
+
+            /* ---- Instance index set ---- */
+            if (arr_val.type == VAL_INSTANCE) {
+                ObjInstance *inst = arr_val.instance;
+                /* Write field to the instance's data map. */
+                obj_map_set(inst->data, &idx_val, &val);
+                gc_unpin();
+                gc_unpin();
+                value_free(&idx_val);
+                /* Push the modified instance on top of the value. */
                 if (!vm_push(vm, arr_val)) {
                     return vm_runtime_error(vm, "stack overflow");
                 }

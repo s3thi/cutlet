@@ -3581,8 +3581,12 @@ TEST(test_obj_init_single_arg) {
 }
 
 TEST(test_obj_init_two_args) {
-    assert_vm_number("object Foo is fn init(self, a, b) is self.a = a\n"
-                     "self.b = b end end\n"
+    assert_vm_number("object Foo is\n"
+                     "fn init(self, a, b) is\n"
+                     "self.a = a\n"
+                     "self.b = b\n"
+                     "end\n"
+                     "end\n"
                      "my f = new Foo(1, 2)\nf.a + f.b",
                      3.0, "init with two args");
 }

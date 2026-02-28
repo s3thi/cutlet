@@ -1758,14 +1758,11 @@ cutlet repl --listen :9000        # listen on custom port
 cutlet repl --connect :9000       # connect to custom port
 ```
 
-## 19. Objects and types (planned)
+## 19. Objects and types
 
-Cutlet has syntax for defining object types and creating instances. The parser
-recognizes these constructs, but the compiler and VM do not support them yet.
-This section documents the planned syntax so you know what is coming.
-
-> **Status:** Parser-only. Attempting to run code with `object` or `new` will
-> produce a compile error. Full runtime support is tracked in a separate task.
+Cutlet has a simple object system. You define named types with methods using
+`object...end`, create instances with `new`, and access fields and methods
+through dot syntax.
 
 ### Defining an object type
 
@@ -1773,25 +1770,198 @@ Use `object...end` to define a named type with methods:
 
 ```cutlet
 object Dog is
-  fn speak(self) is
-    "woof!"
+  fn init(self, name) is
+    self.name = name
   end
 
-  fn name(self) is
-    self.name
+  fn speak(self) is
+    "woof! I'm " ++ self.name
   end
 end
 ```
 
 - The name after `object` must be an identifier (e.g., `Dog`, `Point`).
 - The body contains zero or more `fn` definitions. Each method must be named.
-- Methods conventionally take `self` as the first parameter (but `self` is not
-  a keyword -- it is an ordinary identifier).
+- Methods take `self` as the first parameter. `self` is not a keyword -- it is
+  an ordinary parameter name that receives the instance when called.
 
 An empty object type is valid:
 
 ```cutlet
 object Empty is end
+```
+
+### Creating instances with `new`
+
+Use `new` to create an instance of a type:
+
+```cutlet
+my dog = new Dog("Rex")
+new Point(3, 4)
+new Empty()
+```
+
+`new` takes a type name and parenthesized arguments (which can be any
+expression). If the type has an `init` method, it is called automatically
+with the new instance as `self` and the provided arguments. Zero arguments
+are allowed when the type has no `init` or `init` takes only `self`.
+
+### The `init` method
+
+If an object type defines a method named `init`, it is called automatically
+when `new` creates an instance. `init` is used to set up the instance's
+initial state:
+
+```cutlet
+object Point is
+  fn init(self, x, y) is
+    self.x = x
+    self.y = y
+  end
+end
+
+my p = new Point(3, 4)
+say(p.x)    # => 3
+say(p.y)    # => 4
+```
+
+Important rules for `init`:
+- `init`'s return value is always discarded. `new` returns the instance, not
+  whatever `init` returns.
+- The arity must match: if `init(self, x, y)` expects 2 arguments (besides
+  `self`), then `new Point(1)` or `new Point(1, 2, 3)` produce runtime errors.
+- If a type has no `init` but you pass arguments to `new`, that is also a
+  runtime error: `new Empty(42)` fails.
+
+### Field access
+
+Instance fields are stored in a per-instance data map. You read and write
+fields with dot syntax or bracket syntax:
+
+```cutlet
+object Box is end
+my b = new Box()
+b.label = "fragile"    # dot set: creates a new field
+say(b.label)           # dot get: => "fragile"
+
+b["size"] = 42         # bracket set
+say(b["size"])         # bracket get: => 42
+say(b.size)            # dot get also works: => 42
+```
+
+Accessing a field that does not exist returns `nothing`:
+
+```cutlet
+object Box is end
+my b = new Box()
+say(b.missing)         # => nothing
+```
+
+### Methods
+
+Methods are functions defined inside an object type. They are called through
+dot syntax on instances. The instance is automatically passed as the first
+argument (`self`):
+
+```cutlet
+object Counter is
+  fn init(self, n) is
+    self.n = n
+  end
+
+  fn inc(self) is
+    self.n = self.n + 1
+  end
+
+  fn get(self) is
+    self.n
+  end
+end
+
+my c = new Counter(0)
+c.inc()
+c.inc()
+c.inc()
+say(c.get())    # => 3
+```
+
+Methods can call other methods on `self`:
+
+```cutlet
+object Calc is
+  fn init(self, x) is
+    self.x = x
+  end
+
+  fn double(self) is
+    self.x * 2
+  end
+
+  fn quad(self) is
+    self.double() * 2
+  end
+end
+
+say(new Calc(5).quad())    # => 20
+```
+
+### Membership testing with `in`
+
+You can use the `in` operator to check whether an instance has a field or
+method:
+
+```cutlet
+object Foo is
+  fn init(self, x) is
+    self.x = x
+  end
+
+  fn get(self) is
+    self.x
+  end
+end
+
+my f = new Foo(1)
+say("x" in f)         # => true  (data field)
+say("get" in f)        # => true  (method)
+say("missing" in f)    # => false
+```
+
+### Multiple instances are independent
+
+Each instance has its own data map. Modifying one instance does not affect
+another:
+
+```cutlet
+object Foo is
+  fn init(self, x) is
+    self.x = x
+  end
+end
+
+my a = new Foo(1)
+my b = new Foo(2)
+say(a.x)    # => 1
+say(b.x)    # => 2
+```
+
+### Error cases
+
+Using `new` on a non-type value produces a runtime error:
+
+```cutlet
+# my x = 42
+# new x()     # => runtime error: can only use 'new' with object types
+```
+
+Arity mismatches with `init` produce runtime errors:
+
+```cutlet
+# object Foo is
+#   fn init(self, x) is self.x = x end
+# end
+# new Foo()         # => error: init expects 1 argument, got 0
+# new Foo(1, 2, 3)  # => error: init expects 1 argument, got 3
 ```
 
 ### Mixins (planned)
@@ -1807,20 +1977,7 @@ end
 
 Mixin names are identifiers listed after `with`, separated by commas, before
 the `is` keyword. Multiple mixins are supported. Mixin resolution semantics
-will be defined when runtime support is added.
-
-### Creating instances
-
-Use `new` to create an instance of a type:
-
-```cutlet
-new Dog()
-new Point(3, 4)
-new Foo(1 + 2, "hello")
-```
-
-`new` takes a type name and parenthesized arguments (which can be any
-expression). Zero arguments are allowed: `new Foo()`.
+will be defined when mixin support is added.
 
 ### Reserved keywords
 
@@ -1837,9 +1994,3 @@ variable names:
 
 The REPL recognizes incomplete `object...end` blocks and prompts for
 continuation input (the `...` prompt), just like `if...end` and `while...end`.
-
-### What is next
-
-A future task will add compiler and VM support so that `object` definitions
-create runtime type values, `new` constructs instances, and method dispatch
-works through dot-call syntax (`dog.speak()`).
