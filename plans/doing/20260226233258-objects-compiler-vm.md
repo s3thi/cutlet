@@ -397,6 +397,17 @@ Added `OP_OBJECT_TYPE` and `OP_NEW` to the `OpCode` enum in `chunk.h` with docum
 
 All 565 pre-existing tests pass. The 19 new VM tests from Step 1 still fail as expected (compiler doesn't handle AST_OBJECT_DEF yet). `make format-check` passes. Pre-existing clang-tidy warnings remain (all in unrelated files).
 
+### Step 3: Add `is_initializer` to CallFrame — DONE (2026-02-28)
+
+Added `bool is_initializer` field to the `CallFrame` struct in `vm.h`. Updated all three call frame creation sites in `vm.c` to set `is_initializer = false`:
+- Top-level script frame in `vm_execute()`
+- `vm_call_value()` helper (used by OP_REDUCE_CALL/OP_VECTORIZE_CALL)
+- `OP_CALL` handler in the dispatch loop
+
+Modified the `OP_RETURN` handler: after popping the return value, if `frame->is_initializer` is true, clone `frame->slots[1]` (the instance/self), free the normal return value, and use the cloned instance as the result instead. The clone happens before frame collapse so the stack slot memory is still valid.
+
+All 566 tests pass (same as before — 19 object system tests still fail as expected with "compile: unknown AST node type 24"). `make format-check` passes. No new clang-tidy warnings in changed files.
+
 ---
 
 End of plan.
