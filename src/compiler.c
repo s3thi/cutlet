@@ -961,7 +961,19 @@ writeback_done:
     emit_byte(c, OP_POP, line);
 }
 
-static void compile_function(Compiler *c, const AstNode *node) {
+/*
+ * Compile a function body and emit OP_CLOSURE.
+ *
+ * This is the core of function compilation: it creates a new chunk,
+ * compiles the function body into it, builds an ObjFunction, and emits
+ * OP_CLOSURE (plus upvalue descriptors) into the enclosing compiler's
+ * chunk. After this call, the closure value is on top of the stack.
+ *
+ * This function does NOT bind the function's name as a variable.
+ * compile_function() calls this and then handles name binding separately.
+ * compile_object_def() calls this for each method without name binding.
+ */
+static void compile_function_closure(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
     /* Create a new Chunk for the function body. */
@@ -1116,6 +1128,15 @@ static void compile_function(Compiler *c, const AstNode *node) {
         emit_byte(c, body_compiler.upvalues[i].is_local ? 1 : 0, line);
         emit_byte(c, body_compiler.upvalues[i].index, line);
     }
+}
+
+static void compile_function(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* Compile the function body and emit OP_CLOSURE. */
+    compile_function_closure(c, node);
+    if (c->had_error)
+        return;
 
     /* For named functions, bind the name. In function context, register
      * as a local variable (lexical scoping). In script context, define
@@ -1150,6 +1171,69 @@ static void compile_function(Compiler *c, const AstNode *node) {
             emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
         }
     }
+}
+
+/*
+ * Compile an object type definition.
+ *
+ * An AST_OBJECT_DEF node has:
+ *   value       = type name string
+ *   children    = array of AST_FUNCTION nodes (methods)
+ *   child_count = number of methods
+ *
+ * Emitted bytecode:
+ *   For each method:
+ *     OP_CONSTANT <method_name_string>   -- push method name
+ *     OP_CLOSURE  <method_function>      -- push method closure
+ *   OP_OBJECT_TYPE <name_idx> <method_count> <mixin_count=0>
+ *   OP_DEFINE_GLOBAL <name_idx>
+ */
+static void compile_object_def(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* Add the type name to the constant pool. */
+    char *type_name = compiler_strdup(c, node->value);
+    if (!type_name)
+        return;
+    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(type_name));
+    if (name_idx < 0) {
+        compiler_error(c, "too many constants");
+        return;
+    }
+
+    /* Compile each method: push its name string then its closure. */
+    for (size_t i = 0; i < node->child_count; i++) {
+        const AstNode *method = node->children[i];
+
+        /* Push the method name as a string constant. */
+        char *method_name = compiler_strdup(c, method->value);
+        if (!method_name)
+            return;
+        int method_name_idx = chunk_find_or_add_constant(c->chunk, make_string(method_name));
+        if (method_name_idx < 0) {
+            compiler_error(c, "too many constants");
+            return;
+        }
+        emit_bytes(c, OP_CONSTANT, (uint8_t)method_name_idx, line);
+
+        /* Compile the method body and emit OP_CLOSURE (no name binding).
+         * This pushes the closure onto the stack, paired with the name above. */
+        compile_function_closure(c, method);
+        if (c->had_error)
+            return;
+    }
+
+    /* Emit OP_OBJECT_TYPE with 3 operand bytes:
+     *   1. name constant index
+     *   2. method count
+     *   3. mixin count (always 0 in this task) */
+    emit_byte(c, OP_OBJECT_TYPE, line);
+    emit_byte(c, (uint8_t)name_idx, line);
+    emit_byte(c, (uint8_t)node->child_count, line);
+    emit_byte(c, 0, line); /* mixin count = 0 */
+
+    /* Store the type as a global variable. */
+    emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
 }
 
 /*
@@ -1427,6 +1511,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_METHOD_CALL:
         compile_method_call(c, node);
+        break;
+    case AST_OBJECT_DEF:
+        compile_object_def(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);
