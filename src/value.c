@@ -402,7 +402,7 @@ void obj_object_type_set_method(ObjObjectType *type, const char *name, Value met
         return;
     /* Build a string Value key from the method name. make_string() takes
      * ownership of the strdup'd buffer via obj_string_take(). */
-    Value key = make_string(strdup(name));
+    Value key = make_string(strdup(name)); // NOLINT(clang-analyzer-unix.Malloc)
     obj_map_set(type->methods, &key, &method);
     value_free(&key);
 }
@@ -411,7 +411,7 @@ Value *obj_object_type_get_method(const ObjObjectType *type, const char *name) {
     if (!type || !name)
         return NULL;
     /* Build a string Value key for the lookup. */
-    Value key = make_string(strdup(name));
+    Value key = make_string(strdup(name)); // NOLINT(clang-analyzer-unix.Malloc)
     Value *result = obj_map_get(type->methods, &key);
     value_free(&key);
     return result;
