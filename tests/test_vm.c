@@ -3741,6 +3741,126 @@ TEST(test_obj_instances_independent) {
 }
 
 /* ============================================================
+ * Object system — mixins: basic
+ * ============================================================ */
+
+/* Mixin method is accessible on the mixed-into type's instances. */
+TEST(test_mixin_basic_greet) {
+    assert_vm_string("object Greeter is fn greet(self) is \"hi\" end end\n"
+                     "object Dog with Greeter is fn bark(self) is \"woof\" end end\n"
+                     "new Dog().greet()",
+                     "hi", "mixin method accessible on instance");
+}
+
+/* Own methods still work alongside mixin methods. */
+TEST(test_mixin_basic_own_method) {
+    assert_vm_string("object Greeter is fn greet(self) is \"hi\" end end\n"
+                     "object Dog with Greeter is fn bark(self) is \"woof\" end end\n"
+                     "new Dog().bark()",
+                     "woof", "own method works alongside mixin");
+}
+
+/* ============================================================
+ * Object system — mixins: own method wins over mixin
+ * ============================================================ */
+
+/* When both mixin and object define the same method, object's wins. */
+TEST(test_mixin_own_wins) {
+    assert_vm_string("object Base is fn name(self) is \"base\" end end\n"
+                     "object Child with Base is fn name(self) is \"child\" end end\n"
+                     "new Child().name()",
+                     "child", "own method overrides mixin method");
+}
+
+/* ============================================================
+ * Object system — mixins: multiple mixins
+ * ============================================================ */
+
+/* Methods from multiple mixins are all available. */
+TEST(test_mixin_multiple) {
+    assert_vm_string("object A is fn a(self) is \"a\" end end\n"
+                     "object B is fn b(self) is \"b\" end end\n"
+                     "object C with A, B is end\n"
+                     "my c = new C()\n"
+                     "c.a() ++ c.b()",
+                     "ab", "methods from multiple mixins available");
+}
+
+/* ============================================================
+ * Object system — mixins: later mixin wins on conflict
+ * ============================================================ */
+
+/* When two mixins define the same method, the later one wins. */
+TEST(test_mixin_later_wins) {
+    assert_vm_string("object A is fn x(self) is \"from A\" end end\n"
+                     "object B is fn x(self) is \"from B\" end end\n"
+                     "object C with A, B is end\n"
+                     "new C().x()",
+                     "from B", "later mixin overwrites earlier on conflict");
+}
+
+/* ============================================================
+ * Object system — mixins: mixin doesn't modify source
+ * ============================================================ */
+
+/* Mixing A into B does not add B's methods to A. */
+TEST(test_mixin_source_unmodified) {
+    assert_vm_number("object A is fn x(self) is 1 end end\n"
+                     "object B with A is fn y(self) is 2 end end\n"
+                     "new A().x()",
+                     1.0, "mixin source object still works after being mixed in");
+}
+
+/* ============================================================
+ * Object system — mixins: init from mixin
+ * ============================================================ */
+
+/* init method is inherited from a mixin. */
+TEST(test_mixin_init_inherited) {
+    assert_vm_number("object Initable is fn init(self, n) is self.n = n end end\n"
+                     "object Foo with Initable is fn get(self) is self.n end end\n"
+                     "new Foo(42).get()",
+                     42.0, "init inherited from mixin");
+}
+
+/* ============================================================
+ * Object system — mixins: object overrides mixin init
+ * ============================================================ */
+
+/* Object's own init overwrites mixin's init. */
+TEST(test_mixin_init_overridden) {
+    assert_vm_number("object Initable is fn init(self, n) is self.n = n end end\n"
+                     "object Foo with Initable is "
+                     "fn init(self, n) is self.n = n * 2 end "
+                     "fn get(self) is self.n end end\n"
+                     "new Foo(5).get()",
+                     10.0, "own init overrides mixin init");
+}
+
+/* ============================================================
+ * Object system — mixins: transitive (mixin of mixin)
+ * ============================================================ */
+
+/* B mixes in A, then C mixes in B — C gets both A's and B's methods. */
+TEST(test_mixin_transitive) {
+    assert_vm_string("object A is fn a(self) is \"a\" end end\n"
+                     "object B with A is fn b(self) is \"b\" end end\n"
+                     "object C with B is end\n"
+                     "my c = new C()\n"
+                     "c.a() ++ c.b()",
+                     "ab", "transitive mixin: C gets A's methods via B");
+}
+
+/* ============================================================
+ * Object system — mixins: error cases
+ * ============================================================ */
+
+/* Using a non-object-type value as a mixin is a runtime error. */
+TEST(test_mixin_non_object_type_error) {
+    assert_vm_error("my x = 42\nobject Foo with x is end", "mixin must be an object type");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4548,6 +4668,43 @@ int main(void) {
     /* ---- Object system — multiple instances are independent ---- */
     printf("\nObject system — multiple instances independent:\n");
     RUN_TEST(test_obj_instances_independent);
+
+    /* ---- Object system — mixins: basic ---- */
+    printf("\nObject system — mixins (basic):\n");
+    RUN_TEST(test_mixin_basic_greet);
+    RUN_TEST(test_mixin_basic_own_method);
+
+    /* ---- Object system — mixins: own method wins ---- */
+    printf("\nObject system — mixins (own wins):\n");
+    RUN_TEST(test_mixin_own_wins);
+
+    /* ---- Object system — mixins: multiple mixins ---- */
+    printf("\nObject system — mixins (multiple):\n");
+    RUN_TEST(test_mixin_multiple);
+
+    /* ---- Object system — mixins: later mixin wins ---- */
+    printf("\nObject system — mixins (later wins):\n");
+    RUN_TEST(test_mixin_later_wins);
+
+    /* ---- Object system — mixins: source unmodified ---- */
+    printf("\nObject system — mixins (source unmodified):\n");
+    RUN_TEST(test_mixin_source_unmodified);
+
+    /* ---- Object system — mixins: init from mixin ---- */
+    printf("\nObject system — mixins (init inherited):\n");
+    RUN_TEST(test_mixin_init_inherited);
+
+    /* ---- Object system — mixins: init overridden ---- */
+    printf("\nObject system — mixins (init overridden):\n");
+    RUN_TEST(test_mixin_init_overridden);
+
+    /* ---- Object system — mixins: transitive ---- */
+    printf("\nObject system — mixins (transitive):\n");
+    RUN_TEST(test_mixin_transitive);
+
+    /* ---- Object system — mixins: error cases ---- */
+    printf("\nObject system — mixins (errors):\n");
+    RUN_TEST(test_mixin_non_object_type_error);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
