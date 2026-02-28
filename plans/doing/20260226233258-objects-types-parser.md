@@ -333,3 +333,33 @@ All 19 tests fail as expected (14 failures from `make test`; some already pass b
 - GC marking added proactively for the embedded ObjMap pointers in ObjObjectType.methods and ObjInstance.data.
 
 **Test results:** 341/353 pass. 12 parser tests fail with assertion errors (not compilation errors). All non-parser test suites pass (tokenizer, value, chunk, compiler, VM, GC). Format check passes. Commit: `a74665c`.
+
+### Step 3: Implement ObjObjectType — DONE (2026-02-28)
+
+Implemented all ObjObjectType functionality in `src/value.c`:
+
+**Allocator and accessors:**
+- `obj_object_type_new(name)`: malloc + refcount=1 + strdup(name) + obj_map_new() for methods. Error handling for partial allocation failure.
+- `obj_object_type_set_method(type, name, method)`: builds string Value key via make_string(strdup(name)), delegates to obj_map_set, frees the key.
+- `obj_object_type_get_method(type, name)`: builds string Value key, delegates to obj_map_get, frees key, returns result pointer or NULL.
+
+**Value constructor:**
+- `make_object_type(t)`: returns Value with type=VAL_OBJECT_TYPE, object_type=t.
+
+**Lifecycle functions:**
+- `value_free`: VAL_OBJECT_TYPE decrements refcount; if 0, frees name, methods (via free_owned_map helper), and struct.
+- `value_clone`: VAL_OBJECT_TYPE increments refcount (shared ownership).
+- `value_format`: VAL_OBJECT_TYPE returns `<object Name>`.
+- `value_equal`: VAL_OBJECT_TYPE uses pointer equality.
+- `is_truthy`: VAL_OBJECT_TYPE always truthy.
+
+**Helper added:**
+- `free_owned_map(ObjMap *m)`: frees entries (key+value), entries array, then gc_free_object on the map. Reusable for ObjInstance in Step 4.
+
+**Safety:**
+- Null out `object_type` and `instance` pointers in value_free for all types.
+
+**Decisions made:**
+- Used `gc_free_object()` to properly unlink the ObjMap from the GC's object list before freeing, since the ObjMap is GC-allocated but lifetime-managed by the refcount-managed ObjObjectType.
+
+**Test results:** 341/353 pass (same 12 parser failures from Steps 5-7). All value, compiler, VM, GC, tokenizer, chunk tests pass. Format check passes. Commit: `11004b3`.
