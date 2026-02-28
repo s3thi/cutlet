@@ -1237,6 +1237,48 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
 }
 
 /*
+ * compile_new - compile a `new Name(args)` expression.
+ *
+ * An AST_NEW node has:
+ *   value       = type name string
+ *   children    = array of argument expression nodes
+ *   child_count = number of arguments
+ *
+ * Emitted bytecode:
+ *   OP_GET_GLOBAL <type_name_idx>   -- look up the type by name
+ *   compile(arg1)                   -- push each argument
+ *   compile(arg2)
+ *   ...
+ *   OP_NEW <argc>                   -- create instance
+ */
+static void compile_new(Compiler *c, const AstNode *node) {
+    int line = (int)node->line;
+
+    /* Add the type name to the constant pool as a string constant. */
+    char *type_name = compiler_strdup(c, node->value);
+    if (!type_name)
+        return;
+    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(type_name));
+    if (name_idx < 0) {
+        compiler_error(c, "too many constants");
+        return;
+    }
+
+    /* Emit OP_GET_GLOBAL to look up the type by name. */
+    emit_bytes(c, OP_GET_GLOBAL, (uint8_t)name_idx, line);
+
+    /* Compile each argument expression. */
+    for (size_t i = 0; i < node->child_count; i++) {
+        compile_node(c, node->children[i]);
+        if (c->had_error)
+            return;
+    }
+
+    /* Emit OP_NEW with the argument count. */
+    emit_bytes(c, OP_NEW, (uint8_t)node->child_count, line);
+}
+
+/*
  * Map a meta-operator name to its inner opcode byte for OP_REDUCE.
  * Returns the OpCode value on success, or -1 if the name is not
  * a known built-in operator (meaning it's a custom function name).
@@ -1514,6 +1556,9 @@ static void compile_node(Compiler *c, const AstNode *node) {
         break;
     case AST_OBJECT_DEF:
         compile_object_def(c, node);
+        break;
+    case AST_NEW:
+        compile_new(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);
