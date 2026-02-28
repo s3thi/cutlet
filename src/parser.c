@@ -369,6 +369,7 @@ static AstNode *parse_expr(Parser *p, int min_prec);
 static AstNode *parse_if(Parser *p);
 static AstNode *parse_while(Parser *p);
 static AstNode *parse_fn(Parser *p);
+static AstNode *parse_object(Parser *p);
 static void skip_newlines(Parser *p);
 static void free_expr_array(PtrArray *arr);
 
@@ -500,6 +501,11 @@ static AstNode *parse_atom(Parser *p) {
     /* Function definition expression */
     if (token_is_keyword(&t, "fn")) {
         return parse_fn(p);
+    }
+
+    /* Object definition expression */
+    if (token_is_keyword(&t, "object")) {
+        return parse_object(p);
     }
 
     /* Break expression: break [value]
@@ -2505,6 +2511,220 @@ static AstNode *parse_fn(Parser *p) {
     return node;
 }
 
+/*
+ * Parse an object definition expression.
+ * Syntax: object Name [with Mixin1, Mixin2, ...] is
+ *           fn method1(self) is body end
+ *           fn method2(self, x) is body end
+ *         end
+ *
+ * Returns an AST_OBJECT_DEF node with:
+ *   value = type name (heap-allocated)
+ *   params / param_count = mixin names (heap-allocated array, or NULL/0)
+ *   children / child_count = method definitions (AST_FUNCTION nodes)
+ *   left, right = NULL
+ *   line = source line of 'object' keyword
+ */
+static AstNode *parse_object(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    /* Save the 'object' keyword token for line info */
+    Token obj_tok = p->current;
+
+    /* Consume 'object' keyword (already verified by caller) */
+    advance(p);
+
+    /* Expect identifier for type name (must not be reserved keyword) */
+    if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+        parser_error(p, p->current.line, p->current.col, "expected type name after 'object'");
+        return NULL;
+    }
+
+    /* Save heap-allocated copy of the type name */
+    char *type_name = malloc(p->current.value_len + 1);
+    if (!type_name) {
+        parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+        return NULL;
+    }
+    memcpy(type_name, p->current.value, p->current.value_len);
+    type_name[p->current.value_len] = '\0';
+    advance(p);
+
+    /* Parse optional 'with' clause for mixin names */
+    PtrArray mixin_names;
+    if (!ptr_array_init(&mixin_names, 4)) {
+        parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+        free(type_name);
+        return NULL;
+    }
+
+    if (token_is_keyword(&p->current, "with")) {
+        advance(p); /* consume 'with' */
+
+        /* Parse first mixin name */
+        if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+            parser_error(p, p->current.line, p->current.col, "expected mixin name after 'with'");
+            free(type_name);
+            ptr_array_destroy(&mixin_names);
+            return NULL;
+        }
+        char *mixin = malloc(p->current.value_len + 1);
+        if (!mixin) {
+            parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+            free(type_name);
+            ptr_array_destroy(&mixin_names);
+            return NULL;
+        }
+        memcpy(mixin, p->current.value, p->current.value_len);
+        mixin[p->current.value_len] = '\0';
+        ptr_array_push(&mixin_names, mixin);
+        advance(p);
+
+        /* Parse additional comma-separated mixin names.
+         * Stop when we see 'is' (the next required keyword). */
+        while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+               p->current.value[0] == ',') {
+            advance(p); /* consume ',' */
+            if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+                parser_error(p, p->current.line, p->current.col, "expected mixin name");
+                free(type_name);
+                free_params((char **)mixin_names.items, mixin_names.count);
+                mixin_names.items = NULL;
+                mixin_names.count = 0;
+                ptr_array_destroy(&mixin_names);
+                return NULL;
+            }
+            mixin = malloc(p->current.value_len + 1);
+            if (!mixin) {
+                parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+                free(type_name);
+                free_params((char **)mixin_names.items, mixin_names.count);
+                mixin_names.items = NULL;
+                mixin_names.count = 0;
+                ptr_array_destroy(&mixin_names);
+                return NULL;
+            }
+            memcpy(mixin, p->current.value, p->current.value_len);
+            mixin[p->current.value_len] = '\0';
+            ptr_array_push(&mixin_names, mixin);
+            advance(p);
+        }
+    }
+
+    /* Expect 'is' keyword */
+    if (!token_is_keyword(&p->current, "is")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'is' in object definition");
+        free(type_name);
+        free_params((char **)mixin_names.items, mixin_names.count);
+        mixin_names.items = NULL;
+        mixin_names.count = 0;
+        ptr_array_destroy(&mixin_names);
+        return NULL;
+    }
+    advance(p); /* consume 'is' */
+
+    skip_newlines(p);
+
+    /* Parse method definitions: loop while current token is 'fn' */
+    PtrArray methods;
+    if (!ptr_array_init(&methods, 4)) {
+        parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+        free(type_name);
+        free_params((char **)mixin_names.items, mixin_names.count);
+        mixin_names.items = NULL;
+        mixin_names.count = 0;
+        ptr_array_destroy(&mixin_names);
+        return NULL;
+    }
+
+    while (token_is_keyword(&p->current, "fn")) {
+        AstNode *method = parse_fn(p);
+        if (!method) {
+            free(type_name);
+            free_params((char **)mixin_names.items, mixin_names.count);
+            mixin_names.items = NULL;
+            mixin_names.count = 0;
+            ptr_array_destroy(&mixin_names);
+            free_expr_array(&methods);
+            return NULL;
+        }
+
+        /* Verify the method is named (not anonymous) */
+        if (method->value == NULL) {
+            parser_error(p, method->line, 0, "object methods must be named");
+            ast_free(method);
+            free(type_name);
+            free_params((char **)mixin_names.items, mixin_names.count);
+            mixin_names.items = NULL;
+            mixin_names.count = 0;
+            ptr_array_destroy(&mixin_names);
+            free_expr_array(&methods);
+            return NULL;
+        }
+
+        ptr_array_push(&methods, method);
+        skip_newlines(p);
+    }
+
+    /* After parsing methods, expect 'end' keyword */
+    if (!token_is_keyword(&p->current, "end")) {
+        parser_error(p, p->current.line, p->current.col, "expected 'fn' or 'end' in object body");
+        free(type_name);
+        free_params((char **)mixin_names.items, mixin_names.count);
+        mixin_names.items = NULL;
+        mixin_names.count = 0;
+        ptr_array_destroy(&mixin_names);
+        free_expr_array(&methods);
+        return NULL;
+    }
+    advance(p); /* consume 'end' */
+
+    /* Build AST_OBJECT_DEF node */
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node) {
+        free(type_name);
+        free_params((char **)mixin_names.items, mixin_names.count);
+        mixin_names.items = NULL;
+        mixin_names.count = 0;
+        ptr_array_destroy(&mixin_names);
+        free_expr_array(&methods);
+        parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    /* Transfer mixin names to params */
+    size_t mc = mixin_names.count;
+    char **mixin_arr = NULL;
+    if (mc > 0) {
+        mixin_arr = (char **)ptr_array_release(&mixin_names);
+    } else {
+        ptr_array_destroy(&mixin_names);
+    }
+
+    /* Transfer methods to children */
+    size_t method_count = methods.count;
+    AstNode **method_arr = NULL;
+    if (method_count > 0) {
+        method_arr = (AstNode **)ptr_array_release(&methods);
+    } else {
+        ptr_array_destroy(&methods);
+    }
+
+    node->type = AST_OBJECT_DEF;
+    node->value = type_name; /* takes ownership */
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->line = obj_tok.line;
+    node->children = method_arr;
+    node->child_count = method_count;
+    node->params = mixin_arr;
+    node->param_count = mc;
+
+    return node;
+}
+
 /* ============================================================
  * Public API
  * ============================================================ */
@@ -3362,6 +3582,74 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
+    /* AST_OBJECT_DEF: [OBJECT_DEF Name] or [OBJECT_DEF Name with A, B] or
+     * [OBJECT_DEF Name [FN ...] [FN ...]] or [OBJECT_DEF Name with A [FN ...]]
+     * value = type name, params = mixin names, children = method AST_FUNCTION nodes. */
+    if (node->type == AST_OBJECT_DEF) {
+        /* Format method children. */
+        PtrArray method_strs;
+        if (!ptr_array_init(&method_strs, node->child_count))
+            return NULL;
+
+        /* Start with "[OBJECT_DEF Name" */
+        size_t total_len = 1 + strlen(type_str) + 1 + strlen(node->value);
+
+        /* Add " with A, B, C" if mixins present */
+        if (node->param_count > 0) {
+            total_len += 6; /* " with " */
+            for (size_t i = 0; i < node->param_count; i++) {
+                total_len += strlen(node->params[i]);
+                if (i > 0)
+                    total_len += 2; /* ", " */
+            }
+        }
+
+        /* Format and measure each method child */
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < method_strs.count; j++)
+                    free(method_strs.items[j]);
+                ptr_array_destroy(&method_strs);
+                return NULL;
+            }
+            ptr_array_push(&method_strs, str);
+            total_len += 1 + strlen(str); /* " method" */
+        }
+        total_len += 1 + 1; /* "]" + NUL */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < method_strs.count; i++)
+                free(method_strs.items[i]);
+            ptr_array_destroy(&method_strs);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s", type_str, node->value);
+
+        /* Append " with A, B, C" if mixins */
+        if (node->param_count > 0) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " with ");
+            for (size_t i = 0; i < node->param_count; i++) {
+                if (i > 0)
+                    pos += (size_t)snprintf(buf + pos, total_len - pos, ", ");
+                pos += (size_t)snprintf(buf + pos, total_len - pos, "%s", node->params[i]);
+            }
+        }
+
+        /* Append method children */
+        for (size_t i = 0; i < method_strs.count; i++) {
+            pos +=
+                (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)method_strs.items[i]);
+            free(method_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&method_strs);
+        return buf;
+    }
+
     return NULL;
 }
 
@@ -3521,7 +3809,12 @@ bool parser_is_complete(const char *input) {
     }
 
     if (strstr(msg, "expected 'is'") != NULL) {
-        /* fn without is - incomplete */
+        /* fn/object without is - incomplete */
+        return false;
+    }
+
+    if (strstr(msg, "expected 'fn' or 'end' in object body") != NULL) {
+        /* object body at EOF — incomplete, needs more methods or 'end' */
         return false;
     }
 
