@@ -426,6 +426,18 @@ Autonomous decision: Refactored `compile_function()` by extracting the closure-e
 
 All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "compile: unknown AST node type 25" (AST_NEW not handled yet — that's Step 5). `make format-check` passes. No clang-tidy warnings in changed files.
 
+### Step 5: Compile `new` expressions — DONE (2026-02-28)
+
+Added `compile_new()` static function in `compiler.c` that:
+1. Adds the type name (`node->value`) to the constant pool as a string constant.
+2. Emits `OP_GET_GLOBAL <type_name_idx>` to look up the type by name.
+3. Compiles each argument expression via `compile_node()`.
+4. Emits `OP_NEW <argc>` where argc is `node->child_count`.
+
+Added `case AST_NEW: compile_new(c, node); break;` dispatch in `compile_node()`.
+
+All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "unknown opcode 48" (OP_OBJECT_TYPE/OP_NEW not handled by VM yet — that's Steps 6-7). One test (`test_obj_init_two_args`) fails with a parse error due to a pre-existing parser issue with multi-line object method bodies containing newline-separated statements. `make format-check` passes. No clang-tidy warnings in changed files.
+
 ---
 
 End of plan.
