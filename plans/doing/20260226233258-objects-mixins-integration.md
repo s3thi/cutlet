@@ -299,7 +299,7 @@ Run `make test && make check && make test-examples`. All tests pass.
 - [x] **Step 3**: Implement mixin composition in VM — Reworked `OP_OBJECT_TYPE` handler in `src/vm.c` to pop method pairs and mixin types into temp buffers, apply mixin methods in forward order, then apply own methods last. All 10 mixin tests pass. Committed `9389893`.
 - [x] **Step 4**: Update native functions for new types — Added `type()` native function returning type names ("object_type" for types, user-defined name like "Foo" for instances). Updated `value_type_name()` for VAL_OBJECT_TYPE/VAL_INSTANCE. Extended `keys()`, `len()`, `has_key()` to handle VAL_INSTANCE (has_key checks both data and methods, consistent with OP_IN). str() and say() already worked via value_format(). 17 tests added, all pass.
 - [x] **Step 5**: CLI integration tests — Added 6 end-to-end tests in `tests/test_cli.sh`: basic object method call, object with init, mixin composition, --ast shows OBJECT_DEF/NEW, --bytecode shows OP_OBJECT_TYPE/OP_NEW, error case for `new 42()`. All 168 CLI tests pass. Committed `9bb96d9`.
-- [ ] **Step 6**: Example program
+- [x] **Step 6**: Example program — Extended `examples/objects.cutlet` with mixin demonstrations: basic mixin composition (Greeter mixed into Cat), `type()` and `keys()`/`len()` on instances, multiple mixins with conflict resolution (later mixin wins), own methods overriding mixin methods. Updated `examples/objects.expected`. All 30 example tests pass.
 - [ ] **Step 7**: Final verification and edge cases
 
 ---

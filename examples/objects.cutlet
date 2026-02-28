@@ -85,3 +85,66 @@ object Tag is end
 my t = new Tag()
 t.label = "important"
 say(t.label)              # important
+
+# type() returns the type name for instances
+say(type(dog))            # Dog
+say(type(Dog))            # object_type
+
+# keys() and len() work on instances (data fields only)
+say(keys(dog))            # [name, age, color]
+say(len(dog))             # 3
+
+# --- Mixins: composing behavior from other objects ---
+
+# Define a mixin for greeting behavior
+object Greeter is
+  fn greet(self, who) is
+    say("Hello, " ++ who ++ "! I'm a " ++ type(self) ++ ".")
+  end
+end
+
+# Define a Cat that uses the Greeter mixin
+object Cat with Greeter is
+  fn init(self, name, breed) is
+    self.name = name
+    self.breed = breed
+  end
+
+  fn describe(self) is
+    say(self.name ++ " is a " ++ self.breed)
+  end
+end
+
+# Create and use an instance — both own methods and mixin methods work
+my cat = new Cat("Whiskers", "Siamese")
+cat.describe()            # Whiskers is a Siamese
+cat.greet("World")        # Hello, World! I'm a Cat.
+
+# Instances are backed by maps — fields are dynamic
+cat.tricks = 3
+say(cat.name ++ " knows " ++ str(cat.tricks) ++ " tricks")
+
+# Multiple mixins: later mixin wins on conflict
+object A is
+  fn x(self) is "from A" end
+  fn a-only(self) is "a" end
+end
+
+object B is
+  fn x(self) is "from B" end
+  fn b-only(self) is "b" end
+end
+
+object C with A, B is end
+
+my obj = new C()
+say(obj.x())              # from B (later mixin wins)
+say(obj.a-only())         # a
+say(obj.b-only())         # b
+
+# Own methods always win over mixin methods
+object D with A is
+  fn x(self) is "from D" end
+end
+
+say(new D().x())          # from D
