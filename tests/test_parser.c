@@ -2867,6 +2867,164 @@ TEST(test_is_complete_dot_number_error) {
 }
 
 /* ============================================================
+ * Object definition parsing tests
+ * ============================================================ */
+
+/* object Foo is end → empty object, no mixins, no methods */
+TEST(test_object_def_empty) {
+    ASSERT(ast_matches("object Foo is end", "AST [OBJECT_DEF Foo]"), "empty object");
+    PASS();
+}
+
+/* object Foo is fn greet(self) is "hi" end end → one method */
+TEST(test_object_def_one_method) {
+    ASSERT(ast_matches("object Foo is fn greet(self) is \"hi\" end end",
+                       "AST [OBJECT_DEF Foo [FN greet(self) [STRING hi]]]"),
+           "object with one method");
+    PASS();
+}
+
+/* object Foo is fn a(self) is 1 end fn b(self, x) is x end end → multiple methods */
+TEST(test_object_def_multiple_methods) {
+    ASSERT(ast_matches("object Foo is fn a(self) is 1 end fn b(self, x) is x end end",
+                       "AST [OBJECT_DEF Foo [FN a(self) [NUMBER 1]] [FN b(self, x) [IDENT x]]]"),
+           "object with multiple methods");
+    PASS();
+}
+
+/* object Foo with Bar is end → one mixin, no methods */
+TEST(test_object_def_one_mixin) {
+    ASSERT(ast_matches("object Foo with Bar is end", "AST [OBJECT_DEF Foo with Bar]"),
+           "object with one mixin");
+    PASS();
+}
+
+/* object Foo with A, B, C is fn x(self) is 1 end end → multiple mixins + method */
+TEST(test_object_def_multiple_mixins) {
+    ASSERT(ast_matches("object Foo with A, B, C is fn x(self) is 1 end end",
+                       "AST [OBJECT_DEF Foo with A, B, C [FN x(self) [NUMBER 1]]]"),
+           "object with multiple mixins and a method");
+    PASS();
+}
+
+/* ============================================================
+ * Object definition error tests
+ * ============================================================ */
+
+/* object 42 is end → parse error (non-identifier name) */
+TEST(test_object_def_non_ident_name) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("object 42 is end", &node, &err),
+           "object with non-ident name should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* object Foo is 42 end → parse error (non-fn in body) */
+TEST(test_object_def_non_fn_body) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("object Foo is 42 end", &node, &err),
+           "object with non-fn in body should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* object Foo at EOF → parser_is_complete() returns false */
+TEST(test_object_def_incomplete_eof) {
+    ASSERT(!parser_is_complete("object Foo"), "object without is should be incomplete");
+    PASS();
+}
+
+/* object Foo is at EOF → incomplete (no end) */
+TEST(test_object_def_incomplete_no_end) {
+    ASSERT(!parser_is_complete("object Foo is"), "object is without end should be incomplete");
+    PASS();
+}
+
+/* object Foo is fn a(self) is 1 end at EOF → incomplete (no closing end) */
+TEST(test_object_def_incomplete_no_outer_end) {
+    ASSERT(!parser_is_complete("object Foo is fn a(self) is 1 end"),
+           "object with method but no outer end should be incomplete");
+    PASS();
+}
+
+/* complete object definition → parser_is_complete returns true */
+TEST(test_object_def_complete) {
+    ASSERT(parser_is_complete("object Foo is end"), "complete object should be complete");
+    PASS();
+}
+
+/* complete object definition with method → parser_is_complete returns true */
+TEST(test_object_def_complete_with_method) {
+    ASSERT(parser_is_complete("object Foo is fn a(self) is 1 end end"),
+           "complete object with method should be complete");
+    PASS();
+}
+
+/* ============================================================
+ * New expression parsing tests
+ * ============================================================ */
+
+/* new Foo() → no args */
+TEST(test_new_no_args) {
+    ASSERT(ast_matches("new Foo()", "AST [NEW Foo]"), "new with no args");
+    PASS();
+}
+
+/* new Foo(1) → one arg */
+TEST(test_new_one_arg) {
+    ASSERT(ast_matches("new Foo(1)", "AST [NEW Foo [NUMBER 1]]"), "new with one arg");
+    PASS();
+}
+
+/* new Foo(1, "x") → multiple args */
+TEST(test_new_multi_args) {
+    ASSERT(ast_matches("new Foo(1, \"x\")", "AST [NEW Foo [NUMBER 1] [STRING x]]"),
+           "new with multiple args");
+    PASS();
+}
+
+/* new Foo(1 + 2) → expression arg */
+TEST(test_new_expr_arg) {
+    ASSERT(ast_matches("new Foo(1 + 2)", "AST [NEW Foo [BINOP + [NUMBER 1] [NUMBER 2]]]"),
+           "new with expression arg");
+    PASS();
+}
+
+/* ============================================================
+ * New expression error tests
+ * ============================================================ */
+
+/* new without type name → parse error */
+TEST(test_new_missing_name) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("new 42()", &node, &err), "new with non-ident name should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'object' as variable name rejected */
+TEST(test_object_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my object = 1", &node, &err), "object as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* 'new' as variable name rejected */
+TEST(test_new_keyword_reserved) {
+    AstNode *node = NULL;
+    ParseError err;
+    ASSERT(!parser_parse("my new = 1", &node, &err), "new as variable should fail");
+    ASSERT(node == NULL, "node should be NULL");
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -3320,6 +3478,37 @@ int main(void) {
     printf("\nparser_is_complete() - dot access:\n");
     RUN_TEST(test_is_incomplete_dot_eof);
     RUN_TEST(test_is_complete_dot_number_error);
+
+    printf("\nObject definition parsing:\n");
+    RUN_TEST(test_object_def_empty);
+    RUN_TEST(test_object_def_one_method);
+    RUN_TEST(test_object_def_multiple_methods);
+    RUN_TEST(test_object_def_one_mixin);
+    RUN_TEST(test_object_def_multiple_mixins);
+
+    printf("\nObject definition error cases:\n");
+    RUN_TEST(test_object_def_non_ident_name);
+    RUN_TEST(test_object_def_non_fn_body);
+
+    printf("\nparser_is_complete() - object definitions:\n");
+    RUN_TEST(test_object_def_incomplete_eof);
+    RUN_TEST(test_object_def_incomplete_no_end);
+    RUN_TEST(test_object_def_incomplete_no_outer_end);
+    RUN_TEST(test_object_def_complete);
+    RUN_TEST(test_object_def_complete_with_method);
+
+    printf("\nNew expression parsing:\n");
+    RUN_TEST(test_new_no_args);
+    RUN_TEST(test_new_one_arg);
+    RUN_TEST(test_new_multi_args);
+    RUN_TEST(test_new_expr_arg);
+
+    printf("\nNew expression error cases:\n");
+    RUN_TEST(test_new_missing_name);
+
+    printf("\nObject/new reserved keywords:\n");
+    RUN_TEST(test_object_keyword_reserved);
+    RUN_TEST(test_new_keyword_reserved);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
