@@ -197,6 +197,10 @@ const char *opcode_name(OpCode op) {
         return "OP_AND";
     case OP_OR:
         return "OP_OR";
+    case OP_OBJECT_TYPE:
+        return "OP_OBJECT_TYPE";
+    case OP_NEW:
+        return "OP_NEW";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -439,6 +443,31 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
             offset += 2;
         }
         return offset;
+    }
+
+    /* OP_OBJECT_TYPE: 3 operand bytes (name constant index, method count, mixin count). */
+    case OP_OBJECT_TYPE: {
+        uint8_t name_idx = chunk->code[offset + 1];
+        uint8_t method_count = chunk->code[offset + 2];
+        uint8_t mixin_count = chunk->code[offset + 3];
+        dynbuf_printf(b, "%-20s %4d '", opcode_name(OP_OBJECT_TYPE), name_idx);
+        /* Show the type name from the constant pool. */
+        if (name_idx < chunk->const_count) {
+            char *s = value_format(&chunk->constants[name_idx]);
+            if (s) {
+                dynbuf_printf(b, "%s", s);
+                free(s);
+            }
+        }
+        dynbuf_printf(b, "' methods=%d mixins=%d\n", method_count, mixin_count);
+        return offset + 4;
+    }
+
+    /* OP_NEW: 1-byte argc (number of explicit arguments, not counting self). */
+    case OP_NEW: {
+        uint8_t argc = chunk->code[offset + 1];
+        dynbuf_printf(b, "%-20s argc=%d\n", opcode_name(OP_NEW), argc);
+        return offset + 2;
     }
 
     default:
