@@ -500,6 +500,26 @@ void gc_mark_value(Value *v) {
     case VAL_ERROR:
         /* Scalar/non-heap types — nothing to mark. */
         break;
+    case VAL_OBJECT_TYPE:
+        /* ObjObjectType uses refcounting, but its methods ObjMap is GC-managed.
+         * TODO: mark type->methods entries when ObjObjectType is fully implemented. */
+        if (v->object_type && v->object_type->methods) {
+            gc_mark_object((Obj *)v->object_type->methods);
+        }
+        break;
+    case VAL_INSTANCE:
+        /* ObjInstance uses refcounting, but its data ObjMap is GC-managed.
+         * Also need to mark the type's methods map transitively.
+         * TODO: verify this is complete when ObjInstance is fully implemented. */
+        if (v->instance) {
+            if (v->instance->data) {
+                gc_mark_object((Obj *)v->instance->data);
+            }
+            if (v->instance->type && v->instance->type->methods) {
+                gc_mark_object((Obj *)v->instance->type->methods);
+            }
+        }
+        break;
     }
 }
 

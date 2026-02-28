@@ -354,7 +354,9 @@ static bool is_reserved_keyword(const Token *t) {
            token_is_keyword(t, "else") || token_is_keyword(t, "end") ||
            token_is_keyword(t, "while") || token_is_keyword(t, "do") ||
            token_is_keyword(t, "break") || token_is_keyword(t, "continue") ||
-           token_is_keyword(t, "return") || token_is_keyword(t, "fn") || token_is_keyword(t, "is");
+           token_is_keyword(t, "return") || token_is_keyword(t, "fn") ||
+           token_is_keyword(t, "is") || token_is_keyword(t, "object") ||
+           token_is_keyword(t, "new") || token_is_keyword(t, "with");
 }
 
 /* ============================================================
@@ -2756,6 +2758,10 @@ const char *ast_node_type_str(AstNodeType type) {
         return "VECTORIZE";
     case AST_METHOD_CALL:
         return "METHOD_CALL";
+    case AST_OBJECT_DEF:
+        return "OBJECT_DEF";
+    case AST_NEW:
+        return "NEW";
     default:
         return "UNKNOWN";
     }

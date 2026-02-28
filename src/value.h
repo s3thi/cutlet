@@ -29,10 +29,12 @@ typedef enum {
     VAL_BOOL,
     VAL_NOTHING,
     VAL_ERROR,
-    VAL_FUNCTION, /* Native functions (say, etc.) */
-    VAL_CLOSURE,  /* User-defined functions wrapped in a closure */
-    VAL_ARRAY,    /* Heap-allocated array (GC-managed, reference semantics) */
-    VAL_MAP,      /* Heap-allocated map (GC-managed, reference semantics) */
+    VAL_FUNCTION,    /* Native functions (say, etc.) */
+    VAL_CLOSURE,     /* User-defined functions wrapped in a closure */
+    VAL_ARRAY,       /* Heap-allocated array (GC-managed, reference semantics) */
+    VAL_MAP,         /* Heap-allocated map (GC-managed, reference semantics) */
+    VAL_OBJECT_TYPE, /* Object type definition (refcount-managed) */
+    VAL_INSTANCE,    /* Object instance (refcount-managed) */
 } ValueType;
 
 /* Forward declaration for the Value type (needed by NativeFn). */
@@ -133,6 +135,8 @@ typedef struct {
 typedef struct ObjUpvalue ObjUpvalue;
 typedef struct ObjClosure ObjClosure;
 typedef struct ObjMap ObjMap;
+typedef struct ObjObjectType ObjObjectType;
+typedef struct ObjInstance ObjInstance;
 
 /* A tagged union representing a Cutlet value.
  * - VAL_NUMBER: number field holds the value.
@@ -144,6 +148,8 @@ typedef struct ObjMap ObjMap;
  * - VAL_CLOSURE: closure field holds a GC-managed ObjClosure (user functions).
  * - VAL_ARRAY: array field holds a GC-managed ObjArray.
  * - VAL_MAP: map field holds a GC-managed ObjMap.
+ * - VAL_OBJECT_TYPE: object_type field holds a refcount-managed ObjObjectType*.
+ * - VAL_INSTANCE: instance field holds a refcount-managed ObjInstance*.
  *
  * Note: string and error are separate fields. VAL_STRING uses ObjString*
  * (GC-tracked), while VAL_ERROR uses a plain char* (heap-allocated). */
@@ -152,12 +158,14 @@ struct Value {
     ValueType type;
     double number;
     bool boolean;
-    ObjString *string;     /* owned; non-NULL only for VAL_STRING */
-    char *error;           /* owned; non-NULL only for VAL_ERROR */
-    ObjFunction *function; /* GC-managed; non-NULL only for VAL_FUNCTION */
-    ObjClosure *closure;   /* GC-managed; non-NULL only for VAL_CLOSURE */
-    ObjArray *array;       /* GC-managed; non-NULL only for VAL_ARRAY */
-    ObjMap *map;           /* GC-managed; non-NULL only for VAL_MAP */
+    ObjString *string;          /* owned; non-NULL only for VAL_STRING */
+    char *error;                /* owned; non-NULL only for VAL_ERROR */
+    ObjFunction *function;      /* GC-managed; non-NULL only for VAL_FUNCTION */
+    ObjClosure *closure;        /* GC-managed; non-NULL only for VAL_CLOSURE */
+    ObjArray *array;            /* GC-managed; non-NULL only for VAL_ARRAY */
+    ObjMap *map;                /* GC-managed; non-NULL only for VAL_MAP */
+    ObjObjectType *object_type; /* refcount-managed; non-NULL only for VAL_OBJECT_TYPE */
+    ObjInstance *instance;      /* refcount-managed; non-NULL only for VAL_INSTANCE */
 };
 
 /*
@@ -222,6 +230,38 @@ struct ObjMap {
     MapEntry *entries; /* Owned array of key-value pairs. */
     size_t count;      /* Number of live entries. */
     size_t capacity;   /* Allocated capacity of entries array. */
+};
+
+/*
+ * ObjObjectType - represents a user-defined object type.
+ *
+ * refcount: Reference count for lifetime management.
+ * name:     Heap-allocated type name (e.g. "Dog").
+ * methods:  Owned method table (ObjMap mapping string names to closure values).
+ *
+ * Not GC-managed — uses manual refcounting since object types outlive
+ * individual scopes and are shared across instances.
+ */
+struct ObjObjectType {
+    size_t refcount;
+    char *name;
+    ObjMap *methods;
+};
+
+/*
+ * ObjInstance - represents an instance of a user-defined object type.
+ *
+ * refcount: Reference count for lifetime management.
+ * type:     Reference to the object type (refcount-managed; the instance
+ *           increments type->refcount on creation and decrements on free).
+ * data:     Owned instance data map (field names to values).
+ *
+ * Not GC-managed — uses manual refcounting.
+ */
+struct ObjInstance {
+    size_t refcount;
+    ObjObjectType *type;
+    ObjMap *data;
 };
 
 /* ---- Value constructors ---- */
@@ -317,6 +357,32 @@ ObjMap *obj_map_clone_deep(const ObjMap *src);
 
 /* Create a map Value (takes ownership of the ObjMap reference). */
 Value make_map(ObjMap *m);
+
+/* Create an object type Value (takes ownership of the ObjObjectType reference). */
+Value make_object_type(ObjObjectType *t);
+
+/* Create an instance Value (takes ownership of the ObjInstance reference). */
+Value make_instance(ObjInstance *inst);
+
+/*
+ * Allocate a new ObjObjectType with refcount 1.
+ * name is copied (caller retains ownership of the original).
+ * Returns NULL on allocation failure.
+ */
+ObjObjectType *obj_object_type_new(const char *name);
+
+/*
+ * Allocate a new ObjInstance of the given type with refcount 1.
+ * Increments type->refcount (the instance holds a reference).
+ * Returns NULL on allocation failure.
+ */
+ObjInstance *obj_instance_new(ObjObjectType *type);
+
+/* Set a method on an object type's method table. Clones name and method. */
+void obj_object_type_set_method(ObjObjectType *type, const char *name, Value method);
+
+/* Look up a method by name. Returns pointer to value, or NULL if not found. */
+Value *obj_object_type_get_method(const ObjObjectType *type, const char *name);
 
 /*
  * Compare two values for equality. Used by map key lookup and by
