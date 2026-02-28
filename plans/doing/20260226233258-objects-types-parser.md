@@ -304,3 +304,32 @@ Added 19 parser tests in `tests/test_parser.c`:
 - `test_new_keyword_reserved` — `my new = 1` fails
 
 All 19 tests fail as expected (14 failures from `make test`; some already pass because `new` without a recognized keyword just fails parsing naturally). Commit: `0058b31`.
+
+### Step 2: Add type scaffolding — DONE (2026-02-28)
+
+**`value.h` changes:**
+- Added `VAL_OBJECT_TYPE` and `VAL_INSTANCE` to `ValueType` enum.
+- Added forward declarations for `ObjObjectType` and `ObjInstance`.
+- Added `ObjObjectType` struct: `refcount`, `name`, `methods` (ObjMap*).
+- Added `ObjInstance` struct: `refcount`, `type` (ObjObjectType*), `data` (ObjMap*).
+- Added `object_type` and `instance` fields to `Value` struct.
+- Added constructor declarations: `make_object_type()`, `make_instance()`.
+- Added allocator declarations: `obj_object_type_new()`, `obj_instance_new()`.
+- Added accessor declarations: `obj_object_type_set_method()`, `obj_object_type_get_method()`.
+
+**`parser.h` changes:**
+- Added `AST_OBJECT_DEF` and `AST_NEW` to `AstNodeType` enum.
+
+**`parser.c` changes:**
+- Added `object`, `new`, `with` to `is_reserved_keyword()`.
+- Added `AST_OBJECT_DEF` → `"OBJECT_DEF"` and `AST_NEW` → `"NEW"` to `ast_node_type_str()`.
+
+**`gc.c` changes:**
+- Added `VAL_OBJECT_TYPE` and `VAL_INSTANCE` cases to `gc_mark_value()` to eliminate -Wswitch warnings and correctly mark the GC-managed ObjMap pointers embedded in the refcount-managed structs.
+
+**Decisions made:**
+- `object` and `new` are NOT added to break/return value-exclusion lists (they start expressions, like `fn`/`if`/`while`).
+- `with` is added to `is_reserved_keyword()` following the pattern of `is` (contextual delimiter, cannot be used as variable name).
+- GC marking added proactively for the embedded ObjMap pointers in ObjObjectType.methods and ObjInstance.data.
+
+**Test results:** 341/353 pass. 12 parser tests fail with assertion errors (not compilation errors). All non-parser test suites pass (tokenizer, value, chunk, compiler, VM, GC). Format check passes. Commit: `a74665c`.
