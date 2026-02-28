@@ -1178,15 +1178,23 @@ static void compile_function(Compiler *c, const AstNode *node) {
  *
  * An AST_OBJECT_DEF node has:
  *   value       = type name string
+ *   params      = mixin name strings (e.g., from "with A, B")
+ *   param_count = number of mixins
  *   children    = array of AST_FUNCTION nodes (methods)
  *   child_count = number of methods
  *
  * Emitted bytecode:
+ *   For each mixin (if any):
+ *     OP_GET_GLOBAL <mixin_name_idx>    -- push mixin type onto stack
  *   For each method:
- *     OP_CONSTANT <method_name_string>   -- push method name
- *     OP_CLOSURE  <method_function>      -- push method closure
- *   OP_OBJECT_TYPE <name_idx> <method_count> <mixin_count=0>
+ *     OP_CONSTANT <method_name_string>  -- push method name
+ *     OP_CLOSURE  <method_function>     -- push method closure
+ *   OP_OBJECT_TYPE <name_idx> <method_count> <mixin_count>
  *   OP_DEFINE_GLOBAL <name_idx>
+ *
+ * Stack layout before OP_OBJECT_TYPE:
+ *   [mixin1_type, mixin2_type, ..., method1_name, method1_closure, ..., methodN_name,
+ * methodN_closure]
  */
 static void compile_object_def(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
@@ -1199,6 +1207,22 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
     if (name_idx < 0) {
         compiler_error(c, "too many constants");
         return;
+    }
+
+    /* Emit OP_GET_GLOBAL for each mixin name so the mixin type values are
+     * on the stack BEFORE the method name-closure pairs.  The VM will pop
+     * the methods first, then the mixins, applying mixin methods in
+     * left-to-right order (later mixins overwrite earlier ones). */
+    for (size_t i = 0; i < node->param_count; i++) {
+        char *mixin_name = compiler_strdup(c, node->params[i]);
+        if (!mixin_name)
+            return;
+        int mixin_idx = chunk_find_or_add_constant(c->chunk, make_string(mixin_name));
+        if (mixin_idx < 0) {
+            compiler_error(c, "too many constants");
+            return;
+        }
+        emit_bytes(c, OP_GET_GLOBAL, (uint8_t)mixin_idx, line);
     }
 
     /* Compile each method: push its name string then its closure. */
@@ -1226,11 +1250,11 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
     /* Emit OP_OBJECT_TYPE with 3 operand bytes:
      *   1. name constant index
      *   2. method count
-     *   3. mixin count (always 0 in this task) */
+     *   3. mixin count (from "with" clause, 0 if no mixins) */
     emit_byte(c, OP_OBJECT_TYPE, line);
     emit_byte(c, (uint8_t)name_idx, line);
     emit_byte(c, (uint8_t)node->child_count, line);
-    emit_byte(c, 0, line); /* mixin count = 0 */
+    emit_byte(c, (uint8_t)node->param_count, line);
 
     /* Store the type as a global variable. */
     emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
