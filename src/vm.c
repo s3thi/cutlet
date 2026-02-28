@@ -650,6 +650,7 @@ Value vm_execute(Chunk *chunk, EvalContext *ctx) {
     vm.frames[vm.frame_count].closure = &script_closure;
     vm.frames[vm.frame_count].ip = chunk->code;
     vm.frames[vm.frame_count].slots = vm.stack;
+    vm.frames[vm.frame_count].is_initializer = false;
     vm.frame_count++;
 
     /* Register the VM with the GC so gc_mark_roots() can walk
@@ -742,6 +743,7 @@ static Value vm_call_value(VM *vm, const Value *fn_val, Value arg1, Value arg2) 
         new_frame->closure = cl;
         new_frame->ip = fn->chunk->code;
         new_frame->slots = vm->stack_top - 2 - 1; /* 2 args + callee */
+        new_frame->is_initializer = false;
 
         /* Re-enter the dispatch loop. It will run the function body and
          * return when OP_RETURN drops frame_count back to our level.
@@ -1596,6 +1598,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 new_frame->closure = cl;
                 new_frame->ip = fn->chunk->code;
                 new_frame->slots = vm->stack_top - argc - 1;
+                new_frame->is_initializer = false;
             } else {
                 return vm_runtime_error(vm, "cannot call %s", value_type_name(callee.type));
             }
@@ -2961,6 +2964,17 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 vm_pop(vm, &result);
             } else {
                 result = make_nothing();
+            }
+
+            /* If this is an initializer frame (init() called by OP_NEW),
+             * discard the normal return value and use the instance (self)
+             * from slots[1] instead. Clone it because the stack window
+             * will be freed during frame collapse below. */
+            if (frame->is_initializer) {
+                Value instance;
+                value_clone(&instance, &frame->slots[1]);
+                value_free(&result);
+                result = instance;
             }
 
             /* Pop the current call frame. */

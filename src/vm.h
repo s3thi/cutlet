@@ -36,6 +36,7 @@ typedef struct {
     ObjClosure *closure; /* The closure being executed. */
     uint8_t *ip;         /* Instruction pointer into function's chunk. */
     Value *slots;        /* Pointer into VM stack: base of this frame's window. */
+    bool is_initializer; /* True if this frame is an init() call from OP_NEW. */
 } CallFrame;
 
 typedef struct VM {
