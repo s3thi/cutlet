@@ -415,3 +415,25 @@ Implemented object definition parsing in `src/parser.c`:
 - Added `parser_is_complete()` support in this step rather than deferring to Step 7, since the completeness tests were written in Step 1 and naturally need the parsing to exist to function.
 
 **Test results:** 349/353 pass. All 13 object definition tests pass (5 success, 2 error, 5 completeness, 1 reserved keyword). Remaining 4 failures are all `new` expression tests (Step 6). Format check passes. Commit: `d0da907`.
+
+### Step 6: Parse `new` expressions — DONE (2026-02-28)
+
+Implemented `new` expression parsing in `src/parser.c`:
+
+**parse_new() function:**
+- Handles `new TypeName(arg1, arg2, ...)` syntax.
+- Recognizes `new` keyword in `parse_atom()`, dispatches to `parse_new()`.
+- Type name must be a non-reserved-keyword identifier.
+- Expects `(`, parses comma-separated argument expressions using the same pattern as `AST_CALL` in `parse_atom()`, expects `)`.
+- Builds `AST_NEW` node: `value`=type name, `children`=argument expressions, `left`/`right`=NULL.
+
+**AST formatting:**
+- Added `AST_NEW` branch in `ast_format_node()`:
+  - Formats as `[NEW TypeName]` for zero args.
+  - Formats as `[NEW TypeName [NUMBER 1] [STRING x]]` for multiple args.
+  - Follows the `AST_CALL` formatting pattern exactly.
+
+**Memory cleanup:**
+- `AST_NEW` uses `value` and `children`, both of which are handled by the generic `ast_free()` logic — no type-specific branch needed.
+
+**Test results:** 353/353 parser tests pass. All 7 new-expression tests pass (4 success, 1 error, 2 reserved keyword). All test suites pass with 0 failures. Format check passes. Commit: `5e9310f`.
