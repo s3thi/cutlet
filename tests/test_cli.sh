@@ -1431,6 +1431,60 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# ============================================================
+# Objects and mixins (end-to-end integration)
+# ============================================================
+echo
+echo "Objects and mixins (end-to-end):"
+
+# Basic object definition + method call via cutlet run
+test_run_file "object method call" 'object Foo is fn x(self) is "hi" end end
+say(new Foo().x())' "hi"
+
+# Object with init and field access via cutlet run
+test_run_file "object with init" 'object Foo is fn init(self, n) is self.n = n end fn get(self) is self.n end end
+say(new Foo(42).get())' "42"
+
+# Mixin: object B inherits method from object A via cutlet run
+test_run_file "mixin method" 'object A is fn a(self) is "a" end end
+object B with A is end
+say(new B().a())' "a"
+
+# --ast output contains OBJECT_DEF and NEW nodes
+ast_obj_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'object Foo is fn x(self) is "hi" end end
+new Foo().x()' > "$ast_obj_tmpfile"
+ast_obj_result=$("$CUTLET" run "$ast_obj_tmpfile" --ast 2>/dev/null)
+if echo "$ast_obj_result" | grep -qF "OBJECT_DEF" && echo "$ast_obj_result" | grep -qF "NEW"; then
+    echo "  PASS: --ast shows OBJECT_DEF and NEW"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --ast shows OBJECT_DEF and NEW"
+    echo "    Expected to contain: OBJECT_DEF and NEW"
+    echo "    Got: $ast_obj_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$ast_obj_tmpfile"
+
+# --bytecode output contains OP_OBJECT_TYPE and OP_NEW
+bc_obj_tmpfile=$(mktemp /tmp/cutlet_test_XXXXXX)
+printf '%s' 'object Foo is fn x(self) is "hi" end end
+new Foo().x()' > "$bc_obj_tmpfile"
+bc_obj_result=$("$CUTLET" run "$bc_obj_tmpfile" --bytecode 2>/dev/null)
+if echo "$bc_obj_result" | grep -qF "OP_OBJECT_TYPE" && echo "$bc_obj_result" | grep -qF "OP_NEW"; then
+    echo "  PASS: --bytecode shows OP_OBJECT_TYPE and OP_NEW"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: --bytecode shows OP_OBJECT_TYPE and OP_NEW"
+    echo "    Expected to contain: OP_OBJECT_TYPE and OP_NEW"
+    echo "    Got: $bc_obj_result"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$bc_obj_tmpfile"
+
+# Error case: new on a non-type value produces an error
+test_run_file_error "new non-type error" 'new 42()' "expected type name"
+
 echo
 echo "========================================"
 echo "Tests run: $((PASS + FAIL))"
