@@ -370,6 +370,7 @@ static AstNode *parse_if(Parser *p);
 static AstNode *parse_while(Parser *p);
 static AstNode *parse_fn(Parser *p);
 static AstNode *parse_object(Parser *p);
+static AstNode *parse_new(Parser *p);
 static void skip_newlines(Parser *p);
 static void free_expr_array(PtrArray *arr);
 
@@ -506,6 +507,11 @@ static AstNode *parse_atom(Parser *p) {
     /* Object definition expression */
     if (token_is_keyword(&t, "object")) {
         return parse_object(p);
+    }
+
+    /* New expression: new TypeName(args...) */
+    if (token_is_keyword(&t, "new")) {
+        return parse_new(p);
     }
 
     /* Break expression: break [value]
@@ -2725,6 +2731,140 @@ static AstNode *parse_object(Parser *p) {
     return node;
 }
 
+/*
+ * Parse a 'new' expression: new TypeName(arg1, arg2, ...)
+ *
+ * Returns an AST_NEW node with:
+ *   value       = type name (heap-allocated)
+ *   children    = argument expressions
+ *   child_count = number of arguments
+ *   left, right = NULL
+ *   line        = source line of 'new' keyword
+ *
+ * The argument parsing follows the same pattern as AST_CALL in parse_atom().
+ */
+static AstNode *parse_new(Parser *p) {
+    if (p->has_error)
+        return NULL;
+
+    /* Save the 'new' keyword token for line info */
+    Token new_tok = p->current;
+
+    /* Consume 'new' keyword (already verified by caller) */
+    advance(p);
+
+    /* Expect identifier for type name */
+    if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
+        parser_error(p, p->current.line, p->current.col, "expected type name after 'new'");
+        return NULL;
+    }
+
+    /* Save heap-allocated copy of the type name */
+    char *type_name = malloc(p->current.value_len + 1);
+    if (!type_name) {
+        parser_error(p, new_tok.line, new_tok.col, "memory allocation failed");
+        return NULL;
+    }
+    memcpy(type_name, p->current.value, p->current.value_len);
+    type_name[p->current.value_len] = '\0';
+    advance(p);
+
+    /* Expect opening '(' */
+    if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+        p->current.value[0] != '(') {
+        parser_error(p, p->current.line, p->current.col, "expected '(' after type name in 'new'");
+        free(type_name);
+        return NULL;
+    }
+    advance(p); /* consume '(' */
+
+    /* Parse comma-separated argument list (same pattern as AST_CALL) */
+    PtrArray args;
+    if (!ptr_array_init(&args, 4)) {
+        free(type_name);
+        parser_error(p, new_tok.line, new_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    /* Check for zero-arg case: immediate ')' */
+    if (!(p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+          p->current.value[0] == ')')) {
+        /* Parse first argument */
+        AstNode *arg = parse_assignment(p);
+        if (!arg) {
+            free(type_name);
+            ptr_array_destroy(&args);
+            return NULL;
+        }
+        if (!ptr_array_push(&args, arg)) {
+            ast_free(arg);
+            free(type_name);
+            ptr_array_destroy(&args);
+            parser_error(p, new_tok.line, new_tok.col, "memory allocation failed");
+            return NULL;
+        }
+
+        /* Parse additional comma-separated arguments */
+        while (p->current.type == TOK_OPERATOR && p->current.value_len == 1 &&
+               p->current.value[0] == ',') {
+            advance(p); /* consume ',' */
+            arg = parse_assignment(p);
+            if (!arg) {
+                free(type_name);
+                free_expr_array(&args);
+                return NULL;
+            }
+            if (!ptr_array_push(&args, arg)) {
+                ast_free(arg);
+                free(type_name);
+                free_expr_array(&args);
+                parser_error(p, new_tok.line, new_tok.col, "memory allocation failed");
+                return NULL;
+            }
+        }
+    }
+
+    /* Expect closing ')' */
+    if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
+        p->current.value[0] != ')') {
+        parser_error(p, p->current.line, p->current.col, "expected ')' after arguments in 'new'");
+        free(type_name);
+        free_expr_array(&args);
+        return NULL;
+    }
+    advance(p); /* consume ')' */
+
+    /* Build AST_NEW node */
+    AstNode *node = malloc(sizeof(AstNode));
+    if (!node) {
+        free(type_name);
+        free_expr_array(&args);
+        parser_error(p, new_tok.line, new_tok.col, "memory allocation failed");
+        return NULL;
+    }
+
+    size_t arg_count = args.count;
+    AstNode **children = NULL;
+    if (arg_count > 0) {
+        children = (AstNode **)ptr_array_release(&args);
+    } else {
+        ptr_array_destroy(&args);
+    }
+
+    node->type = AST_NEW;
+    node->value = type_name; /* takes ownership */
+    node->left = NULL;
+    node->right = NULL;
+    node->grouped = false;
+    node->line = new_tok.line;
+    node->children = children;
+    node->child_count = arg_count;
+    node->params = NULL;
+    node->param_count = 0;
+
+    return node;
+}
+
 /* ============================================================
  * Public API
  * ============================================================ */
@@ -3647,6 +3787,50 @@ static char *ast_format_node(const AstNode *node) {
         }
         snprintf(buf + pos, total_len - pos, "]");
         ptr_array_destroy(&method_strs);
+        return buf;
+    }
+
+    /* AST_NEW: [NEW TypeName arg1 arg2 ...]
+     * value = type name, children = argument expressions.
+     * Follows the same formatting pattern as AST_CALL. */
+    if (node->type == AST_NEW) {
+        /* Format argument children */
+        PtrArray arg_strs;
+        if (!ptr_array_init(&arg_strs, node->child_count))
+            return NULL;
+
+        /* Start with "[NEW TypeName" */
+        size_t total_len = 1 + strlen(type_str) + 1 + strlen(node->value);
+
+        for (size_t i = 0; i < node->child_count; i++) {
+            char *str = ast_format_node(node->children[i]);
+            if (!str) {
+                for (size_t j = 0; j < arg_strs.count; j++)
+                    free(arg_strs.items[j]);
+                ptr_array_destroy(&arg_strs);
+                return NULL;
+            }
+            ptr_array_push(&arg_strs, str);
+            total_len += 1 + strlen(str); /* " arg" */
+        }
+        total_len += 1 + 1; /* "]" + NUL */
+
+        char *buf = malloc(total_len);
+        if (!buf) {
+            for (size_t i = 0; i < arg_strs.count; i++)
+                free(arg_strs.items[i]);
+            ptr_array_destroy(&arg_strs);
+            return NULL;
+        }
+
+        size_t pos = 0;
+        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s", type_str, node->value);
+        for (size_t i = 0; i < arg_strs.count; i++) {
+            pos += (size_t)snprintf(buf + pos, total_len - pos, " %s", (char *)arg_strs.items[i]);
+            free(arg_strs.items[i]);
+        }
+        snprintf(buf + pos, total_len - pos, "]");
+        ptr_array_destroy(&arg_strs);
         return buf;
     }
 
