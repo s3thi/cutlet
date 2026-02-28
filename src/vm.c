@@ -1822,6 +1822,135 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_NEW: {
+            /* Create an ObjInstance from the type on the stack.
+             * Operand: argc (number of explicit arguments, not counting self).
+             *
+             * Stack before: [type, arg1, arg2, ..., argN]
+             * Stack after:  [instance]
+             *
+             * If the type has an init() method, set up a call frame to
+             * invoke it with (self=instance, args...).  The is_initializer
+             * flag on the frame ensures OP_RETURN pushes the instance
+             * instead of init's normal return value. */
+            uint8_t argc = read_byte(frame);
+
+            /* Read the type value from below the arguments. */
+            Value type_val = vm->stack_top[-(int)argc - 1];
+            if (type_val.type != VAL_OBJECT_TYPE) {
+                return vm_runtime_error(vm, "can only use 'new' with object types");
+            }
+
+            /* Create the instance. */
+            ObjInstance *inst = obj_instance_new(type_val.object_type);
+            if (!inst) {
+                return vm_runtime_error(vm, "memory allocation failed");
+            }
+            Value instance_val = make_instance(inst);
+
+            /* Look up init() in the type's method table. */
+            Value *init_method = obj_object_type_get_method(type_val.object_type, "init");
+
+            if (init_method) {
+                /* init() exists — set up a call frame to invoke it. */
+
+                /* Clone the init method; it must be a closure. */
+                Value init_clone;
+                if (!value_clone(&init_clone, init_method)) {
+                    value_free(&instance_val);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                if (init_clone.type != VAL_CLOSURE) {
+                    value_free(&init_clone);
+                    value_free(&instance_val);
+                    return vm_runtime_error(vm, "init must be a closure");
+                }
+                ObjClosure *init_closure = init_clone.closure;
+
+                /* Verify arity: init expects (self + explicit args).
+                 * init_closure->function->arity includes self, so it
+                 * must equal argc + 1. */
+                if (init_closure->function->arity != argc + 1) {
+                    int expected = init_closure->function->arity - 1;
+                    value_free(&init_clone);
+                    value_free(&instance_val);
+                    return vm_runtime_error(vm, "init() expects %d argument(s), got %d", expected,
+                                            (int)argc);
+                }
+
+                /* Save the argc arguments from the stack into a
+                 * temporary buffer (pop them in reverse order). */
+                Value saved_args[256];
+                for (int i = argc - 1; i >= 0; i--) {
+                    vm_pop(vm, &saved_args[i]);
+                }
+
+                /* Pop the type value from the stack. */
+                Value type_discard;
+                vm_pop(vm, &type_discard);
+                value_free(&type_discard);
+
+                /* Push the init closure (callee — slots[0]). */
+                if (!vm_push(vm, init_clone)) {
+                    value_free(&instance_val);
+                    for (int i = 0; i < argc; i++) {
+                        value_free(&saved_args[i]);
+                    }
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+
+                /* Push the instance (self — slots[1]). */
+                if (!vm_push(vm, instance_val)) {
+                    for (int i = 0; i < argc; i++) {
+                        value_free(&saved_args[i]);
+                    }
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+
+                /* Push each saved argument. */
+                for (int i = 0; i < argc; i++) {
+                    if (!vm_push(vm, saved_args[i])) {
+                        /* Free remaining unsaved args. */
+                        for (int j = i + 1; j < argc; j++) {
+                            value_free(&saved_args[j]);
+                        }
+                        return vm_runtime_error(vm, "stack overflow");
+                    }
+                }
+
+                /* Push a new CallFrame — same pattern as OP_CALL for closures. */
+                if (vm->frame_count >= FRAMES_MAX) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+                CallFrame *new_frame = &vm->frames[vm->frame_count++];
+                new_frame->closure = init_closure;
+                new_frame->ip = init_closure->function->chunk->code;
+                /* slots base: stack_top minus (argc + 1 self) minus 1 callee.
+                 * This is: stack_top - argc - 1 (self) - 1 (callee) */
+                new_frame->slots = vm->stack_top - argc - 1 - 1;
+                new_frame->is_initializer = true;
+
+                /* Break — execution continues inside init(). When init
+                 * does OP_RETURN, the is_initializer flag ensures the
+                 * instance (slots[1]) is returned, not init's return value. */
+            } else if (argc > 0) {
+                /* No init() but arguments were provided — error. */
+                const char *type_name = type_val.object_type->name;
+                value_free(&instance_val);
+                return vm_runtime_error(vm, "'%s' has no init() method but received %d argument(s)",
+                                        type_name, (int)argc);
+            } else {
+                /* No init() and no arguments — pop the type, push the instance. */
+                Value type_discard;
+                vm_pop(vm, &type_discard);
+                value_free(&type_discard);
+                if (!vm_push(vm, instance_val)) {
+                    return vm_runtime_error(vm, "stack overflow");
+                }
+            }
+            break;
+        }
+
         case OP_INDEX_GET: {
             /* Read container[index]: pop index, pop container, push element.
              * Supports arrays and maps:
