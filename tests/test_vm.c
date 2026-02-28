@@ -3861,6 +3861,131 @@ TEST(test_mixin_non_object_type_error) {
 }
 
 /* ============================================================
+ * Object system — native function support (type, str, keys, len, has_key, say)
+ * ============================================================ */
+
+/* type() returns "object_type" for an object type value. */
+TEST(test_native_type_object_type) {
+    assert_vm_string("object Foo is end\ntype(Foo)", "object_type", "type(Foo) = object_type");
+}
+
+/* type() returns the type name for an instance. */
+TEST(test_native_type_instance) {
+    assert_vm_string("object Foo is end\ntype(new Foo())", "Foo", "type(instance) = Foo");
+}
+
+/* type() returns the type name for an instance with init. */
+TEST(test_native_type_instance_with_init) {
+    assert_vm_string("object Bar is fn init(self, x) is self.x = x end end\n"
+                     "type(new Bar(1))",
+                     "Bar", "type(instance with init) = Bar");
+}
+
+/* str() formats an object type. */
+TEST(test_native_str_object_type) {
+    assert_vm_string("object Foo is end\nstr(Foo)", "<object Foo>", "str(Foo) = <object Foo>");
+}
+
+/* str() formats an instance. */
+TEST(test_native_str_instance) {
+    assert_vm_string("object Foo is end\nstr(new Foo())", "<Foo instance>",
+                     "str(instance) = <Foo instance>");
+}
+
+/* str() formats an instance with data. */
+TEST(test_native_str_instance_with_data) {
+    assert_vm_string("object Foo is fn init(self, x) is self.x = x end end\n"
+                     "str(new Foo(42))",
+                     "<Foo instance>", "str(instance with data)");
+}
+
+/* keys() returns data field names of an instance. */
+TEST(test_native_keys_instance) {
+    assert_vm_formatted("object Foo is fn init(self, x) is self.x = x end end\n"
+                        "keys(new Foo(1))",
+                        "[x]", "keys(instance) = [x]");
+}
+
+/* keys() returns multiple data field names. */
+TEST(test_native_keys_instance_multiple) {
+    assert_vm_formatted("object Foo is\nfn init(self, a, b) is\nself.a = a\nself.b = b\nend\nend\n"
+                        "keys(new Foo(1, 2))",
+                        "[a, b]", "keys(instance) = [a, b]");
+}
+
+/* keys() returns empty array for instance with no data fields. */
+TEST(test_native_keys_instance_empty) {
+    assert_vm_formatted("object Foo is end\nkeys(new Foo())", "[]",
+                        "keys(instance with no data) = []");
+}
+
+/* len() returns count of data fields on an instance. */
+TEST(test_native_len_instance) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
+                     "len(new Foo(1))",
+                     1.0, "len(instance) = 1");
+}
+
+/* len() returns 0 for instance with no data fields. */
+TEST(test_native_len_instance_empty) {
+    assert_vm_number("object Foo is end\nlen(new Foo())", 0.0, "len(instance with no data) = 0");
+}
+
+/* len() returns count of multiple data fields. */
+TEST(test_native_len_instance_multiple) {
+    assert_vm_number("object Foo is\nfn init(self, a, b) is\nself.a = a\nself.b = b\nend\nend\n"
+                     "len(new Foo(1, 2))",
+                     2.0, "len(instance) = 2");
+}
+
+/* has_key() checks data fields on instance (consistent with OP_IN). */
+TEST(test_native_has_key_instance_data) {
+    assert_vm_bool("object Foo is fn init(self, x) is self.x = x end end\n"
+                   "has_key(new Foo(1), \"x\")",
+                   true, "has_key(instance, data_key) = true");
+}
+
+/* has_key() returns false for missing data key. */
+TEST(test_native_has_key_instance_missing) {
+    assert_vm_bool("object Foo is fn init(self, x) is self.x = x end end\n"
+                   "has_key(new Foo(1), \"y\")",
+                   false, "has_key(instance, missing_key) = false");
+}
+
+/* has_key() checks methods too (consistent with OP_IN which checks both). */
+TEST(test_native_has_key_instance_method) {
+    assert_vm_bool("object Foo is fn greet(self) is \"hi\" end end\n"
+                   "has_key(new Foo(), \"greet\")",
+                   true, "has_key(instance, method_name) = true");
+}
+
+/* say() works for instances without crashing (uses value_format). */
+TEST(test_native_say_instance) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("object Foo is end\nsay(new Foo())", &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say(instance) returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "<Foo instance>\n", "say(instance) output", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* say() works for object types without crashing. */
+TEST(test_native_say_object_type) {
+    TestBuffer buf;
+    test_buffer_init(&buf);
+    EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
+    Value v = run_input("object Foo is end\nsay(Foo)", &ctx);
+    ASSERT_CLEANUP(v.type == VAL_NOTHING, "say(object_type) returns nothing", v, buf);
+    ASSERT_STR_EQ_CLEANUP(buf.data, "<object Foo>\n", "say(object_type) output", v, buf);
+    value_free(&v);
+    test_buffer_free(&buf);
+    PASS();
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4705,6 +4830,26 @@ int main(void) {
     /* ---- Object system — mixins: error cases ---- */
     printf("\nObject system — mixins (errors):\n");
     RUN_TEST(test_mixin_non_object_type_error);
+
+    /* ---- Object system — native function support ---- */
+    printf("\nObject system — native functions (type, str, keys, len, has_key, say):\n");
+    RUN_TEST(test_native_type_object_type);
+    RUN_TEST(test_native_type_instance);
+    RUN_TEST(test_native_type_instance_with_init);
+    RUN_TEST(test_native_str_object_type);
+    RUN_TEST(test_native_str_instance);
+    RUN_TEST(test_native_str_instance_with_data);
+    RUN_TEST(test_native_keys_instance);
+    RUN_TEST(test_native_keys_instance_multiple);
+    RUN_TEST(test_native_keys_instance_empty);
+    RUN_TEST(test_native_len_instance);
+    RUN_TEST(test_native_len_instance_empty);
+    RUN_TEST(test_native_len_instance_multiple);
+    RUN_TEST(test_native_has_key_instance_data);
+    RUN_TEST(test_native_has_key_instance_missing);
+    RUN_TEST(test_native_has_key_instance_method);
+    RUN_TEST(test_native_say_instance);
+    RUN_TEST(test_native_say_object_type);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

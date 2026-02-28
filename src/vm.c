@@ -213,6 +213,25 @@ static Value native_str(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
+ * type(x) — return a string describing the type of a value.
+ * For most types, returns the generic type name (e.g. "number", "string").
+ * For VAL_INSTANCE, returns the object type's name (e.g. "Foo", "Dog").
+ * For VAL_OBJECT_TYPE, returns "object_type".
+ */
+static Value native_type(int argc, Value *args, EvalContext *ctx) {
+    (void)argc; /* Arity is checked by the VM before calling. */
+    (void)ctx;
+
+    /* For instances, return the user-defined type name instead of
+     * the generic "instance" — this is more useful for introspection. */
+    if (args[0].type == VAL_INSTANCE && args[0].instance && args[0].instance->type) {
+        return make_string(strdup(args[0].instance->type->name));
+    }
+
+    return make_string(strdup(value_type_name(args[0].type)));
+}
+
+/*
  * len(x) — return the length of an array or string.
  * Arrays: number of elements. Strings: number of bytes.
  * Other types produce a runtime error.
@@ -230,7 +249,12 @@ static Value native_len(int argc, Value *args, EvalContext *ctx) {
     if (args[0].type == VAL_MAP) {
         return make_number((double)args[0].map->count);
     }
-    return make_error("len() requires an array, string, or map, got %s",
+    /* For instances, return the count of data fields (not methods). */
+    if (args[0].type == VAL_INSTANCE) {
+        ObjInstance *inst = args[0].instance;
+        return make_number((double)(inst && inst->data ? inst->data->count : 0));
+    }
+    return make_error("len() requires an array, string, map, or instance, got %s",
                       value_type_name(args[0].type));
 }
 
@@ -288,17 +312,34 @@ static Value native_pop(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
- * keys(map) — return an array of the map's keys in insertion order.
+ * keys(x) — return an array of keys in insertion order.
+ * For maps: returns all map keys.
+ * For instances: returns data field names only (not methods).
  */
 static Value native_keys(int argc, Value *args, EvalContext *ctx) {
     (void)argc;
     (void)ctx;
 
-    if (args[0].type != VAL_MAP) {
-        return make_error("keys() requires a map, got %s", value_type_name(args[0].type));
+    /* Determine which ObjMap to extract keys from. */
+    ObjMap *m = NULL;
+    if (args[0].type == VAL_MAP) {
+        m = args[0].map;
+    } else if (args[0].type == VAL_INSTANCE) {
+        ObjInstance *inst = args[0].instance;
+        m = inst ? inst->data : NULL;
+    } else {
+        return make_error("keys() requires a map or instance, got %s",
+                          value_type_name(args[0].type));
     }
 
-    ObjMap *m = args[0].map;
+    /* Handle NULL or empty map. */
+    if (!m || m->count == 0) {
+        ObjArray *arr = obj_array_new();
+        if (!arr)
+            return make_error("memory allocation failed");
+        return make_array(arr);
+    }
+
     ObjArray *arr = obj_array_new();
     if (!arr)
         return make_error("memory allocation failed");
@@ -342,19 +383,33 @@ static Value native_values(int argc, Value *args, EvalContext *ctx) {
 }
 
 /*
- * has_key(map, key) — return true if the key exists in the map.
- * Distinguishes "key absent" from "key present with value nothing".
+ * has_key(container, key) — return true if the key exists.
+ * For maps: checks map keys.
+ * For instances: checks data map first, then method table for string keys
+ * (consistent with the OP_IN operator behavior).
  */
 static Value native_has_key(int argc, Value *args, EvalContext *ctx) {
     (void)argc;
     (void)ctx;
 
-    if (args[0].type != VAL_MAP) {
-        return make_error("has_key() requires a map as first argument, got %s",
-                          value_type_name(args[0].type));
+    if (args[0].type == VAL_MAP) {
+        return make_bool(obj_map_has(args[0].map, &args[1]));
     }
 
-    return make_bool(obj_map_has(args[0].map, &args[1]));
+    if (args[0].type == VAL_INSTANCE) {
+        ObjInstance *inst = args[0].instance;
+        /* Check data map first. */
+        bool found = inst && inst->data && obj_map_has(inst->data, &args[1]);
+        /* If not in data, check method table for string keys
+         * (consistent with OP_IN behavior). */
+        if (!found && args[1].type == VAL_STRING && inst && inst->type) {
+            found = obj_object_type_get_method(inst->type, args[1].string->chars) != NULL;
+        }
+        return make_bool(found);
+    }
+
+    return make_error("has_key() requires a map or instance as first argument, got %s",
+                      value_type_name(args[0].type));
 }
 
 /*
@@ -371,6 +426,10 @@ static void register_builtins(void) {
     Value str_fn = make_native("str", 1, native_str);
     runtime_var_define("str", &str_fn);
     value_free(&str_fn);
+
+    Value type_fn = make_native("type", 1, native_type);
+    runtime_var_define("type", &type_fn);
+    value_free(&type_fn);
 
     Value len_fn = make_native("len", 1, native_len);
     runtime_var_define("len", &len_fn);
@@ -419,6 +478,10 @@ static const char *value_type_name(ValueType type) {
         return "map";
     case VAL_ERROR:
         return "error";
+    case VAL_OBJECT_TYPE:
+        return "object_type";
+    case VAL_INSTANCE:
+        return "instance";
     default:
         return "value";
     }
