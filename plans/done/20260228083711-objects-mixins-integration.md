@@ -300,7 +300,13 @@ Run `make test && make check && make test-examples`. All tests pass.
 - [x] **Step 4**: Update native functions for new types — Added `type()` native function returning type names ("object_type" for types, user-defined name like "Foo" for instances). Updated `value_type_name()` for VAL_OBJECT_TYPE/VAL_INSTANCE. Extended `keys()`, `len()`, `has_key()` to handle VAL_INSTANCE (has_key checks both data and methods, consistent with OP_IN). str() and say() already worked via value_format(). 17 tests added, all pass.
 - [x] **Step 5**: CLI integration tests — Added 6 end-to-end tests in `tests/test_cli.sh`: basic object method call, object with init, mixin composition, --ast shows OBJECT_DEF/NEW, --bytecode shows OP_OBJECT_TYPE/OP_NEW, error case for `new 42()`. All 168 CLI tests pass. Committed `9bb96d9`.
 - [x] **Step 6**: Example program — Extended `examples/objects.cutlet` with mixin demonstrations: basic mixin composition (Greeter mixed into Cat), `type()` and `keys()`/`len()` on instances, multiple mixins with conflict resolution (later mixin wins), own methods overriding mixin methods. Updated `examples/objects.expected`. All 30 example tests pass.
-- [ ] **Step 7**: Final verification and edge cases
+- [x] **Step 7**: Final verification and edge cases — Added 3 edge case tests (empty object with mixin, instance truthiness, object type truthiness). "Multiple instances independent" test already existed from step 3. Updated TUTORIAL.md: replaced "Mixins (planned)" placeholder with full documentation covering basic usage, multiple mixins, override precedence, transitive mixins, init inheritance, empty object with mixin, error cases, and truthiness. All 168 unit tests, 30 example tests pass.
+
+---
+
+## Summary
+
+The object system with mixin composition is fully implemented and tested. The `with` keyword allows object types to inherit methods from one or more other object types using flat copy semantics (no prototype chains). Own methods always win over mixin methods, and later mixins overwrite earlier ones on conflict. Native functions (type, str, keys, len, has_key, say) all handle object types and instances. CLI integration tests and an example program cover the full feature set. The tutorial is updated with comprehensive documentation.
 
 ---
 
