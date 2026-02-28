@@ -1783,48 +1783,159 @@ static Value vm_run(VM *vm, int base_frame_count) {
         }
 
         case OP_OBJECT_TYPE: {
-            /* Create an ObjObjectType from name-closure pairs on the stack.
+            /* Create an ObjObjectType from mixin types and name-closure pairs
+             * on the stack.
              * Operands: name_idx (constant pool index for type name),
-             *           method_count (number of name-closure pairs),
-             *           mixin_count (number of mixin types, must be 0). */
+             *           method_count (number of own name-closure pairs),
+             *           mixin_count (number of mixin types below methods).
+             *
+             * Stack layout (bottom to top):
+             *   [mixin1, mixin2, ..., name1, closure1, ..., nameN, closureN]
+             *
+             * Steps:
+             *   1. Pop own method pairs into a temporary buffer.
+             *   2. Pop mixin type values into a temporary buffer.
+             *   3. Create the ObjObjectType.
+             *   4. Apply mixin methods (first mixin first; later overwrites).
+             *   5. Apply own methods (always last, overwrite mixin methods).
+             *   6. Push the new type value. */
             uint8_t name_idx = read_byte(frame);
             uint8_t method_count = read_byte(frame);
             uint8_t mixin_count = read_byte(frame);
-            (void)mixin_count; /* Ignored — must be 0 in this task. */
 
             /* Get the type name string from the constant pool. */
             const char *type_name =
                 frame->closure->function->chunk->constants[name_idx].string->chars;
 
-            /* Create the object type. */
+            /* --- 1. Pop own method pairs into a temporary buffer. ---
+             * Each method is a name-closure pair (2 values).
+             * The last method's closure is on top of the stack,
+             * so we pop closure first, then name for each method. */
+            Value *own_methods = NULL;
+            if (method_count > 0) {
+                own_methods = malloc(sizeof(Value) * 2 * (size_t)method_count);
+                if (!own_methods) {
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+            }
+            for (int i = method_count - 1; i >= 0; i--) {
+                /* Pop closure, then name for this method pair.
+                 * Store as [name, closure] at index [2*i, 2*i+1].
+                 * i is bounded by uint8_t method_count, so 2*i fits int. */
+                size_t idx = (size_t)i * 2;
+                if (!vm_pop(vm, &own_methods[idx + 1])) {
+                    /* Free already-popped values on underflow. */
+                    for (int j = method_count - 1; j > i; j--) {
+                        size_t jdx = (size_t)j * 2;
+                        value_free(&own_methods[jdx]);
+                        value_free(&own_methods[jdx + 1]);
+                    }
+                    free(own_methods);
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+                if (!vm_pop(vm, &own_methods[idx])) {
+                    value_free(&own_methods[idx + 1]);
+                    for (int j = method_count - 1; j > i; j--) {
+                        size_t jdx = (size_t)j * 2;
+                        value_free(&own_methods[jdx]);
+                        value_free(&own_methods[jdx + 1]);
+                    }
+                    free(own_methods);
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+            }
+
+            /* --- 2. Pop mixin type values into a temporary buffer. ---
+             * The last mixin is on top. We pop in reverse to get forward
+             * order in the buffer (index 0 = first mixin listed). */
+            Value *mixins = NULL;
+            if (mixin_count > 0) {
+                mixins = malloc(sizeof(Value) * (size_t)mixin_count);
+                if (!mixins) {
+                    /* Free own methods on allocation failure. */
+                    for (size_t i = 0; i < method_count; i++) {
+                        value_free(&own_methods[2 * i]);
+                        value_free(&own_methods[2 * i + 1]);
+                    }
+                    free(own_methods);
+                    return vm_runtime_error(vm, "memory allocation failed");
+                }
+                for (int i = mixin_count - 1; i >= 0; i--) {
+                    if (!vm_pop(vm, &mixins[i])) {
+                        /* Free already-popped mixins. */
+                        for (int j = mixin_count - 1; j > i; j--) {
+                            value_free(&mixins[j]);
+                        }
+                        free(mixins);
+                        for (size_t k = 0; k < method_count; k++) {
+                            value_free(&own_methods[2 * k]);
+                            value_free(&own_methods[2 * k + 1]);
+                        }
+                        free(own_methods);
+                        return vm_runtime_error(vm, "stack underflow");
+                    }
+                }
+            }
+
+            /* --- 3. Create the ObjObjectType. --- */
             ObjObjectType *type = obj_object_type_new(type_name);
             if (!type) {
+                for (size_t i = 0; i < mixin_count; i++)
+                    value_free(&mixins[i]);
+                free(mixins);
+                for (size_t i = 0; i < method_count; i++) {
+                    value_free(&own_methods[2 * i]);
+                    value_free(&own_methods[2 * i + 1]);
+                }
+                free(own_methods);
                 return vm_runtime_error(vm, "memory allocation failed");
             }
 
-            /* Pop 2 * method_count values from the stack.
-             * Stack layout (bottom to top): name1, closure1, name2, closure2, ...
-             * Pop in reverse order: closure first, then name. */
-            for (int i = 0; i < method_count; i++) {
-                Value closure_val, name_val;
-                if (!vm_pop(vm, &closure_val)) {
-                    return vm_runtime_error(vm, "stack underflow");
+            /* --- 4. Apply mixin methods in forward order. ---
+             * First mixin applied first; later mixins overwrite earlier ones.
+             * For each mixin, verify it is a VAL_OBJECT_TYPE, then copy all
+             * of its methods into the new type's method table. */
+            for (int i = 0; i < mixin_count; i++) {
+                if (mixins[i].type != VAL_OBJECT_TYPE) {
+                    /* Error: mixin is not an object type. Clean up everything. */
+                    for (int j = i; j < mixin_count; j++)
+                        value_free(&mixins[j]);
+                    free(mixins);
+                    for (size_t k = 0; k < method_count; k++) {
+                        value_free(&own_methods[2 * k]);
+                        value_free(&own_methods[2 * k + 1]);
+                    }
+                    free(own_methods);
+                    /* Free the partially-built type via a Value wrapper
+                     * so refcount-based cleanup fires correctly. */
+                    Value type_val = make_object_type(type);
+                    value_free(&type_val);
+                    return vm_runtime_error(vm, "mixin must be an object type");
                 }
-                if (!vm_pop(vm, &name_val)) {
-                    value_free(&closure_val);
-                    return vm_runtime_error(vm, "stack underflow");
+                /* Iterate over the mixin's method table entries.
+                 * obj_object_type_set_method clones internally, so we
+                 * pass the mixin's values directly. */
+                ObjMap *mixin_methods = mixins[i].object_type->methods;
+                for (size_t e = 0; e < mixin_methods->count; e++) {
+                    MapEntry *entry = &mixin_methods->entries[e];
+                    obj_object_type_set_method(type, entry->key.string->chars, entry->value);
                 }
-
-                /* Add the method to the type's method table.
-                 * obj_object_type_set_method clones internally via obj_map_set. */
-                obj_object_type_set_method(type, name_val.string->chars, closure_val);
-
-                /* Free the originals — the method table holds clones. */
-                value_free(&name_val);
-                value_free(&closure_val);
+                value_free(&mixins[i]);
             }
+            free(mixins);
 
-            /* Push the new object type value onto the stack. */
+            /* --- 5. Apply own methods (overwrite mixin methods). ---
+             * obj_object_type_set_method clones internally via obj_map_set. */
+            for (size_t i = 0; i < method_count; i++) {
+                obj_object_type_set_method(type, own_methods[2 * i].string->chars,
+                                           own_methods[2 * i + 1]);
+                /* Free the originals — the method table holds clones. */
+                value_free(&own_methods[2 * i]);
+                value_free(&own_methods[2 * i + 1]);
+            }
+            free(own_methods);
+
+            /* --- 6. Push the new object type value onto the stack. --- */
             if (!vm_push(vm, make_object_type(type))) {
                 return vm_runtime_error(vm, "stack overflow");
             }
