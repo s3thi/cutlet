@@ -265,3 +265,42 @@ Add detection for incomplete `object...end` blocks. Study how `if...end` and `wh
 ---
 
 End of plan.
+
+## Progress
+
+### Step 1: Write parser tests — DONE (2026-02-28)
+
+Added 19 parser tests in `tests/test_parser.c`:
+
+**Object definition success tests (5):**
+- `test_object_def_empty` — `object Foo is end`
+- `test_object_def_one_method` — one `fn` method
+- `test_object_def_multiple_methods` — two methods with varying params
+- `test_object_def_one_mixin` — `object Foo with Bar is end`
+- `test_object_def_multiple_mixins` — `with A, B, C` plus method
+
+**Object definition error tests (2):**
+- `test_object_def_non_ident_name` — `object 42 is end` fails
+- `test_object_def_non_fn_body` — `object Foo is 42 end` fails
+
+**Object definition completeness tests (5):**
+- `test_object_def_incomplete_eof` — `object Foo` incomplete
+- `test_object_def_incomplete_no_end` — `object Foo is` incomplete
+- `test_object_def_incomplete_no_outer_end` — method but no outer `end` incomplete
+- `test_object_def_complete` — complete object is complete
+- `test_object_def_complete_with_method` — complete object with method is complete
+
+**New expression success tests (4):**
+- `test_new_no_args` — `new Foo()`
+- `test_new_one_arg` — `new Foo(1)`
+- `test_new_multi_args` — `new Foo(1, "x")`
+- `test_new_expr_arg` — `new Foo(1 + 2)`
+
+**New expression error tests (1):**
+- `test_new_missing_name` — `new 42()` fails
+
+**Reserved keyword tests (2):**
+- `test_object_keyword_reserved` — `my object = 1` fails
+- `test_new_keyword_reserved` — `my new = 1` fails
+
+All 19 tests fail as expected (14 failures from `make test`; some already pass because `new` without a recognized keyword just fails parsing naturally). Commit: `0058b31`.
