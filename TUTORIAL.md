@@ -1757,3 +1757,89 @@ cutlet repl --connect             # connect to a running server
 cutlet repl --listen :9000        # listen on custom port
 cutlet repl --connect :9000       # connect to custom port
 ```
+
+## 19. Objects and types (planned)
+
+Cutlet has syntax for defining object types and creating instances. The parser
+recognizes these constructs, but the compiler and VM do not support them yet.
+This section documents the planned syntax so you know what is coming.
+
+> **Status:** Parser-only. Attempting to run code with `object` or `new` will
+> produce a compile error. Full runtime support is tracked in a separate task.
+
+### Defining an object type
+
+Use `object...end` to define a named type with methods:
+
+```cutlet
+object Dog is
+  fn speak(self) is
+    "woof!"
+  end
+
+  fn name(self) is
+    self.name
+  end
+end
+```
+
+- The name after `object` must be an identifier (e.g., `Dog`, `Point`).
+- The body contains zero or more `fn` definitions. Each method must be named.
+- Methods conventionally take `self` as the first parameter (but `self` is not
+  a keyword -- it is an ordinary identifier).
+
+An empty object type is valid:
+
+```cutlet
+object Empty is end
+```
+
+### Mixins (planned)
+
+Object types can declare mixins with the `with` keyword:
+
+```cutlet
+object Dog with Speakable, Walkable is
+  fn speak(self) is "woof!" end
+  fn walk(self) is "trot trot" end
+end
+```
+
+Mixin names are identifiers listed after `with`, separated by commas, before
+the `is` keyword. Multiple mixins are supported. Mixin resolution semantics
+will be defined when runtime support is added.
+
+### Creating instances
+
+Use `new` to create an instance of a type:
+
+```cutlet
+new Dog()
+new Point(3, 4)
+new Foo(1 + 2, "hello")
+```
+
+`new` takes a type name and parenthesized arguments (which can be any
+expression). Zero arguments are allowed: `new Foo()`.
+
+### Reserved keywords
+
+`object`, `new`, and `with` are reserved keywords. They cannot be used as
+variable names:
+
+```cutlet
+# my object = 1   # => ERR parse error
+# my new = 1      # => ERR parse error
+# my with = 1     # => ERR parse error
+```
+
+### REPL support
+
+The REPL recognizes incomplete `object...end` blocks and prompts for
+continuation input (the `...` prompt), just like `if...end` and `while...end`.
+
+### What is next
+
+A future task will add compiler and VM support so that `object` definitions
+create runtime type values, `new` constructs instances, and method dispatch
+works through dot-call syntax (`dog.speak()`).

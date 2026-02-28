@@ -437,3 +437,29 @@ Implemented `new` expression parsing in `src/parser.c`:
 - `AST_NEW` uses `value` and `children`, both of which are handled by the generic `ast_free()` logic — no type-specific branch needed.
 
 **Test results:** 353/353 parser tests pass. All 7 new-expression tests pass (4 success, 1 error, 2 reserved keyword). All test suites pass with 0 failures. Format check passes. Commit: `5e9310f`.
+
+### Step 7: REPL completeness + memory cleanup + final verification — DONE (2026-02-28)
+
+**REPL completeness:** Already handled in Step 5. `parser_is_complete()` correctly detects:
+- `"expected 'is'"` — covers `object Foo` at EOF.
+- `"expected 'fn' or 'end' in object body"` — covers `object Foo is` at EOF.
+- `"expected 'end'"` — covers unterminated blocks with methods.
+All 5 completeness tests pass.
+
+**Memory cleanup:** Verified. `ast_free()` is generic — it unconditionally frees `value`, `params`/`param_count`, `children`/`child_count`, `left`, and `right`. Both `AST_OBJECT_DEF` (uses `value`, `params`, `children`) and `AST_NEW` (uses `value`, `children`) are properly freed with no type-specific branches needed.
+
+**Sanitizer verification:** Ran `make test-sanitize` (ASan+UBSan+LSan). All tests pass. Only pre-existing leaks in `test_chunk.c` (unrelated to this plan — `test_chunk.c` was not modified).
+
+**Tutorial update:** Added Section 19 "Objects and types (planned)" to `TUTORIAL.md` documenting:
+- `object Name is ... end` syntax with methods.
+- `with` clause for mixins.
+- `new TypeName(args)` syntax.
+- Reserved keyword status of `object`, `new`, `with`.
+- REPL continuation support for incomplete object blocks.
+- Note that these are parser-only features; runtime support is a future task.
+
+**Example file:** Skipped per plan instructions (interpreter cannot run `object`/`new` yet).
+
+**Final test results:** `make test` — all tests pass (353/353 parser, 29/29 examples, all suites). `make check` — same pre-existing lint warnings as main branch (no new warnings introduced).
+
+**All 7 steps complete.** Plan ready for `scripts/plan-done`.
