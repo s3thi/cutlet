@@ -1773,6 +1773,55 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
+        case OP_OBJECT_TYPE: {
+            /* Create an ObjObjectType from name-closure pairs on the stack.
+             * Operands: name_idx (constant pool index for type name),
+             *           method_count (number of name-closure pairs),
+             *           mixin_count (number of mixin types, must be 0). */
+            uint8_t name_idx = read_byte(frame);
+            uint8_t method_count = read_byte(frame);
+            uint8_t mixin_count = read_byte(frame);
+            (void)mixin_count; /* Ignored — must be 0 in this task. */
+
+            /* Get the type name string from the constant pool. */
+            const char *type_name =
+                frame->closure->function->chunk->constants[name_idx].string->chars;
+
+            /* Create the object type. */
+            ObjObjectType *type = obj_object_type_new(type_name);
+            if (!type) {
+                return vm_runtime_error(vm, "memory allocation failed");
+            }
+
+            /* Pop 2 * method_count values from the stack.
+             * Stack layout (bottom to top): name1, closure1, name2, closure2, ...
+             * Pop in reverse order: closure first, then name. */
+            for (int i = 0; i < method_count; i++) {
+                Value closure_val, name_val;
+                if (!vm_pop(vm, &closure_val)) {
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+                if (!vm_pop(vm, &name_val)) {
+                    value_free(&closure_val);
+                    return vm_runtime_error(vm, "stack underflow");
+                }
+
+                /* Add the method to the type's method table.
+                 * obj_object_type_set_method clones internally via obj_map_set. */
+                obj_object_type_set_method(type, name_val.string->chars, closure_val);
+
+                /* Free the originals — the method table holds clones. */
+                value_free(&name_val);
+                value_free(&closure_val);
+            }
+
+            /* Push the new object type value onto the stack. */
+            if (!vm_push(vm, make_object_type(type))) {
+                return vm_runtime_error(vm, "stack overflow");
+            }
+            break;
+        }
+
         case OP_INDEX_GET: {
             /* Read container[index]: pop index, pop container, push element.
              * Supports arrays and maps:
