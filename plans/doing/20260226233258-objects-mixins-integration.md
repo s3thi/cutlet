@@ -298,7 +298,7 @@ Run `make test && make check && make test-examples`. All tests pass.
 - [x] **Step 2**: Update compiler for mixins — Modified `compile_object_def()` in `src/compiler.c` to emit `OP_GET_GLOBAL` for each mixin name before method pairs, and replaced hardcoded mixin_count=0 with `node->param_count`. Same 6 mixin tests still fail (VM not updated yet). Committed `92945fe`.
 - [x] **Step 3**: Implement mixin composition in VM — Reworked `OP_OBJECT_TYPE` handler in `src/vm.c` to pop method pairs and mixin types into temp buffers, apply mixin methods in forward order, then apply own methods last. All 10 mixin tests pass. Committed `9389893`.
 - [x] **Step 4**: Update native functions for new types — Added `type()` native function returning type names ("object_type" for types, user-defined name like "Foo" for instances). Updated `value_type_name()` for VAL_OBJECT_TYPE/VAL_INSTANCE. Extended `keys()`, `len()`, `has_key()` to handle VAL_INSTANCE (has_key checks both data and methods, consistent with OP_IN). str() and say() already worked via value_format(). 17 tests added, all pass.
-- [ ] **Step 5**: CLI integration tests
+- [x] **Step 5**: CLI integration tests — Added 6 end-to-end tests in `tests/test_cli.sh`: basic object method call, object with init, mixin composition, --ast shows OBJECT_DEF/NEW, --bytecode shows OP_OBJECT_TYPE/OP_NEW, error case for `new 42()`. All 168 CLI tests pass. Committed `9bb96d9`.
 - [ ] **Step 6**: Example program
 - [ ] **Step 7**: Final verification and edge cases
 
