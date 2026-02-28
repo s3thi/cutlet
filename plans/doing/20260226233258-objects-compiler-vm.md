@@ -451,6 +451,26 @@ Added `OP_OBJECT_TYPE` case in the `vm_run()` dispatch loop in `vm.c`:
 
 All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "unknown opcode 49" (`OP_NEW` not handled by VM yet — that's Step 7). `make format-check` passes. No clang-tidy warnings in `vm.c`.
 
+### Step 7: VM — OP_NEW handler — DONE (2026-02-28)
+
+Added `OP_NEW` case in the `vm_run()` dispatch loop in `vm.c`:
+1. Reads 1 operand byte: `argc` (number of explicit arguments, not counting self).
+2. Reads the type value from `stack_top[-(int)argc - 1]`. Validates it's `VAL_OBJECT_TYPE`.
+3. Creates `ObjInstance` via `obj_instance_new(type->object_type)`.
+4. Looks up `init` via `obj_object_type_get_method(type->object_type, "init")`.
+5. **If init exists:**
+   - Verifies arity: `init_closure->function->arity` must equal `argc + 1` (self + explicit args).
+   - Saves argc arguments into temporary buffer, pops them from the stack.
+   - Pops the type value from the stack.
+   - Clones the init method (must be VAL_CLOSURE).
+   - Pushes init closure (callee, slots[0]), instance (self, slots[1]), and saved args.
+   - Pushes a new CallFrame with `is_initializer = true`.
+   - Breaks to let execution continue inside init().
+6. **If init doesn't exist and argc > 0:** Runtime error with type name and arg count.
+7. **If init doesn't exist and argc == 0:** Pops the type, pushes the instance.
+
+All 5 error case tests pass (new on non-type, arity mismatches, no init with args). The 13 remaining object system test failures all require instance field access (Step 8: OP_INDEX_GET/OP_INDEX_SET/OP_IN on VAL_INSTANCE). All 566 pre-existing tests continue to pass. `make format-check` passes. No clang-tidy warnings in `vm.c`.
+
 ---
 
 End of plan.
