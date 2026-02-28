@@ -12,25 +12,25 @@ Add compiler and VM support for object definitions and instance creation. After 
 
 ## Acceptance criteria
 
-- [ ] `OP_OBJECT_TYPE` opcode: creates `ObjObjectType` from name-closure pairs on the stack.
-- [ ] `OP_NEW` opcode: creates `ObjInstance`, calls `init` if defined, returns the instance.
-- [ ] `CallFrame` has an `is_initializer` field; `OP_RETURN` returns the instance (not init's return value) for initializer frames.
-- [ ] `compile_object_def()` emits method closures + `OP_OBJECT_TYPE` + `OP_DEFINE_GLOBAL`.
-- [ ] `compile_new()` emits `OP_GET_GLOBAL` + args + `OP_NEW`.
-- [ ] `OP_INDEX_GET` on `VAL_INSTANCE`: checks data map first, then type's method table, then returns `nothing`.
-- [ ] `OP_INDEX_SET` on `VAL_INSTANCE`: writes to the instance data map.
-- [ ] `OP_IN` on `VAL_INSTANCE`: checks both data map and method table.
-- [ ] Instance creation works (empty data map + type reference).
-- [ ] `init` is called automatically by `new` with correct arity.
-- [ ] `init`'s return value is discarded; `new` always returns the instance.
-- [ ] Methods can access and modify `self` fields via dot access.
-- [ ] Methods can call other methods on `self`.
-- [ ] Missing field access returns `nothing`.
-- [ ] Dot assignment creates new fields on the instance.
-- [ ] `new` on a non-type value produces a runtime error.
-- [ ] Arity mismatch with `init` produces a runtime error.
-- [ ] `new Name(args)` with no `init` and args > 0 produces a runtime error.
-- [ ] `make test && make check` pass.
+- [x] `OP_OBJECT_TYPE` opcode: creates `ObjObjectType` from name-closure pairs on the stack.
+- [x] `OP_NEW` opcode: creates `ObjInstance`, calls `init` if defined, returns the instance.
+- [x] `CallFrame` has an `is_initializer` field; `OP_RETURN` returns the instance (not init's return value) for initializer frames.
+- [x] `compile_object_def()` emits method closures + `OP_OBJECT_TYPE` + `OP_DEFINE_GLOBAL`.
+- [x] `compile_new()` emits `OP_GET_GLOBAL` + args + `OP_NEW`.
+- [x] `OP_INDEX_GET` on `VAL_INSTANCE`: checks data map first, then type's method table, then returns `nothing`.
+- [x] `OP_INDEX_SET` on `VAL_INSTANCE`: writes to the instance data map.
+- [x] `OP_IN` on `VAL_INSTANCE`: checks both data map and method table.
+- [x] Instance creation works (empty data map + type reference).
+- [x] `init` is called automatically by `new` with correct arity.
+- [x] `init`'s return value is discarded; `new` always returns the instance.
+- [x] Methods can access and modify `self` fields via dot access.
+- [x] Methods can call other methods on `self`.
+- [x] Missing field access returns `nothing`.
+- [x] Dot assignment creates new fields on the instance.
+- [x] `new` on a non-type value produces a runtime error.
+- [x] Arity mismatch with `init` produces a runtime error.
+- [x] `new Name(args)` with no `init` and args > 0 produces a runtime error.
+- [x] `make test && make check` pass.
 
 ## Dependencies
 
@@ -470,6 +470,36 @@ Added `OP_NEW` case in the `vm_run()` dispatch loop in `vm.c`:
 7. **If init doesn't exist and argc == 0:** Pops the type, pushes the instance.
 
 All 5 error case tests pass (new on non-type, arity mismatches, no init with args). The 13 remaining object system test failures all require instance field access (Step 8: OP_INDEX_GET/OP_INDEX_SET/OP_IN on VAL_INSTANCE). All 566 pre-existing tests continue to pass. `make format-check` passes. No clang-tidy warnings in `vm.c`.
+
+### Step 8: VM — Instance field access — DONE (2026-02-28)
+
+Extended three existing opcode handlers in `vm.c` to support `VAL_INSTANCE`:
+
+**OP_INDEX_GET:** Added `VAL_INSTANCE` branch between the `VAL_MAP` and `VAL_ARRAY` branches. Checks the instance's `data` map via `obj_map_get()` first; if not found and the index is a `VAL_STRING`, checks the type's method table via `obj_object_type_get_method()`; otherwise returns `nothing`.
+
+**OP_INDEX_SET:** Added `VAL_INSTANCE` branch between the `VAL_MAP` and `VAL_ARRAY` branches. Writes to the instance's `data` map via `obj_map_set()`, following the same result/cleanup pattern as the `VAL_MAP` branch.
+
+**OP_IN:** Added `case VAL_INSTANCE:` in the switch statement. Checks `obj_map_has()` on the instance's data map; if not found and the key is `VAL_STRING`, checks `obj_object_type_get_method()` on the type's method table.
+
+All 585 tests pass (584 test cases + 30 example tests including the new `objects` example). `make format-check` passes. No clang-tidy warnings in `vm.c`.
+
+Autonomous decisions:
+- Fixed the `test_obj_init_two_args` test which had a pre-existing parser issue: the multi-line init body with newline-separated statements needed proper multi-line function syntax (newline after `is`, explicit `end`). Changed from single-line-style to multi-line-style function body.
+- Updated TUTORIAL.md section 19 from "planned" to full documentation covering object definitions, `new`, `init`, methods, field access, bracket access, `in` operator, multiple instances, and error cases.
+- Added `examples/objects.cutlet` with `say()` output and generated `examples/objects.expected`.
+
+### Summary — ALL STEPS COMPLETE
+
+The object system compiler and VM support is fully implemented:
+
+1. **Step 1:** 24 VM tests covering object definitions, instance creation, init, methods, field access, bracket access, `in` operator, error cases, and instance independence.
+2. **Step 2:** `OP_OBJECT_TYPE` (3 operands) and `OP_NEW` (1 operand) opcodes with disassembly.
+3. **Step 3:** `is_initializer` field on `CallFrame` with `OP_RETURN` modification to return the instance from init frames.
+4. **Step 4:** `compile_object_def()` emitting method closures + `OP_OBJECT_TYPE` + `OP_DEFINE_GLOBAL`. Refactored `compile_function()` into `compile_function_closure()` + name binding.
+5. **Step 5:** `compile_new()` emitting `OP_GET_GLOBAL` + args + `OP_NEW`.
+6. **Step 6:** `OP_OBJECT_TYPE` VM handler creating `ObjObjectType` from stack-based name-closure pairs.
+7. **Step 7:** `OP_NEW` VM handler creating instances, calling `init` if defined, handling arity checks.
+8. **Step 8:** `OP_INDEX_GET`, `OP_INDEX_SET`, and `OP_IN` extended for `VAL_INSTANCE` (data map + method table lookup).
 
 ---
 
