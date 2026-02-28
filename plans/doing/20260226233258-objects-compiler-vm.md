@@ -438,6 +438,19 @@ Added `case AST_NEW: compile_new(c, node); break;` dispatch in `compile_node()`.
 
 All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "unknown opcode 48" (OP_OBJECT_TYPE/OP_NEW not handled by VM yet — that's Steps 6-7). One test (`test_obj_init_two_args`) fails with a parse error due to a pre-existing parser issue with multi-line object method bodies containing newline-separated statements. `make format-check` passes. No clang-tidy warnings in changed files.
 
+### Step 6: VM — OP_OBJECT_TYPE handler — DONE (2026-02-28)
+
+Added `OP_OBJECT_TYPE` case in the `vm_run()` dispatch loop in `vm.c`:
+1. Reads 3 operand bytes: `name_idx`, `method_count`, `mixin_count`.
+2. Gets the type name string from the constant pool at `name_idx`.
+3. Creates `ObjObjectType` via `obj_object_type_new(type_name)`.
+4. Pops `2 * method_count` values from the stack (name-closure pairs in reverse order: closure first, then name).
+5. For each pair, calls `obj_object_type_set_method()` then frees the originals (method table clones internally via `obj_map_set`).
+6. Ignores `mixin_count` (always 0 in this task).
+7. Pushes `make_object_type(type)` onto the stack.
+
+All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "unknown opcode 49" (`OP_NEW` not handled by VM yet — that's Step 7). `make format-check` passes. No clang-tidy warnings in `vm.c`.
+
 ---
 
 End of plan.
