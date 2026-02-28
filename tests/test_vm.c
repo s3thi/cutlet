@@ -3547,6 +3547,196 @@ TEST(test_method_call_fn_from_variable) {
 }
 
 /* ============================================================
+ * Object system — object definition
+ * ============================================================ */
+
+TEST(test_obj_def_method_call) {
+    assert_vm_string("object Foo is fn greet(self) is \"hello\" end end\n"
+                     "new Foo().greet()",
+                     "hello", "object def + instance + method call");
+}
+
+/* ============================================================
+ * Object system — instance creation (no init)
+ * ============================================================ */
+
+TEST(test_obj_instance_no_init) {
+    assert_vm_not_error("object Foo is end\nmy f = new Foo()\nf", "instance creation without init");
+}
+
+TEST(test_obj_instance_no_init_method) {
+    assert_vm_string("object Foo is fn greet(self) is \"hello\" end end\n"
+                     "new Foo().greet()",
+                     "hello", "instance no init, method call");
+}
+
+/* ============================================================
+ * Object system — instance creation with init
+ * ============================================================ */
+
+TEST(test_obj_init_single_arg) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
+                     "my f = new Foo(42)\nf.x",
+                     42.0, "init with single arg");
+}
+
+TEST(test_obj_init_two_args) {
+    assert_vm_number("object Foo is fn init(self, a, b) is self.a = a\n"
+                     "self.b = b end end\n"
+                     "my f = new Foo(1, 2)\nf.a + f.b",
+                     3.0, "init with two args");
+}
+
+/* ============================================================
+ * Object system — method calls
+ * ============================================================ */
+
+TEST(test_obj_method_get) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
+                     "fn get(self) is self.x end end\n"
+                     "my f = new Foo(99)\nf.get()",
+                     99.0, "method returns field");
+}
+
+TEST(test_obj_method_with_arg) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
+                     "fn add(self, n) is self.x + n end end\n"
+                     "new Foo(10).add(5)",
+                     15.0, "method with extra arg");
+}
+
+TEST(test_obj_counter_side_effects) {
+    assert_vm_number("object Counter is fn init(self, n) is self.n = n end "
+                     "fn inc(self) is self.n = self.n + 1 end "
+                     "fn get(self) is self.n end end\n"
+                     "my c = new Counter(0)\nc.inc()\nc.inc()\nc.inc()\nc.get()",
+                     3.0, "counter with side effects");
+}
+
+/* ============================================================
+ * Object system — method calling another method on self
+ * ============================================================ */
+
+TEST(test_obj_self_method_call) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
+                     "fn double(self) is self.x * 2 end "
+                     "fn quad(self) is self.double() * 2 end end\n"
+                     "new Foo(5).quad()",
+                     20.0, "method calls another method on self");
+}
+
+/* ============================================================
+ * Object system — dot access on instances
+ * ============================================================ */
+
+TEST(test_obj_dot_field_overwrite) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
+                     "my f = new Foo(1)\nf.x = 99\nf.x",
+                     99.0, "field assignment overwrites");
+}
+
+TEST(test_obj_dot_field_no_init) {
+    assert_vm_string("object Foo is end\nmy f = new Foo()\n"
+                     "f.name = \"test\"\nf.name",
+                     "test", "set field on object without init");
+}
+
+TEST(test_obj_dot_missing_field) {
+    assert_vm_nothing("object Foo is end\nmy f = new Foo()\nf.missing",
+                      "missing field returns nothing");
+}
+
+/* ============================================================
+ * Object system — bracket access on instances
+ * ============================================================ */
+
+TEST(test_obj_bracket_get) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
+                     "my f = new Foo(42)\nf[\"x\"]",
+                     42.0, "bracket get on instance");
+}
+
+TEST(test_obj_bracket_set_dot_get) {
+    assert_vm_number("object Foo is end\nmy f = new Foo()\n"
+                     "f[\"y\"] = 7\nf.y",
+                     7.0, "bracket set, dot get");
+}
+
+/* ============================================================
+ * Object system — `in` operator on instances
+ * ============================================================ */
+
+TEST(test_obj_in_data_field) {
+    assert_vm_bool("object Foo is fn init(self, x) is self.x = x end "
+                   "fn get(self) is self.x end end\n"
+                   "my f = new Foo(1)\n\"x\" in f",
+                   true, "in operator finds data field");
+}
+
+TEST(test_obj_in_method) {
+    assert_vm_bool("object Foo is fn init(self, x) is self.x = x end "
+                   "fn get(self) is self.x end end\n"
+                   "my f = new Foo(1)\n\"get\" in f",
+                   true, "in operator finds method");
+}
+
+TEST(test_obj_in_missing) {
+    assert_vm_bool("object Foo is end\nmy f = new Foo()\n"
+                   "\"missing\" in f",
+                   false, "in operator missing key");
+}
+
+/* ============================================================
+ * Object system — init return value is discarded
+ * ============================================================ */
+
+TEST(test_obj_init_return_discarded) {
+    assert_vm_string("object Foo is fn init(self) is 42 end "
+                     "fn check(self) is \"ok\" end end\n"
+                     "new Foo().check()",
+                     "ok", "init return value discarded, new returns instance");
+}
+
+/* ============================================================
+ * Object system — error cases
+ * ============================================================ */
+
+/* new on a non-type value → runtime error.
+ * The parser requires an identifier after 'new', so we use a variable
+ * that holds a non-type value to test the VM-level error path. */
+TEST(test_obj_new_number_error) { assert_vm_error("my x = 42\nnew x()", "new on number"); }
+
+TEST(test_obj_new_string_error) { assert_vm_error("my x = \"hello\"\nnew x()", "new on string"); }
+
+TEST(test_obj_init_arity_too_few) {
+    assert_vm_error("object Foo is fn init(self, x) is self.x = x end end\n"
+                    "new Foo()",
+                    "arity mismatch: too few args");
+}
+
+TEST(test_obj_init_arity_too_many) {
+    assert_vm_error("object Foo is fn init(self, x) is self.x = x end end\n"
+                    "new Foo(1, 2, 3)",
+                    "arity mismatch: too many args");
+}
+
+TEST(test_obj_no_init_but_args) {
+    assert_vm_error("object Foo is end\nnew Foo(1)", "no init but args provided");
+}
+
+/* ============================================================
+ * Object system — multiple instances are independent
+ * ============================================================ */
+
+TEST(test_obj_instances_independent) {
+    assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
+                     "fn get(self) is self.x end end\n"
+                     "my a = new Foo(1)\nmy b = new Foo(2)\n"
+                     "a.get() + b.get()",
+                     3.0, "two instances are independent");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4297,6 +4487,63 @@ int main(void) {
     RUN_TEST(test_dot_then_bracket_index);
     RUN_TEST(test_chained_method_calls_returning_self);
     RUN_TEST(test_method_call_fn_from_variable);
+
+    /* ---- Object system — object definition ---- */
+    printf("\nObject system — object definition:\n");
+    RUN_TEST(test_obj_def_method_call);
+
+    /* ---- Object system — instance creation (no init) ---- */
+    printf("\nObject system — instance creation (no init):\n");
+    RUN_TEST(test_obj_instance_no_init);
+    RUN_TEST(test_obj_instance_no_init_method);
+
+    /* ---- Object system — instance creation with init ---- */
+    printf("\nObject system — instance creation with init:\n");
+    RUN_TEST(test_obj_init_single_arg);
+    RUN_TEST(test_obj_init_two_args);
+
+    /* ---- Object system — method calls ---- */
+    printf("\nObject system — method calls:\n");
+    RUN_TEST(test_obj_method_get);
+    RUN_TEST(test_obj_method_with_arg);
+    RUN_TEST(test_obj_counter_side_effects);
+
+    /* ---- Object system — method calling another method on self ---- */
+    printf("\nObject system — self method calls:\n");
+    RUN_TEST(test_obj_self_method_call);
+
+    /* ---- Object system — dot access on instances ---- */
+    printf("\nObject system — dot access on instances:\n");
+    RUN_TEST(test_obj_dot_field_overwrite);
+    RUN_TEST(test_obj_dot_field_no_init);
+    RUN_TEST(test_obj_dot_missing_field);
+
+    /* ---- Object system — bracket access on instances ---- */
+    printf("\nObject system — bracket access on instances:\n");
+    RUN_TEST(test_obj_bracket_get);
+    RUN_TEST(test_obj_bracket_set_dot_get);
+
+    /* ---- Object system — `in` operator on instances ---- */
+    printf("\nObject system — `in` operator on instances:\n");
+    RUN_TEST(test_obj_in_data_field);
+    RUN_TEST(test_obj_in_method);
+    RUN_TEST(test_obj_in_missing);
+
+    /* ---- Object system — init return value discarded ---- */
+    printf("\nObject system — init return value discarded:\n");
+    RUN_TEST(test_obj_init_return_discarded);
+
+    /* ---- Object system — error cases ---- */
+    printf("\nObject system — error cases:\n");
+    RUN_TEST(test_obj_new_number_error);
+    RUN_TEST(test_obj_new_string_error);
+    RUN_TEST(test_obj_init_arity_too_few);
+    RUN_TEST(test_obj_init_arity_too_many);
+    RUN_TEST(test_obj_no_init_but_args);
+
+    /* ---- Object system — multiple instances are independent ---- */
+    printf("\nObject system — multiple instances independent:\n");
+    RUN_TEST(test_obj_instances_independent);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);
