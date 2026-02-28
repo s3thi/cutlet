@@ -388,6 +388,15 @@ All 19 non-error tests fail with "compile: unknown AST node type 24" (AST_OBJECT
 
 Autonomous decision: Changed `new 42()` and `new "hello"()` error tests to use variables (`my x = 42\nnew x()`) since the parser requires an identifier after `new`, making literal values a parse error rather than a runtime error. Using variables ensures these tests will exercise the VM runtime error path once the compiler is implemented.
 
+### Step 2: Add opcodes — DONE (2026-02-28)
+
+Added `OP_OBJECT_TYPE` and `OP_NEW` to the `OpCode` enum in `chunk.h` with documentation comments. Added corresponding entries in `opcode_name()` and disassembly support in `disassemble_instruction_to_buf()` in `chunk.c`.
+
+- `OP_OBJECT_TYPE`: 3 operand bytes (name constant index, method count, mixin count). Disassembly shows the type name from the constant pool plus method and mixin counts.
+- `OP_NEW`: 1 operand byte (argc). Disassembly shows the argument count.
+
+All 565 pre-existing tests pass. The 19 new VM tests from Step 1 still fail as expected (compiler doesn't handle AST_OBJECT_DEF yet). `make format-check` passes. Pre-existing clang-tidy warnings remain (all in unrelated files).
+
 ---
 
 End of plan.
