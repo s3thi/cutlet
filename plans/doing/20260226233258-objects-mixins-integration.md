@@ -297,7 +297,7 @@ Run `make test && make check && make test-examples`. All tests pass.
 - [x] **Step 1**: Write mixin VM tests — 10 tests added in `tests/test_vm.c`. 6 fail as expected (mixin copying not implemented). 4 pass (test own-method behavior that already works). Committed `7f67ebb`.
 - [x] **Step 2**: Update compiler for mixins — Modified `compile_object_def()` in `src/compiler.c` to emit `OP_GET_GLOBAL` for each mixin name before method pairs, and replaced hardcoded mixin_count=0 with `node->param_count`. Same 6 mixin tests still fail (VM not updated yet). Committed `92945fe`.
 - [x] **Step 3**: Implement mixin composition in VM — Reworked `OP_OBJECT_TYPE` handler in `src/vm.c` to pop method pairs and mixin types into temp buffers, apply mixin methods in forward order, then apply own methods last. All 10 mixin tests pass. Committed `9389893`.
-- [ ] **Step 4**: Update native functions for new types
+- [x] **Step 4**: Update native functions for new types — Added `type()` native function returning type names ("object_type" for types, user-defined name like "Foo" for instances). Updated `value_type_name()` for VAL_OBJECT_TYPE/VAL_INSTANCE. Extended `keys()`, `len()`, `has_key()` to handle VAL_INSTANCE (has_key checks both data and methods, consistent with OP_IN). str() and say() already worked via value_format(). 17 tests added, all pass.
 - [ ] **Step 5**: CLI integration tests
 - [ ] **Step 6**: Example program
 - [ ] **Step 7**: Final verification and edge cases
