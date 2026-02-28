@@ -295,7 +295,7 @@ Run `make test && make check && make test-examples`. All tests pass.
 ## Progress
 
 - [x] **Step 1**: Write mixin VM tests — 10 tests added in `tests/test_vm.c`. 6 fail as expected (mixin copying not implemented). 4 pass (test own-method behavior that already works). Committed `7f67ebb`.
-- [ ] **Step 2**: Update compiler for mixins
+- [x] **Step 2**: Update compiler for mixins — Modified `compile_object_def()` in `src/compiler.c` to emit `OP_GET_GLOBAL` for each mixin name before method pairs, and replaced hardcoded mixin_count=0 with `node->param_count`. Same 6 mixin tests still fail (VM not updated yet). Committed `92945fe`.
 - [ ] **Step 3**: Implement mixin composition in VM
 - [ ] **Step 4**: Update native functions for new types
 - [ ] **Step 5**: CLI integration tests
