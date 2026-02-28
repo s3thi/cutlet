@@ -363,3 +363,23 @@ Implemented all ObjObjectType functionality in `src/value.c`:
 - Used `gc_free_object()` to properly unlink the ObjMap from the GC's object list before freeing, since the ObjMap is GC-allocated but lifetime-managed by the refcount-managed ObjObjectType.
 
 **Test results:** 341/353 pass (same 12 parser failures from Steps 5-7). All value, compiler, VM, GC, tokenizer, chunk tests pass. Format check passes. Commit: `11004b3`.
+
+### Step 4: Implement ObjInstance — DONE (2026-02-28)
+
+Implemented all ObjInstance functionality in `src/value.c`:
+
+**Allocator and constructor:**
+- `obj_instance_new(type)`: malloc + refcount=1 + type refcount bump + obj_map_new() for data. Null check on type, cleanup on allocation failure (undo refcount bump).
+- `make_instance(inst)`: returns Value with type=VAL_INSTANCE, instance=inst.
+
+**Lifecycle functions:**
+- `value_free`: VAL_INSTANCE decrements refcount; if 0, frees data map via free_owned_map, decrements type->refcount (frees type via free_object_type if last ref), frees the ObjInstance struct.
+- `value_clone`: VAL_INSTANCE increments refcount (shared ownership).
+- `value_format`: VAL_INSTANCE returns `<Name instance>` where Name is inst->type->name.
+- `value_equal`: VAL_INSTANCE uses pointer equality (two different instances are never equal).
+- `is_truthy`: VAL_INSTANCE always truthy.
+
+**Helper extracted:**
+- `free_object_type(ObjObjectType *t)`: freed from the inlined code in VAL_OBJECT_TYPE's value_free path. Now shared by both VAL_OBJECT_TYPE and VAL_INSTANCE (when instance's type ref is the last one).
+
+**Test results:** 341/353 pass (same 12 parser failures from Steps 5-7). All value, compiler, VM, GC, tokenizer, chunk tests pass. Format check passes. Commit: `c39cf5e`.
