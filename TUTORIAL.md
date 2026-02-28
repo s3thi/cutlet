@@ -1964,20 +1964,113 @@ Arity mismatches with `init` produce runtime errors:
 # new Foo(1, 2, 3)  # => error: init expects 1 argument, got 3
 ```
 
-### Mixins (planned)
+### Mixins
 
-Object types can declare mixins with the `with` keyword:
+Object types can inherit methods from other object types using the `with`
+keyword. This is Cutlet's composition mechanism -- it copies methods from one
+or more source types into the new type at definition time.
+
+Basic mixin -- inherit a method from another type:
 
 ```cutlet
-object Dog with Speakable, Walkable is
-  fn speak(self) is "woof!" end
-  fn walk(self) is "trot trot" end
+object Greeter is
+  fn greet(self) is "hi" end
 end
+
+object Dog with Greeter is
+  fn bark(self) is "woof!" end
+end
+
+my d = new Dog()
+say(d.greet())    # prints: hi    (inherited from Greeter)
+say(d.bark())     # prints: woof! (own method)
 ```
 
-Mixin names are identifiers listed after `with`, separated by commas, before
-the `is` keyword. Multiple mixins are supported. Mixin resolution semantics
-will be defined when mixin support is added.
+Multiple mixins -- list them separated by commas after `with`:
+
+```cutlet
+object A is fn a(self) is "a" end end
+object B is fn b(self) is "b" end end
+
+object C with A, B is end
+
+my c = new C()
+say(c.a())    # prints: a
+say(c.b())    # prints: b
+```
+
+Own methods win over mixin methods. If both the mixin and the object define
+the same method name, the object's own definition takes precedence:
+
+```cutlet
+object Base is fn name(self) is "base" end end
+object Child with Base is fn name(self) is "child" end end
+
+say(new Child().name())    # prints: child (own method wins)
+```
+
+When multiple mixins define the same method, the later mixin wins:
+
+```cutlet
+object X is fn who(self) is "X" end end
+object Y is fn who(self) is "Y" end end
+object Z with X, Y is end
+
+say(new Z().who())    # prints: Y (later mixin wins)
+```
+
+Mixins are transitive -- if B mixes in A, and C mixes in B, then C gets
+both A's and B's methods:
+
+```cutlet
+object A is fn a(self) is "a" end end
+object B with A is fn b(self) is "b" end end
+object C with B is end
+
+my c = new C()
+say(c.a())    # prints: a (inherited transitively via B)
+say(c.b())    # prints: b
+```
+
+An `init` method can be inherited from a mixin:
+
+```cutlet
+object Initable is
+  fn init(self, n) is self.n = n end
+end
+
+object Foo with Initable is
+  fn get(self) is self.n end
+end
+
+say(new Foo(42).get())    # prints: 42
+```
+
+An empty object body with a mixin still inherits all methods:
+
+```cutlet
+object A is fn x(self) is 1 end end
+object B with A is end
+
+say(new B().x())    # prints: 1
+```
+
+Using a non-object-type value as a mixin is a runtime error:
+
+```cutlet
+# my x = 42
+# object Foo with x is end   # => ERR mixin must be an object type
+```
+
+### Truthiness
+
+Both object types and instances are truthy values:
+
+```cutlet
+object Foo is end
+if Foo then "yes" else "no" end         # => yes (type is truthy)
+if new Foo() then "yes" else "no" end   # => yes (instance is truthy)
+```
 
 ### Reserved keywords
 

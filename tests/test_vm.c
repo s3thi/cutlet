@@ -3861,6 +3861,36 @@ TEST(test_mixin_non_object_type_error) {
 }
 
 /* ============================================================
+ * Object system — edge cases: empty object with mixin
+ * ============================================================ */
+
+/* An empty object body that mixes in another object still inherits methods. */
+TEST(test_edge_empty_object_with_mixin) {
+    assert_vm_number("object A is fn x(self) is 1 end end\n"
+                     "object B with A is end\n"
+                     "new B().x()",
+                     1.0, "empty object with mixin inherits method");
+}
+
+/* ============================================================
+ * Object system — edge cases: truthiness
+ * ============================================================ */
+
+/* An instance value is truthy in a conditional. */
+TEST(test_edge_instance_is_truthy) {
+    assert_vm_string("object Foo is end\n"
+                     "if new Foo() then \"yes\" else \"no\" end",
+                     "yes", "instance is truthy");
+}
+
+/* An object type value is truthy in a conditional. */
+TEST(test_edge_object_type_is_truthy) {
+    assert_vm_string("object Foo is end\n"
+                     "if Foo then \"yes\" else \"no\" end",
+                     "yes", "object type is truthy");
+}
+
+/* ============================================================
  * Object system — native function support (type, str, keys, len, has_key, say)
  * ============================================================ */
 
@@ -4830,6 +4860,12 @@ int main(void) {
     /* ---- Object system — mixins: error cases ---- */
     printf("\nObject system — mixins (errors):\n");
     RUN_TEST(test_mixin_non_object_type_error);
+
+    /* ---- Object system — edge cases ---- */
+    printf("\nObject system — edge cases:\n");
+    RUN_TEST(test_edge_empty_object_with_mixin);
+    RUN_TEST(test_edge_instance_is_truthy);
+    RUN_TEST(test_edge_object_type_is_truthy);
 
     /* ---- Object system — native function support ---- */
     printf("\nObject system — native functions (type, str, keys, len, has_key, say):\n");
