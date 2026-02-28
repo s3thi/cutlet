@@ -367,4 +367,27 @@ Run `make test && make check`. All VM tests should now pass.
 
 ---
 
+## Progress
+
+### Step 1: Write VM tests — DONE (2026-02-28)
+
+Added 24 tests in `tests/test_vm.c` covering:
+- Object definition + method call (1 test)
+- Instance creation without init (2 tests)
+- Instance creation with init (2 tests)
+- Method calls including side effects (3 tests)
+- Method calling another method on self (1 test)
+- Dot access on instances: overwrite, no-init field, missing field (3 tests)
+- Bracket access on instances: get and set (2 tests)
+- `in` operator on instances: data field, method, missing (3 tests)
+- Init return value discarded (1 test)
+- Error cases: new on non-type, arity mismatches, no init with args (5 tests)
+- Multiple instances are independent (1 test)
+
+All 19 non-error tests fail with "compile: unknown AST node type 24" (AST_OBJECT_DEF not handled by compiler yet). The 5 error-case tests pass because they produce parse/compile errors. All 560 pre-existing VM tests continue to pass. `make format-check` passes.
+
+Autonomous decision: Changed `new 42()` and `new "hello"()` error tests to use variables (`my x = 42\nnew x()`) since the parser requires an identifier after `new`, making literal values a parse error rather than a runtime error. Using variables ensures these tests will exercise the VM runtime error path once the compiler is implemented.
+
+---
+
 End of plan.
