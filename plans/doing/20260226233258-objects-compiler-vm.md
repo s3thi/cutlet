@@ -408,6 +408,24 @@ Modified the `OP_RETURN` handler: after popping the return value, if `frame->is_
 
 All 566 tests pass (same as before — 19 object system tests still fail as expected with "compile: unknown AST node type 24"). `make format-check` passes. No new clang-tidy warnings in changed files.
 
+### Step 4: Compile object definitions — DONE (2026-02-28)
+
+Refactored `compile_function()` into two parts:
+- `compile_function_closure()` — compiles the function body and emits `OP_CLOSURE` (plus upvalue descriptors). Does NOT bind the function's name as a variable.
+- `compile_function()` — calls `compile_function_closure()` then handles name binding (global or local).
+
+Added `compile_object_def()` which:
+1. Adds the type name to the constant pool.
+2. For each method: emits `OP_CONSTANT` (method name string), then calls `compile_function_closure()` which emits `OP_CLOSURE` (method body). This pushes name-closure pairs onto the stack without polluting the global namespace.
+3. Emits `OP_OBJECT_TYPE` with 3 operand bytes (name index, method count, mixin count=0).
+4. Emits `OP_DEFINE_GLOBAL` to store the type as a global variable.
+
+Added `case AST_OBJECT_DEF: compile_object_def(c, node); break;` dispatch in `compile_node()`.
+
+Autonomous decision: Refactored `compile_function()` by extracting the closure-emission logic into `compile_function_closure()`. This avoids polluting the global namespace with method names (which would happen if `compile_function()` were called directly for methods, since it also emits `OP_DEFINE_GLOBAL` for named functions in script context, or registers a local + emits `OP_GET_LOCAL` in function context).
+
+All 566 pre-existing tests pass. The 19 object system tests still fail as expected, now with "compile: unknown AST node type 25" (AST_NEW not handled yet — that's Step 5). `make format-check` passes. No clang-tidy warnings in changed files.
+
 ---
 
 End of plan.
