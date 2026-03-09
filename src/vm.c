@@ -107,7 +107,7 @@ static Value vm_runtime_error(VM *vm, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap); // NOLINT(clang-analyzer-valist.Uninitialized)
+    va_end(ap); // NOLINT(clang-analyzer-security.VAList)
     vm_free_stack(vm);
 
     if (line > 0) {

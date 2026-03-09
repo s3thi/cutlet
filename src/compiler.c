@@ -91,7 +91,7 @@ static void compiler_error(Compiler *c, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(c->err->message, sizeof(c->err->message), fmt, ap);
-    va_end(ap); // NOLINT(clang-analyzer-valist.Uninitialized)
+    va_end(ap); // NOLINT(clang-analyzer-security.VAList)
 }
 
 /* Duplicate a string, setting compiler error on failure. Returns NULL on error. */

@@ -62,7 +62,7 @@ static void parser_error(Parser *p, size_t line, size_t col, const char *fmt, ..
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(p->err->message, sizeof(p->err->message), fmt, ap);
-    va_end(ap); // NOLINT(clang-analyzer-valist.Uninitialized)
+    va_end(ap); // NOLINT(clang-analyzer-security.VAList)
 }
 
 /*
