@@ -11,8 +11,8 @@ object Dog is
   end
 end
 
-# Create an instance with new
-my dog = new Dog("Rex")
+# Create an instance with make
+my dog = make Dog("Rex")
 say(dog.speak())          # Rex says woof!
 
 # Access fields set by init
@@ -50,7 +50,7 @@ object Counter is
   end
 end
 
-my c = new Counter(0)
+my c = make Counter(0)
 c.inc()
 c.inc()
 c.inc()
@@ -71,18 +71,18 @@ object Calc is
   end
 end
 
-say(new Calc(5).quad())   # 20
+say(make Calc(5).quad())   # 20
 
 # Each instance is independent
-my a = new Counter(10)
-my b = new Counter(20)
+my a = make Counter(10)
+my b = make Counter(20)
 a.inc()
 say(a.get())              # 11
 say(b.get())              # 20
 
 # Empty types work too
 object Tag is end
-my t = new Tag()
+my t = make Tag()
 t.label = "important"
 say(t.label)              # important
 
@@ -116,7 +116,7 @@ object Cat with Greeter is
 end
 
 # Create and use an instance — both own methods and mixin methods work
-my cat = new Cat("Whiskers", "Siamese")
+my cat = make Cat("Whiskers", "Siamese")
 cat.describe()            # Whiskers is a Siamese
 cat.greet("World")        # Hello, World! I'm a Cat.
 
@@ -137,7 +137,7 @@ end
 
 object C with A, B is end
 
-my obj = new C()
+my obj = make C()
 say(obj.x())              # from B (later mixin wins)
 say(obj.a-only())         # a
 say(obj.b-only())         # b
@@ -147,4 +147,4 @@ object D with A is
   fn x(self) is "from D" end
 end
 
-say(new D().x())          # from D
+say(make D().x())          # from D

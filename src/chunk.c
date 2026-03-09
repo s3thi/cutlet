@@ -199,8 +199,8 @@ const char *opcode_name(OpCode op) {
         return "OP_OR";
     case OP_OBJECT_TYPE:
         return "OP_OBJECT_TYPE";
-    case OP_NEW:
-        return "OP_NEW";
+    case OP_MAKE:
+        return "OP_MAKE";
     case OP_RETURN:
         return "OP_RETURN";
     default:
@@ -463,10 +463,10 @@ static size_t disassemble_instruction_to_buf(DynBuf *b, const Chunk *chunk, size
         return offset + 4;
     }
 
-    /* OP_NEW: 1-byte argc (number of explicit arguments, not counting self). */
-    case OP_NEW: {
+    /* OP_MAKE: 1-byte argc (number of explicit arguments, not counting self). */
+    case OP_MAKE: {
         uint8_t argc = chunk->code[offset + 1];
-        dynbuf_printf(b, "%-20s argc=%d\n", opcode_name(OP_NEW), argc);
+        dynbuf_printf(b, "%-20s argc=%d\n", opcode_name(OP_MAKE), argc);
         return offset + 2;
     }
 

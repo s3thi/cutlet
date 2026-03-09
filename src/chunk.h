@@ -16,7 +16,7 @@
  * - OP_GET_UPVALUE, OP_SET_UPVALUE have a 1-byte upvalue index.
  * - OP_OBJECT_TYPE has 3 operand bytes: name constant index, method count,
  *   mixin count.
- * - OP_NEW has a 1-byte argc operand (explicit args, not counting self).
+ * - OP_MAKE has a 1-byte argc operand (explicit args, not counting self).
  */
 
 #ifndef CUTLET_CHUNK_H
@@ -127,7 +127,7 @@ typedef enum {
     /* Object system */
     OP_OBJECT_TYPE, /* Create object type. 3 operands: name constant index, method count, mixin
                        count. */
-    OP_NEW,         /* Create instance. 1 operand: argc (explicit args, not counting self). */
+    OP_MAKE,        /* Create instance. 1 operand: argc (explicit args, not counting self). */
 
     /* End of program */
     OP_RETURN, /* End execution. TOS is the result. */
