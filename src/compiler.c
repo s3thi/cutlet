@@ -1261,9 +1261,9 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
 }
 
 /*
- * compile_new - compile a `new Name(args)` expression.
+ * compile_make - compile a `make Name(args)` expression.
  *
- * An AST_NEW node has:
+ * An AST_MAKE node has:
  *   value       = type name string
  *   children    = array of argument expression nodes
  *   child_count = number of arguments
@@ -1273,9 +1273,9 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
  *   compile(arg1)                   -- push each argument
  *   compile(arg2)
  *   ...
- *   OP_NEW <argc>                   -- create instance
+ *   OP_MAKE <argc>                  -- create instance
  */
-static void compile_new(Compiler *c, const AstNode *node) {
+static void compile_make(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
     /* Add the type name to the constant pool as a string constant. */
@@ -1298,8 +1298,8 @@ static void compile_new(Compiler *c, const AstNode *node) {
             return;
     }
 
-    /* Emit OP_NEW with the argument count. */
-    emit_bytes(c, OP_NEW, (uint8_t)node->child_count, line);
+    /* Emit OP_MAKE with the argument count. */
+    emit_bytes(c, OP_MAKE, (uint8_t)node->child_count, line);
 }
 
 /*
@@ -1581,8 +1581,8 @@ static void compile_node(Compiler *c, const AstNode *node) {
     case AST_OBJECT_DEF:
         compile_object_def(c, node);
         break;
-    case AST_NEW:
-        compile_new(c, node);
+    case AST_MAKE:
+        compile_make(c, node);
         break;
     default:
         compiler_error(c, "unknown AST node type %d", node->type);

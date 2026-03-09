@@ -2005,7 +2005,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
             break;
         }
 
-        case OP_NEW: {
+        case OP_MAKE: {
             /* Create an ObjInstance from the type on the stack.
              * Operand: argc (number of explicit arguments, not counting self).
              *
@@ -2021,7 +2021,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
             /* Read the type value from below the arguments. */
             Value type_val = vm->stack_top[-(int)argc - 1];
             if (type_val.type != VAL_OBJECT_TYPE) {
-                return vm_runtime_error(vm, "can only use 'new' with object types");
+                return vm_runtime_error(vm, "can only use 'make' with object types");
             }
 
             /* Create the instance. */
@@ -3405,7 +3405,7 @@ static Value vm_run(VM *vm, int base_frame_count) {
                 result = make_nothing();
             }
 
-            /* If this is an initializer frame (init() called by OP_NEW),
+            /* If this is an initializer frame (init() called by OP_MAKE),
              * discard the normal return value and use the instance (self)
              * from slots[1] instead. Clone it because the stack window
              * will be freed during frame collapse below. */

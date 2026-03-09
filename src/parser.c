@@ -356,7 +356,7 @@ static bool is_reserved_keyword(const Token *t) {
            token_is_keyword(t, "break") || token_is_keyword(t, "continue") ||
            token_is_keyword(t, "return") || token_is_keyword(t, "fn") ||
            token_is_keyword(t, "is") || token_is_keyword(t, "object") ||
-           token_is_keyword(t, "new") || token_is_keyword(t, "with");
+           token_is_keyword(t, "make") || token_is_keyword(t, "with");
 }
 
 /* ============================================================
@@ -370,7 +370,7 @@ static AstNode *parse_if(Parser *p);
 static AstNode *parse_while(Parser *p);
 static AstNode *parse_fn(Parser *p);
 static AstNode *parse_object(Parser *p);
-static AstNode *parse_new(Parser *p);
+static AstNode *parse_make(Parser *p);
 static void skip_newlines(Parser *p);
 static void free_expr_array(PtrArray *arr);
 
@@ -509,9 +509,9 @@ static AstNode *parse_atom(Parser *p) {
         return parse_object(p);
     }
 
-    /* New expression: new TypeName(args...) */
-    if (token_is_keyword(&t, "new")) {
-        return parse_new(p);
+    /* Make expression: make TypeName(args...) */
+    if (token_is_keyword(&t, "make")) {
+        return parse_make(p);
     }
 
     /* Break expression: break [value]
@@ -2732,30 +2732,30 @@ static AstNode *parse_object(Parser *p) {
 }
 
 /*
- * Parse a 'new' expression: new TypeName(arg1, arg2, ...)
+ * Parse a 'make' expression: make TypeName(arg1, arg2, ...)
  *
- * Returns an AST_NEW node with:
+ * Returns an AST_MAKE node with:
  *   value       = type name (heap-allocated)
  *   children    = argument expressions
  *   child_count = number of arguments
  *   left, right = NULL
- *   line        = source line of 'new' keyword
+ *   line        = source line of 'make' keyword
  *
  * The argument parsing follows the same pattern as AST_CALL in parse_atom().
  */
-static AstNode *parse_new(Parser *p) {
+static AstNode *parse_make(Parser *p) {
     if (p->has_error)
         return NULL;
 
-    /* Save the 'new' keyword token for line info */
+    /* Save the 'make' keyword token for line info */
     Token new_tok = p->current;
 
-    /* Consume 'new' keyword (already verified by caller) */
+    /* Consume 'make' keyword (already verified by caller) */
     advance(p);
 
     /* Expect identifier for type name */
     if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
-        parser_error(p, p->current.line, p->current.col, "expected type name after 'new'");
+        parser_error(p, p->current.line, p->current.col, "expected type name after 'make'");
         return NULL;
     }
 
@@ -2772,7 +2772,7 @@ static AstNode *parse_new(Parser *p) {
     /* Expect opening '(' */
     if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
         p->current.value[0] != '(') {
-        parser_error(p, p->current.line, p->current.col, "expected '(' after type name in 'new'");
+        parser_error(p, p->current.line, p->current.col, "expected '(' after type name in 'make'");
         free(type_name);
         return NULL;
     }
@@ -2827,14 +2827,14 @@ static AstNode *parse_new(Parser *p) {
     /* Expect closing ')' */
     if (p->current.type != TOK_OPERATOR || p->current.value_len != 1 ||
         p->current.value[0] != ')') {
-        parser_error(p, p->current.line, p->current.col, "expected ')' after arguments in 'new'");
+        parser_error(p, p->current.line, p->current.col, "expected ')' after arguments in 'make'");
         free(type_name);
         free_expr_array(&args);
         return NULL;
     }
     advance(p); /* consume ')' */
 
-    /* Build AST_NEW node */
+    /* Build AST_MAKE node */
     AstNode *node = malloc(sizeof(AstNode));
     if (!node) {
         free(type_name);
@@ -2851,7 +2851,7 @@ static AstNode *parse_new(Parser *p) {
         ptr_array_destroy(&args);
     }
 
-    node->type = AST_NEW;
+    node->type = AST_MAKE;
     node->value = type_name; /* takes ownership */
     node->left = NULL;
     node->right = NULL;
@@ -3120,8 +3120,8 @@ const char *ast_node_type_str(AstNodeType type) {
         return "METHOD_CALL";
     case AST_OBJECT_DEF:
         return "OBJECT_DEF";
-    case AST_NEW:
-        return "NEW";
+    case AST_MAKE:
+        return "MAKE";
     default:
         return "UNKNOWN";
     }
@@ -3790,16 +3790,16 @@ static char *ast_format_node(const AstNode *node) {
         return buf;
     }
 
-    /* AST_NEW: [NEW TypeName arg1 arg2 ...]
+    /* AST_MAKE: [MAKE TypeName arg1 arg2 ...]
      * value = type name, children = argument expressions.
      * Follows the same formatting pattern as AST_CALL. */
-    if (node->type == AST_NEW) {
+    if (node->type == AST_MAKE) {
         /* Format argument children */
         PtrArray arg_strs;
         if (!ptr_array_init(&arg_strs, node->child_count))
             return NULL;
 
-        /* Start with "[NEW TypeName" */
+        /* Start with "[MAKE TypeName" */
         size_t total_len = 1 + strlen(type_str) + 1 + strlen(node->value);
 
         for (size_t i = 0; i < node->child_count; i++) {

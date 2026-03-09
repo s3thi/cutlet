@@ -2967,41 +2967,41 @@ TEST(test_object_def_complete_with_method) {
  * New expression parsing tests
  * ============================================================ */
 
-/* new Foo() → no args */
-TEST(test_new_no_args) {
-    ASSERT(ast_matches("new Foo()", "AST [NEW Foo]"), "new with no args");
+/* make Foo() → no args */
+TEST(test_make_no_args) {
+    ASSERT(ast_matches("make Foo()", "AST [MAKE Foo]"), "make with no args");
     PASS();
 }
 
-/* new Foo(1) → one arg */
-TEST(test_new_one_arg) {
-    ASSERT(ast_matches("new Foo(1)", "AST [NEW Foo [NUMBER 1]]"), "new with one arg");
+/* make Foo(1) → one arg */
+TEST(test_make_one_arg) {
+    ASSERT(ast_matches("make Foo(1)", "AST [MAKE Foo [NUMBER 1]]"), "make with one arg");
     PASS();
 }
 
-/* new Foo(1, "x") → multiple args */
-TEST(test_new_multi_args) {
-    ASSERT(ast_matches("new Foo(1, \"x\")", "AST [NEW Foo [NUMBER 1] [STRING x]]"),
-           "new with multiple args");
+/* make Foo(1, "x") → multiple args */
+TEST(test_make_multi_args) {
+    ASSERT(ast_matches("make Foo(1, \"x\")", "AST [MAKE Foo [NUMBER 1] [STRING x]]"),
+           "make with multiple args");
     PASS();
 }
 
-/* new Foo(1 + 2) → expression arg */
-TEST(test_new_expr_arg) {
-    ASSERT(ast_matches("new Foo(1 + 2)", "AST [NEW Foo [BINOP + [NUMBER 1] [NUMBER 2]]]"),
-           "new with expression arg");
+/* make Foo(1 + 2) → expression arg */
+TEST(test_make_expr_arg) {
+    ASSERT(ast_matches("make Foo(1 + 2)", "AST [MAKE Foo [BINOP + [NUMBER 1] [NUMBER 2]]]"),
+           "make with expression arg");
     PASS();
 }
 
 /* ============================================================
- * New expression error tests
+ * Make expression error tests
  * ============================================================ */
 
-/* new without type name → parse error */
-TEST(test_new_missing_name) {
+/* make without type name → parse error */
+TEST(test_make_missing_name) {
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("new 42()", &node, &err), "new with non-ident name should fail");
+    ASSERT(!parser_parse("make 42()", &node, &err), "make with non-ident name should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -3015,11 +3015,11 @@ TEST(test_object_keyword_reserved) {
     PASS();
 }
 
-/* 'new' as variable name rejected */
-TEST(test_new_keyword_reserved) {
+/* 'make' as variable name rejected */
+TEST(test_make_keyword_reserved) {
     AstNode *node = NULL;
     ParseError err;
-    ASSERT(!parser_parse("my new = 1", &node, &err), "new as variable should fail");
+    ASSERT(!parser_parse("my make = 1", &node, &err), "make as variable should fail");
     ASSERT(node == NULL, "node should be NULL");
     PASS();
 }
@@ -3497,18 +3497,18 @@ int main(void) {
     RUN_TEST(test_object_def_complete);
     RUN_TEST(test_object_def_complete_with_method);
 
-    printf("\nNew expression parsing:\n");
-    RUN_TEST(test_new_no_args);
-    RUN_TEST(test_new_one_arg);
-    RUN_TEST(test_new_multi_args);
-    RUN_TEST(test_new_expr_arg);
+    printf("\nMake expression parsing:\n");
+    RUN_TEST(test_make_no_args);
+    RUN_TEST(test_make_one_arg);
+    RUN_TEST(test_make_multi_args);
+    RUN_TEST(test_make_expr_arg);
 
-    printf("\nNew expression error cases:\n");
-    RUN_TEST(test_new_missing_name);
+    printf("\nMake expression error cases:\n");
+    RUN_TEST(test_make_missing_name);
 
-    printf("\nObject/new reserved keywords:\n");
+    printf("\nObject/make reserved keywords:\n");
     RUN_TEST(test_object_keyword_reserved);
-    RUN_TEST(test_new_keyword_reserved);
+    RUN_TEST(test_make_keyword_reserved);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

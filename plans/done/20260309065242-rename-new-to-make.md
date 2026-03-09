@@ -121,3 +121,34 @@ In `TUTORIAL.md`:
 ### 9. Run `make test && make check`
 
 Verify everything passes. Fix any remaining references.
+
+## Summary
+
+Renamed the `new` keyword to `make` throughout the entire codebase. All changes
+are purely mechanical renames with no semantic changes.
+
+**Files changed:**
+- `src/parser.h` — `AST_NEW` → `AST_MAKE` in enum
+- `src/parser.c` — `parse_new()` → `parse_make()`, keyword `"new"` → `"make"`, `AST_NEW` → `AST_MAKE`, `"NEW"` → `"MAKE"` in string representations
+- `src/chunk.h` — `OP_NEW` → `OP_MAKE` in enum
+- `src/chunk.c` — `OP_NEW` → `OP_MAKE` in `opcode_name()` and disassembler
+- `src/compiler.c` — `compile_new()` → `compile_make()`, `AST_NEW` → `AST_MAKE`, `OP_NEW` → `OP_MAKE`
+- `src/vm.c` — `OP_NEW` → `OP_MAKE`, error message `'new'` → `'make'`
+- `src/vm.h` — comment update `OP_NEW` → `OP_MAKE`
+- `tests/test_parser.c` — all `new` → `make` in Cutlet source strings and test names
+- `tests/test_vm.c` — all `new` → `make` in Cutlet source strings, test names; also renamed `fn make()` → `fn create()` in closure tests (since `make` is now reserved)
+- `tests/test_cli.sh` — all `new` → `make` in Cutlet source strings and expected output
+- `examples/objects.cutlet` — all `new` → `make`
+- `TUTORIAL.md` — all `new` keyword references → `make`
+
+## Progress
+
+- [x] Step 1: Rename AST_NEW → AST_MAKE in parser.h
+- [x] Step 2: Rename OP_NEW → OP_MAKE in chunk.h/chunk.c
+- [x] Step 3: Rename parse_new → parse_make, update keyword recognition in parser.c
+- [x] Step 4: Rename compile_new → compile_make in compiler.c
+- [x] Step 5: Update OP_MAKE handler and error message in vm.c/vm.h
+- [x] Step 6: Update parser tests
+- [x] Step 7: Update VM tests (including renaming `fn make()` → `fn create()` in closure tests)
+- [x] Step 8: Update examples/objects.cutlet, TUTORIAL.md, tests/test_cli.sh
+- [x] Step 9: All tests pass, lint clean (pre-existing issues only)

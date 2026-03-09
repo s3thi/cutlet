@@ -42,7 +42,7 @@ typedef enum {
                         children=args */
     AST_OBJECT_DEF,  /* object definition: object Name [with Mixins] is methods end —
                         value=name, params=mixins, children=methods (AST_FUNCTION nodes) */
-    AST_NEW,         /* new expression: new Name(args) — value=name, children=args */
+    AST_MAKE,        /* make expression: make Name(args) — value=name, children=args */
 } AstNodeType;
 
 typedef struct AstNode {

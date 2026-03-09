@@ -1880,25 +1880,25 @@ TEST(test_upvalue_shared_between_closures) {
 /* Closure that outlives its enclosing function still works
  * because the upvalue is closed (value moved from stack to heap). */
 TEST(test_close_upvalue_outlive_creator) {
-    assert_vm_number("fn make() is\n"
+    assert_vm_number("fn create() is\n"
                      "  my x = 42\n"
                      "  fn get() is x end\n"
                      "end\n"
-                     "my g = make()\n"
+                     "my g = create()\n"
                      "g()",
                      42.0, "closure outlives creator via closed upvalue");
 }
 
 /* Counter pattern: closed upvalue retains state across calls. */
 TEST(test_close_upvalue_counter) {
-    assert_vm_number("fn make() is\n"
+    assert_vm_number("fn create() is\n"
                      "  my x = 0\n"
                      "  fn inc() is\n"
                      "    x = x + 1\n"
                      "    x\n"
                      "  end\n"
                      "end\n"
-                     "my f = make()\n"
+                     "my f = create()\n"
                      "f()\n"
                      "f()",
                      2.0, "counter pattern with closed upvalue");
@@ -1908,13 +1908,13 @@ TEST(test_close_upvalue_counter) {
  * one writes, the other reads, both see the same variable. */
 TEST(test_close_upvalue_shared) {
     assert_vm_number("my setter = nothing\n"
-                     "fn make() is\n"
+                     "fn create() is\n"
                      "  my x = 0\n"
                      "  fn set(v) is x = v end\n"
                      "  setter = set\n"
                      "  fn() is x end\n"
                      "end\n"
-                     "my getter = make()\n"
+                     "my getter = create()\n"
                      "setter(42)\n"
                      "getter()",
                      42.0, "two closures share closed upvalue");
@@ -2168,7 +2168,7 @@ TEST(test_closure_shared_capture) {
                      "  fn set(v) is val = v end\n"
                      "end\n"
                      "my setter = nothing\n"
-                     "fn make() is\n"
+                     "fn create() is\n"
                      "  my val = 0\n"
                      "  fn get() is val end\n"
                      "  fn set(v) is val = v end\n"
@@ -2243,10 +2243,10 @@ TEST(test_closure_capture_parameter) {
 
 /* Closure captures multiple parameters */
 TEST(test_closure_capture_multiple_params) {
-    assert_vm_number("fn make(a, b) is\n"
+    assert_vm_number("fn create(a, b) is\n"
                      "  fn() is a + b end\n"
                      "end\n"
-                     "my f = make(3, 7)\n"
+                     "my f = create(3, 7)\n"
                      "f()",
                      10.0, "closure captures multiple parameters");
 }
@@ -2266,7 +2266,7 @@ TEST(test_closure_with_recursion) {
 
 /* Closure + control flow: closure captures variable modified by while loop */
 TEST(test_closure_with_while_loop) {
-    assert_vm_number("fn make() is\n"
+    assert_vm_number("fn create() is\n"
                      "  my total = 0\n"
                      "  my i = 0\n"
                      "  while i < 5 do\n"
@@ -2275,7 +2275,7 @@ TEST(test_closure_with_while_loop) {
                      "  end\n"
                      "  fn() is total end\n"
                      "end\n"
-                     "my f = make()\n"
+                     "my f = create()\n"
                      "f()",
                      10.0, "closure captures variable modified by while loop (0+1+2+3+4=10)");
 }
@@ -2312,10 +2312,10 @@ TEST(test_closure_error_call_non_function) {
 
 /* Error case: arity mismatch on closure still reports function name */
 TEST(test_closure_error_arity_named) {
-    Value v = run_input("fn make() is\n"
+    Value v = run_input("fn create() is\n"
                         "  fn adder(x, y) is x + y end\n"
                         "end\n"
-                        "my f = make()\n"
+                        "my f = create()\n"
                         "f(1)",
                         &test_ctx);
     ASSERT(v.type == VAL_ERROR, "arity mismatch should error");
@@ -2329,10 +2329,10 @@ TEST(test_closure_error_arity_named) {
 
 /* Error case: arity mismatch on anonymous closure reports <fn> */
 TEST(test_closure_error_arity_anonymous) {
-    Value v = run_input("fn make() is\n"
+    Value v = run_input("fn create() is\n"
                         "  fn(x, y) is x + y end\n"
                         "end\n"
-                        "my f = make()\n"
+                        "my f = create()\n"
                         "f(1)",
                         &test_ctx);
     ASSERT(v.type == VAL_ERROR, "arity mismatch on anon closure should error");
@@ -3552,7 +3552,7 @@ TEST(test_method_call_fn_from_variable) {
 
 TEST(test_obj_def_method_call) {
     assert_vm_string("object Foo is fn greet(self) is \"hello\" end end\n"
-                     "new Foo().greet()",
+                     "make Foo().greet()",
                      "hello", "object def + instance + method call");
 }
 
@@ -3561,12 +3561,13 @@ TEST(test_obj_def_method_call) {
  * ============================================================ */
 
 TEST(test_obj_instance_no_init) {
-    assert_vm_not_error("object Foo is end\nmy f = new Foo()\nf", "instance creation without init");
+    assert_vm_not_error("object Foo is end\nmy f = make Foo()\nf",
+                        "instance creation without init");
 }
 
 TEST(test_obj_instance_no_init_method) {
     assert_vm_string("object Foo is fn greet(self) is \"hello\" end end\n"
-                     "new Foo().greet()",
+                     "make Foo().greet()",
                      "hello", "instance no init, method call");
 }
 
@@ -3576,7 +3577,7 @@ TEST(test_obj_instance_no_init_method) {
 
 TEST(test_obj_init_single_arg) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
-                     "my f = new Foo(42)\nf.x",
+                     "my f = make Foo(42)\nf.x",
                      42.0, "init with single arg");
 }
 
@@ -3587,7 +3588,7 @@ TEST(test_obj_init_two_args) {
                      "self.b = b\n"
                      "end\n"
                      "end\n"
-                     "my f = new Foo(1, 2)\nf.a + f.b",
+                     "my f = make Foo(1, 2)\nf.a + f.b",
                      3.0, "init with two args");
 }
 
@@ -3598,14 +3599,14 @@ TEST(test_obj_init_two_args) {
 TEST(test_obj_method_get) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
                      "fn get(self) is self.x end end\n"
-                     "my f = new Foo(99)\nf.get()",
+                     "my f = make Foo(99)\nf.get()",
                      99.0, "method returns field");
 }
 
 TEST(test_obj_method_with_arg) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
                      "fn add(self, n) is self.x + n end end\n"
-                     "new Foo(10).add(5)",
+                     "make Foo(10).add(5)",
                      15.0, "method with extra arg");
 }
 
@@ -3613,7 +3614,7 @@ TEST(test_obj_counter_side_effects) {
     assert_vm_number("object Counter is fn init(self, n) is self.n = n end "
                      "fn inc(self) is self.n = self.n + 1 end "
                      "fn get(self) is self.n end end\n"
-                     "my c = new Counter(0)\nc.inc()\nc.inc()\nc.inc()\nc.get()",
+                     "my c = make Counter(0)\nc.inc()\nc.inc()\nc.inc()\nc.get()",
                      3.0, "counter with side effects");
 }
 
@@ -3625,7 +3626,7 @@ TEST(test_obj_self_method_call) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
                      "fn double(self) is self.x * 2 end "
                      "fn quad(self) is self.double() * 2 end end\n"
-                     "new Foo(5).quad()",
+                     "make Foo(5).quad()",
                      20.0, "method calls another method on self");
 }
 
@@ -3635,18 +3636,18 @@ TEST(test_obj_self_method_call) {
 
 TEST(test_obj_dot_field_overwrite) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
-                     "my f = new Foo(1)\nf.x = 99\nf.x",
+                     "my f = make Foo(1)\nf.x = 99\nf.x",
                      99.0, "field assignment overwrites");
 }
 
 TEST(test_obj_dot_field_no_init) {
-    assert_vm_string("object Foo is end\nmy f = new Foo()\n"
+    assert_vm_string("object Foo is end\nmy f = make Foo()\n"
                      "f.name = \"test\"\nf.name",
                      "test", "set field on object without init");
 }
 
 TEST(test_obj_dot_missing_field) {
-    assert_vm_nothing("object Foo is end\nmy f = new Foo()\nf.missing",
+    assert_vm_nothing("object Foo is end\nmy f = make Foo()\nf.missing",
                       "missing field returns nothing");
 }
 
@@ -3656,12 +3657,12 @@ TEST(test_obj_dot_missing_field) {
 
 TEST(test_obj_bracket_get) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
-                     "my f = new Foo(42)\nf[\"x\"]",
+                     "my f = make Foo(42)\nf[\"x\"]",
                      42.0, "bracket get on instance");
 }
 
 TEST(test_obj_bracket_set_dot_get) {
-    assert_vm_number("object Foo is end\nmy f = new Foo()\n"
+    assert_vm_number("object Foo is end\nmy f = make Foo()\n"
                      "f[\"y\"] = 7\nf.y",
                      7.0, "bracket set, dot get");
 }
@@ -3673,19 +3674,19 @@ TEST(test_obj_bracket_set_dot_get) {
 TEST(test_obj_in_data_field) {
     assert_vm_bool("object Foo is fn init(self, x) is self.x = x end "
                    "fn get(self) is self.x end end\n"
-                   "my f = new Foo(1)\n\"x\" in f",
+                   "my f = make Foo(1)\n\"x\" in f",
                    true, "in operator finds data field");
 }
 
 TEST(test_obj_in_method) {
     assert_vm_bool("object Foo is fn init(self, x) is self.x = x end "
                    "fn get(self) is self.x end end\n"
-                   "my f = new Foo(1)\n\"get\" in f",
+                   "my f = make Foo(1)\n\"get\" in f",
                    true, "in operator finds method");
 }
 
 TEST(test_obj_in_missing) {
-    assert_vm_bool("object Foo is end\nmy f = new Foo()\n"
+    assert_vm_bool("object Foo is end\nmy f = make Foo()\n"
                    "\"missing\" in f",
                    false, "in operator missing key");
 }
@@ -3697,35 +3698,37 @@ TEST(test_obj_in_missing) {
 TEST(test_obj_init_return_discarded) {
     assert_vm_string("object Foo is fn init(self) is 42 end "
                      "fn check(self) is \"ok\" end end\n"
-                     "new Foo().check()",
-                     "ok", "init return value discarded, new returns instance");
+                     "make Foo().check()",
+                     "ok", "init return value discarded, make returns instance");
 }
 
 /* ============================================================
  * Object system — error cases
  * ============================================================ */
 
-/* new on a non-type value → runtime error.
- * The parser requires an identifier after 'new', so we use a variable
+/* make on a non-type value → runtime error.
+ * The parser requires an identifier after 'make', so we use a variable
  * that holds a non-type value to test the VM-level error path. */
-TEST(test_obj_new_number_error) { assert_vm_error("my x = 42\nnew x()", "new on number"); }
+TEST(test_obj_make_number_error) { assert_vm_error("my x = 42\nmake x()", "make on number"); }
 
-TEST(test_obj_new_string_error) { assert_vm_error("my x = \"hello\"\nnew x()", "new on string"); }
+TEST(test_obj_make_string_error) {
+    assert_vm_error("my x = \"hello\"\nmake x()", "make on string");
+}
 
 TEST(test_obj_init_arity_too_few) {
     assert_vm_error("object Foo is fn init(self, x) is self.x = x end end\n"
-                    "new Foo()",
+                    "make Foo()",
                     "arity mismatch: too few args");
 }
 
 TEST(test_obj_init_arity_too_many) {
     assert_vm_error("object Foo is fn init(self, x) is self.x = x end end\n"
-                    "new Foo(1, 2, 3)",
+                    "make Foo(1, 2, 3)",
                     "arity mismatch: too many args");
 }
 
 TEST(test_obj_no_init_but_args) {
-    assert_vm_error("object Foo is end\nnew Foo(1)", "no init but args provided");
+    assert_vm_error("object Foo is end\nmake Foo(1)", "no init but args provided");
 }
 
 /* ============================================================
@@ -3735,7 +3738,7 @@ TEST(test_obj_no_init_but_args) {
 TEST(test_obj_instances_independent) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end "
                      "fn get(self) is self.x end end\n"
-                     "my a = new Foo(1)\nmy b = new Foo(2)\n"
+                     "my a = make Foo(1)\nmy b = make Foo(2)\n"
                      "a.get() + b.get()",
                      3.0, "two instances are independent");
 }
@@ -3748,7 +3751,7 @@ TEST(test_obj_instances_independent) {
 TEST(test_mixin_basic_greet) {
     assert_vm_string("object Greeter is fn greet(self) is \"hi\" end end\n"
                      "object Dog with Greeter is fn bark(self) is \"woof\" end end\n"
-                     "new Dog().greet()",
+                     "make Dog().greet()",
                      "hi", "mixin method accessible on instance");
 }
 
@@ -3756,7 +3759,7 @@ TEST(test_mixin_basic_greet) {
 TEST(test_mixin_basic_own_method) {
     assert_vm_string("object Greeter is fn greet(self) is \"hi\" end end\n"
                      "object Dog with Greeter is fn bark(self) is \"woof\" end end\n"
-                     "new Dog().bark()",
+                     "make Dog().bark()",
                      "woof", "own method works alongside mixin");
 }
 
@@ -3768,7 +3771,7 @@ TEST(test_mixin_basic_own_method) {
 TEST(test_mixin_own_wins) {
     assert_vm_string("object Base is fn name(self) is \"base\" end end\n"
                      "object Child with Base is fn name(self) is \"child\" end end\n"
-                     "new Child().name()",
+                     "make Child().name()",
                      "child", "own method overrides mixin method");
 }
 
@@ -3781,7 +3784,7 @@ TEST(test_mixin_multiple) {
     assert_vm_string("object A is fn a(self) is \"a\" end end\n"
                      "object B is fn b(self) is \"b\" end end\n"
                      "object C with A, B is end\n"
-                     "my c = new C()\n"
+                     "my c = make C()\n"
                      "c.a() ++ c.b()",
                      "ab", "methods from multiple mixins available");
 }
@@ -3795,7 +3798,7 @@ TEST(test_mixin_later_wins) {
     assert_vm_string("object A is fn x(self) is \"from A\" end end\n"
                      "object B is fn x(self) is \"from B\" end end\n"
                      "object C with A, B is end\n"
-                     "new C().x()",
+                     "make C().x()",
                      "from B", "later mixin overwrites earlier on conflict");
 }
 
@@ -3807,7 +3810,7 @@ TEST(test_mixin_later_wins) {
 TEST(test_mixin_source_unmodified) {
     assert_vm_number("object A is fn x(self) is 1 end end\n"
                      "object B with A is fn y(self) is 2 end end\n"
-                     "new A().x()",
+                     "make A().x()",
                      1.0, "mixin source object still works after being mixed in");
 }
 
@@ -3819,7 +3822,7 @@ TEST(test_mixin_source_unmodified) {
 TEST(test_mixin_init_inherited) {
     assert_vm_number("object Initable is fn init(self, n) is self.n = n end end\n"
                      "object Foo with Initable is fn get(self) is self.n end end\n"
-                     "new Foo(42).get()",
+                     "make Foo(42).get()",
                      42.0, "init inherited from mixin");
 }
 
@@ -3833,7 +3836,7 @@ TEST(test_mixin_init_overridden) {
                      "object Foo with Initable is "
                      "fn init(self, n) is self.n = n * 2 end "
                      "fn get(self) is self.n end end\n"
-                     "new Foo(5).get()",
+                     "make Foo(5).get()",
                      10.0, "own init overrides mixin init");
 }
 
@@ -3846,7 +3849,7 @@ TEST(test_mixin_transitive) {
     assert_vm_string("object A is fn a(self) is \"a\" end end\n"
                      "object B with A is fn b(self) is \"b\" end end\n"
                      "object C with B is end\n"
-                     "my c = new C()\n"
+                     "my c = make C()\n"
                      "c.a() ++ c.b()",
                      "ab", "transitive mixin: C gets A's methods via B");
 }
@@ -3868,7 +3871,7 @@ TEST(test_mixin_non_object_type_error) {
 TEST(test_edge_empty_object_with_mixin) {
     assert_vm_number("object A is fn x(self) is 1 end end\n"
                      "object B with A is end\n"
-                     "new B().x()",
+                     "make B().x()",
                      1.0, "empty object with mixin inherits method");
 }
 
@@ -3879,7 +3882,7 @@ TEST(test_edge_empty_object_with_mixin) {
 /* An instance value is truthy in a conditional. */
 TEST(test_edge_instance_is_truthy) {
     assert_vm_string("object Foo is end\n"
-                     "if new Foo() then \"yes\" else \"no\" end",
+                     "if make Foo() then \"yes\" else \"no\" end",
                      "yes", "instance is truthy");
 }
 
@@ -3901,13 +3904,13 @@ TEST(test_native_type_object_type) {
 
 /* type() returns the type name for an instance. */
 TEST(test_native_type_instance) {
-    assert_vm_string("object Foo is end\ntype(new Foo())", "Foo", "type(instance) = Foo");
+    assert_vm_string("object Foo is end\ntype(make Foo())", "Foo", "type(instance) = Foo");
 }
 
 /* type() returns the type name for an instance with init. */
 TEST(test_native_type_instance_with_init) {
     assert_vm_string("object Bar is fn init(self, x) is self.x = x end end\n"
-                     "type(new Bar(1))",
+                     "type(make Bar(1))",
                      "Bar", "type(instance with init) = Bar");
 }
 
@@ -3918,74 +3921,74 @@ TEST(test_native_str_object_type) {
 
 /* str() formats an instance. */
 TEST(test_native_str_instance) {
-    assert_vm_string("object Foo is end\nstr(new Foo())", "<Foo instance>",
+    assert_vm_string("object Foo is end\nstr(make Foo())", "<Foo instance>",
                      "str(instance) = <Foo instance>");
 }
 
 /* str() formats an instance with data. */
 TEST(test_native_str_instance_with_data) {
     assert_vm_string("object Foo is fn init(self, x) is self.x = x end end\n"
-                     "str(new Foo(42))",
+                     "str(make Foo(42))",
                      "<Foo instance>", "str(instance with data)");
 }
 
 /* keys() returns data field names of an instance. */
 TEST(test_native_keys_instance) {
     assert_vm_formatted("object Foo is fn init(self, x) is self.x = x end end\n"
-                        "keys(new Foo(1))",
+                        "keys(make Foo(1))",
                         "[x]", "keys(instance) = [x]");
 }
 
 /* keys() returns multiple data field names. */
 TEST(test_native_keys_instance_multiple) {
     assert_vm_formatted("object Foo is\nfn init(self, a, b) is\nself.a = a\nself.b = b\nend\nend\n"
-                        "keys(new Foo(1, 2))",
+                        "keys(make Foo(1, 2))",
                         "[a, b]", "keys(instance) = [a, b]");
 }
 
 /* keys() returns empty array for instance with no data fields. */
 TEST(test_native_keys_instance_empty) {
-    assert_vm_formatted("object Foo is end\nkeys(new Foo())", "[]",
+    assert_vm_formatted("object Foo is end\nkeys(make Foo())", "[]",
                         "keys(instance with no data) = []");
 }
 
 /* len() returns count of data fields on an instance. */
 TEST(test_native_len_instance) {
     assert_vm_number("object Foo is fn init(self, x) is self.x = x end end\n"
-                     "len(new Foo(1))",
+                     "len(make Foo(1))",
                      1.0, "len(instance) = 1");
 }
 
 /* len() returns 0 for instance with no data fields. */
 TEST(test_native_len_instance_empty) {
-    assert_vm_number("object Foo is end\nlen(new Foo())", 0.0, "len(instance with no data) = 0");
+    assert_vm_number("object Foo is end\nlen(make Foo())", 0.0, "len(instance with no data) = 0");
 }
 
 /* len() returns count of multiple data fields. */
 TEST(test_native_len_instance_multiple) {
     assert_vm_number("object Foo is\nfn init(self, a, b) is\nself.a = a\nself.b = b\nend\nend\n"
-                     "len(new Foo(1, 2))",
+                     "len(make Foo(1, 2))",
                      2.0, "len(instance) = 2");
 }
 
 /* has_key() checks data fields on instance (consistent with OP_IN). */
 TEST(test_native_has_key_instance_data) {
     assert_vm_bool("object Foo is fn init(self, x) is self.x = x end end\n"
-                   "has_key(new Foo(1), \"x\")",
+                   "has_key(make Foo(1), \"x\")",
                    true, "has_key(instance, data_key) = true");
 }
 
 /* has_key() returns false for missing data key. */
 TEST(test_native_has_key_instance_missing) {
     assert_vm_bool("object Foo is fn init(self, x) is self.x = x end end\n"
-                   "has_key(new Foo(1), \"y\")",
+                   "has_key(make Foo(1), \"y\")",
                    false, "has_key(instance, missing_key) = false");
 }
 
 /* has_key() checks methods too (consistent with OP_IN which checks both). */
 TEST(test_native_has_key_instance_method) {
     assert_vm_bool("object Foo is fn greet(self) is \"hi\" end end\n"
-                   "has_key(new Foo(), \"greet\")",
+                   "has_key(make Foo(), \"greet\")",
                    true, "has_key(instance, method_name) = true");
 }
 
@@ -3994,7 +3997,7 @@ TEST(test_native_say_instance) {
     TestBuffer buf;
     test_buffer_init(&buf);
     EvalContext ctx = {.write_fn = test_write_capture, .userdata = &buf};
-    Value v = run_input("object Foo is end\nsay(new Foo())", &ctx);
+    Value v = run_input("object Foo is end\nsay(make Foo())", &ctx);
     ASSERT_CLEANUP(v.type == VAL_NOTHING, "say(instance) returns nothing", v, buf);
     ASSERT_STR_EQ_CLEANUP(buf.data, "<Foo instance>\n", "say(instance) output", v, buf);
     value_free(&v);
@@ -4814,8 +4817,8 @@ int main(void) {
 
     /* ---- Object system — error cases ---- */
     printf("\nObject system — error cases:\n");
-    RUN_TEST(test_obj_new_number_error);
-    RUN_TEST(test_obj_new_string_error);
+    RUN_TEST(test_obj_make_number_error);
+    RUN_TEST(test_obj_make_string_error);
     RUN_TEST(test_obj_init_arity_too_few);
     RUN_TEST(test_obj_init_arity_too_many);
     RUN_TEST(test_obj_no_init_but_args);

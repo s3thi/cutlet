@@ -1760,7 +1760,7 @@ cutlet repl --connect :9000       # connect to custom port
 ## 19. Objects and types
 
 Cutlet has a simple object system. You define named types with methods using
-`object...end`, create instances with `new`, and access fields and methods
+`object...end`, create instances with `make`, and access fields and methods
 through dot syntax.
 
 ### Defining an object type
@@ -1790,17 +1790,17 @@ An empty object type is valid:
 object Empty is end
 ```
 
-### Creating instances with `new`
+### Creating instances with `make`
 
-Use `new` to create an instance of a type:
+Use `make` to create an instance of a type:
 
 ```cutlet
-my dog = new Dog("Rex")
-new Point(3, 4)
-new Empty()
+my dog = make Dog("Rex")
+make Point(3, 4)
+make Empty()
 ```
 
-`new` takes a type name and parenthesized arguments (which can be any
+`make` takes a type name and parenthesized arguments (which can be any
 expression). If the type has an `init` method, it is called automatically
 with the new instance as `self` and the provided arguments. Zero arguments
 are allowed when the type has no `init` or `init` takes only `self`.
@@ -1808,7 +1808,7 @@ are allowed when the type has no `init` or `init` takes only `self`.
 ### The `init` method
 
 If an object type defines a method named `init`, it is called automatically
-when `new` creates an instance. `init` is used to set up the instance's
+when `make` creates an instance. `init` is used to set up the instance's
 initial state:
 
 ```cutlet
@@ -1819,18 +1819,18 @@ object Point is
   end
 end
 
-my p = new Point(3, 4)
+my p = make Point(3, 4)
 say(p.x)    # => 3
 say(p.y)    # => 4
 ```
 
 Important rules for `init`:
-- `init`'s return value is always discarded. `new` returns the instance, not
+- `init`'s return value is always discarded. `make` returns the instance, not
   whatever `init` returns.
 - The arity must match: if `init(self, x, y)` expects 2 arguments (besides
-  `self`), then `new Point(1)` or `new Point(1, 2, 3)` produce runtime errors.
-- If a type has no `init` but you pass arguments to `new`, that is also a
-  runtime error: `new Empty(42)` fails.
+  `self`), then `make Point(1)` or `make Point(1, 2, 3)` produce runtime errors.
+- If a type has no `init` but you pass arguments to `make`, that is also a
+  runtime error: `make Empty(42)` fails.
 
 ### Field access
 
@@ -1839,7 +1839,7 @@ fields with dot syntax or bracket syntax:
 
 ```cutlet
 object Box is end
-my b = new Box()
+my b = make Box()
 b.label = "fragile"    # dot set: creates a new field
 say(b.label)           # dot get: => "fragile"
 
@@ -1852,7 +1852,7 @@ Accessing a field that does not exist returns `nothing`:
 
 ```cutlet
 object Box is end
-my b = new Box()
+my b = make Box()
 say(b.missing)         # => nothing
 ```
 
@@ -1877,7 +1877,7 @@ object Counter is
   end
 end
 
-my c = new Counter(0)
+my c = make Counter(0)
 c.inc()
 c.inc()
 c.inc()
@@ -1901,7 +1901,7 @@ object Calc is
   end
 end
 
-say(new Calc(5).quad())    # => 20
+say(make Calc(5).quad())    # => 20
 ```
 
 ### Membership testing with `in`
@@ -1920,7 +1920,7 @@ object Foo is
   end
 end
 
-my f = new Foo(1)
+my f = make Foo(1)
 say("x" in f)         # => true  (data field)
 say("get" in f)        # => true  (method)
 say("missing" in f)    # => false
@@ -1938,19 +1938,19 @@ object Foo is
   end
 end
 
-my a = new Foo(1)
-my b = new Foo(2)
+my a = make Foo(1)
+my b = make Foo(2)
 say(a.x)    # => 1
 say(b.x)    # => 2
 ```
 
 ### Error cases
 
-Using `new` on a non-type value produces a runtime error:
+Using `make` on a non-type value produces a runtime error:
 
 ```cutlet
 # my x = 42
-# new x()     # => runtime error: can only use 'new' with object types
+# make x()     # => runtime error: can only use 'make' with object types
 ```
 
 Arity mismatches with `init` produce runtime errors:
@@ -1959,8 +1959,8 @@ Arity mismatches with `init` produce runtime errors:
 # object Foo is
 #   fn init(self, x) is self.x = x end
 # end
-# new Foo()         # => error: init expects 1 argument, got 0
-# new Foo(1, 2, 3)  # => error: init expects 1 argument, got 3
+# make Foo()         # => error: init expects 1 argument, got 0
+# make Foo(1, 2, 3)  # => error: init expects 1 argument, got 3
 ```
 
 ### Mixins
@@ -1980,7 +1980,7 @@ object Dog with Greeter is
   fn bark(self) is "woof!" end
 end
 
-my d = new Dog()
+my d = make Dog()
 say(d.greet())    # prints: hi    (inherited from Greeter)
 say(d.bark())     # prints: woof! (own method)
 ```
@@ -1993,7 +1993,7 @@ object B is fn b(self) is "b" end end
 
 object C with A, B is end
 
-my c = new C()
+my c = make C()
 say(c.a())    # prints: a
 say(c.b())    # prints: b
 ```
@@ -2005,7 +2005,7 @@ the same method name, the object's own definition takes precedence:
 object Base is fn name(self) is "base" end end
 object Child with Base is fn name(self) is "child" end end
 
-say(new Child().name())    # prints: child (own method wins)
+say(make Child().name())    # prints: child (own method wins)
 ```
 
 When multiple mixins define the same method, the later mixin wins:
@@ -2015,7 +2015,7 @@ object X is fn who(self) is "X" end end
 object Y is fn who(self) is "Y" end end
 object Z with X, Y is end
 
-say(new Z().who())    # prints: Y (later mixin wins)
+say(make Z().who())    # prints: Y (later mixin wins)
 ```
 
 Mixins are transitive -- if B mixes in A, and C mixes in B, then C gets
@@ -2026,7 +2026,7 @@ object A is fn a(self) is "a" end end
 object B with A is fn b(self) is "b" end end
 object C with B is end
 
-my c = new C()
+my c = make C()
 say(c.a())    # prints: a (inherited transitively via B)
 say(c.b())    # prints: b
 ```
@@ -2042,7 +2042,7 @@ object Foo with Initable is
   fn get(self) is self.n end
 end
 
-say(new Foo(42).get())    # prints: 42
+say(make Foo(42).get())    # prints: 42
 ```
 
 An empty object body with a mixin still inherits all methods:
@@ -2051,7 +2051,7 @@ An empty object body with a mixin still inherits all methods:
 object A is fn x(self) is 1 end end
 object B with A is end
 
-say(new B().x())    # prints: 1
+say(make B().x())    # prints: 1
 ```
 
 Using a non-object-type value as a mixin is a runtime error:
@@ -2068,17 +2068,17 @@ Both object types and instances are truthy values:
 ```cutlet
 object Foo is end
 if Foo then "yes" else "no" end         # => yes (type is truthy)
-if new Foo() then "yes" else "no" end   # => yes (instance is truthy)
+if make Foo() then "yes" else "no" end   # => yes (instance is truthy)
 ```
 
 ### Reserved keywords
 
-`object`, `new`, and `with` are reserved keywords. They cannot be used as
+`object`, `make`, and `with` are reserved keywords. They cannot be used as
 variable names:
 
 ```cutlet
 # my object = 1   # => ERR parse error
-# my new = 1      # => ERR parse error
+# my make = 1     # => ERR parse error
 # my with = 1     # => ERR parse error
 ```
 
