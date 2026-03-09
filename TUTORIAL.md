@@ -1,10 +1,9 @@
 # Learn Cutlet in Y Minutes
 
-Cutlet is a dynamic programming language written in C, designed primarily for
-writing better shell scripts. It replaces Bash for anything beyond trivial
-one-liners, combining the expressiveness of Python, Ruby, Lua, and JavaScript
-with first-class support for running subprocesses, building pipelines, and
-scripting your system.
+Cutlet is a dynamic programming language written in C. Its long-term goal is to
+replace Bash for anything beyond trivial one-liners, combining the
+expressiveness of Python, Ruby, Lua, and JavaScript with first-class support for
+running subprocesses, building pipelines, and scripting your system.
 
 Comments start with `#` and go to the end of the line.
 

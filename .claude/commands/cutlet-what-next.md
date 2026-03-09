@@ -6,7 +6,7 @@ Read `TUTORIAL.md` and the `examples/` directory to understand the language's cu
 
 Now help me figure out what to build next. Guidelines:
 
-- Cutlet's primary purpose is to be a better shell scripting language — a replacement for Bash when scripts outgrow trivial one-liners. Every suggestion should be evaluated through that lens: does it make Cutlet more useful for scripting your system? Features like subprocess execution, pipelines, file/directory manipulation, environment variables, exit code handling, and signal management are all high-value.
+- Cutlet's long-term goal is to be a better shell scripting language — a replacement for Bash when scripts outgrow trivial one-liners. Every suggestion should be evaluated through that lens: does it move Cutlet closer to being useful for scripting your system? Features like subprocess execution, pipelines, file/directory manipulation, environment variables, exit code handling, and signal management are all high-value.
 - That said, Cutlet also needs to be pleasant to program in, like Python, Ruby, Lua, or JavaScript. Core language ergonomics matter too.
 - Suggest 3-5 concrete ideas, ordered by what you think would have the highest impact.
 - For each idea, give a one-sentence description and a brief rationale (why now, what it unlocks).

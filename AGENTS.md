@@ -2,7 +2,7 @@
 
 Cutlet is a dynamic programming language built entirely using coding agents.
 
-Cutlet is a dynamic programming language designed primarily for writing better shell scripts. It aims to replace Bash for anything beyond trivial one-liners, providing the expressiveness of languages like Python, Ruby, Lua, and JavaScript while making it dead simple to run subprocesses, build pipelines, handle exit codes, and script your system. It excels at parsing text, navigating files and directories, inter-process communication, job control, and quickly building simple user interfaces for one-off tasks. It's a glue language that can bring together and orchestrate disparate programs. It's optimized for REPL-driven programming, similar to how it's done in Common Lisp or Clojure.
+Cutlet is a dynamic programming language whose long-term goal is to replace Bash for anything beyond trivial one-liners. It aims to provide the expressiveness of languages like Python, Ruby, Lua, and JavaScript while making it dead simple to run subprocesses, build pipelines, handle exit codes, and script your system. Eventually it will excel at parsing text, navigating files and directories, inter-process communication, job control, and quickly building simple user interfaces for one-off tasks — a glue language that can bring together and orchestrate disparate programs. It's optimized for REPL-driven programming, similar to how it's done in Common Lisp or Clojure.
 
 Cutlet is written in C. It's designed to run on Linux and macOS.
 
