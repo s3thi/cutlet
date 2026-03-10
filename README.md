@@ -1,9 +1,9 @@
 # Cutlet
 
 > [!WARNING]
-> **This project is entirely LLM-generated.** The author has not read any of
+> **This project is entirely LLM-generated.** I haven't read any of
 > the code. Use it at your own risk. Read more about it
-> [here](https://example.com/cutlet-blog-post).
+> [here](https://ankursethi.com/blog/programming-language-claude-code/).
 
 Cutlet is a dynamic programming language written in C. Its long-term goal is to
 replace Bash for anything beyond trivial one-liners, combining the
