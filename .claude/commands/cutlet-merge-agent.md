@@ -26,6 +26,8 @@ Follow these steps in order. Stop and ask me only when explicitly noted below.
 
 - Run `make test` and `make check`.
 - If either fails, read the errors, fix them, and re-run until both pass.
+- Run `make test-sanitize` (ASan + UBSan + LSan) and `make test-gc-stress`.
+- If either fails, read the errors, fix them, and re-run until both pass.
 - If you cannot fix a failure after two attempts, stop and ask me for help.
 
 ## 4. Check for completed plan files

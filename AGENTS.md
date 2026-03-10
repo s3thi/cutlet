@@ -52,6 +52,7 @@ scripts/agent-delete <branch>          # remove the container
 - Before implementing any new code, run `make test` and `make check` to prove that your tests are failing. Pause after test failures and require user confirmation to proceed with implementation. (This only applies when writing source code, not documentation.)
 - After editing any C source or header file, run `make format` to auto-format them before running any other checks. This prevents formatting-only failures from `make check`.
 - Run `make test` and `make check` after every source code change (C files, headers, Makefiles, test files). Skip for documentation-only changes (plans, READMEs, AGENTS.md, TUTORIAL.md, etc.). **Note:** output from these commands may exceed the tool output limit. Be prepared to pipe through `tail` or `grep` to see the results summary rather than re-running the full command.
+- **Final gate before completing a plan:** After all implementation and tests pass, run `make test-sanitize` (ASan + UBSan + LSan) and `make test-gc-stress` as a final check. Do not mark a plan as done until both pass.
 - Never remove, change, or disable any tests without user confirmation.
 - Never disable any linter errors without user confirmation.
 - Comment your code to include guidance and context for future coding agents.
