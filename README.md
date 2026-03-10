@@ -1,13 +1,15 @@
 # Cutlet
 
+> [!WARNING]
+> **This project is entirely LLM-generated.** The author has not read any of
+> the code. Use it at your own risk. Read more about it
+> [here](https://example.com/cutlet-blog-post).
+
 Cutlet is a dynamic programming language written in C. Its long-term goal is to
 replace Bash for anything beyond trivial one-liners, combining the
 expressiveness of Python, Ruby, Lua, and JavaScript with first-class support for
 running subprocesses, building pipelines, and scripting your system. It focuses
 on REPL-driven development.
-
-**This project is entirely LLM-generated.** The author has not read any of
-the code. Use it at your own risk.
 
 ```cutlet
 # Vectorized math — operations apply to entire arrays at once
