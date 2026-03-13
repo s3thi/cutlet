@@ -4019,6 +4019,86 @@ TEST(test_native_say_object_type) {
 }
 
 /* ============================================================
+ * Object system — objects as expressions
+ *
+ * These tests validate expression-like behavior for object definitions:
+ * anonymous objects, local type lookup in make, alias binding, upvalue
+ * capture of object types, local mixin resolution, and typeof() on
+ * anonymous instances.
+ * ============================================================ */
+
+/* Anonymous object: assign an anonymous object type to a variable and
+ * instantiate it.  The object has no name after 'object', just 'is'. */
+TEST(test_obj_expr_anonymous) {
+    assert_vm_not_error("my T = object is fn hi() is 42 end end\n"
+                        "make T()",
+                        "anonymous object instantiation");
+}
+
+/* Local type lookup in make: a function defines an object type as a
+ * local variable and instantiates it with make — make must resolve
+ * the type through local variable lookup, not just globals. */
+TEST(test_obj_expr_local_type_lookup) {
+    assert_vm_number("fn make-it() is\n"
+                     "  object Local is\n"
+                     "    fn val() is 99 end\n"
+                     "  end\n"
+                     "  make Local()\n"
+                     "end\n"
+                     "make-it().val()",
+                     99.0, "local type lookup in make");
+}
+
+/* Alias binding: when a named object is assigned to a variable, both
+ * the original name and the alias should be usable at global scope. */
+TEST(test_obj_expr_alias_binding) {
+    assert_vm_not_error("my X = object Foo is fn id() is 1 end end\n"
+                        "make X()",
+                        "alias binding: make via alias X");
+}
+
+/* Upvalue capture of object type: a closure captures a locally-defined
+ * object type and instantiates it later, after the defining function
+ * has returned.  make must resolve the type through upvalue lookup. */
+TEST(test_obj_expr_upvalue_capture) {
+    assert_vm_number("fn outer() is\n"
+                     "  object Local is\n"
+                     "    fn val() is 7 end\n"
+                     "  end\n"
+                     "  fn inner() is\n"
+                     "    make Local()\n"
+                     "  end\n"
+                     "  inner\n"
+                     "end\n"
+                     "outer()().val()",
+                     7.0, "upvalue capture of object type");
+}
+
+/* Local mixin resolution: a function defines a mixin locally and uses
+ * it with 'with' — the mixin must be resolved through local variable
+ * lookup, not just globals. */
+TEST(test_obj_expr_local_mixin) {
+    assert_vm_number("fn go() is\n"
+                     "  object Greetable is\n"
+                     "    fn hi() is 1 end\n"
+                     "  end\n"
+                     "  object Bot with Greetable is\n"
+                     "  end\n"
+                     "  make Bot().hi()\n"
+                     "end\n"
+                     "go()",
+                     1.0, "local mixin resolution");
+}
+
+/* typeof() on anonymous instance: type() should return "<anonymous object>"
+ * for an instance created from an anonymous object type. */
+TEST(test_obj_expr_typeof_anonymous) {
+    assert_vm_string("my T = object is end\n"
+                     "type(make T())",
+                     "<anonymous object>", "typeof anonymous instance = <anonymous object>");
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -4889,6 +4969,15 @@ int main(void) {
     RUN_TEST(test_native_has_key_instance_method);
     RUN_TEST(test_native_say_instance);
     RUN_TEST(test_native_say_object_type);
+
+    /* ---- Object system — objects as expressions ---- */
+    printf("\nObject system — objects as expressions:\n");
+    RUN_TEST(test_obj_expr_anonymous);
+    RUN_TEST(test_obj_expr_local_type_lookup);
+    RUN_TEST(test_obj_expr_alias_binding);
+    RUN_TEST(test_obj_expr_upvalue_capture);
+    RUN_TEST(test_obj_expr_local_mixin);
+    RUN_TEST(test_obj_expr_typeof_anonymous);
 
     printf("\n========================================\n");
     printf("Tests run: %d\n", tests_run);

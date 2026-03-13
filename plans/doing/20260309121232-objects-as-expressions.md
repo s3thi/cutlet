@@ -175,3 +175,9 @@ a string name parameter. The anonymous name is just a different string.
 ### 7. Run `make test && make check`
 
 Verify all tests pass. Fix any issues found.
+
+## Progress
+
+- [x] Step 1: Write parser tests for anonymous objects — added 6 tests (3 parsing, 3 completeness)
+- [x] Step 2: Update `parse_object` to accept anonymous objects — parser accepts `object is ... end`, ast_format handles NULL name
+- [x] Step 3: Write VM tests for expression-like object behavior — added 6 tests: anonymous object, local type lookup, alias binding, upvalue capture, local mixin resolution, typeof on anonymous instance. Used `make` (not `new`) per rename that already landed. Tests fail as expected (segfault on anonymous object).
