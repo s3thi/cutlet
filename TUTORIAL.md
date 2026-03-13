@@ -2061,6 +2061,97 @@ Using a non-object-type value as a mixin is a runtime error:
 # object Foo with x is end   # => ERR mixin must be an object type
 ```
 
+### Anonymous objects
+
+Object definitions do not require a name. An anonymous object is written as
+`object is ... end` (no identifier after `object`):
+
+```cutlet
+my T = object is
+  fn greet(self) is "hello" end
+end
+
+say(make T().greet())    # prints: hello
+```
+
+Anonymous objects work exactly like anonymous functions -- they produce a value
+without binding a name. This is useful when you want to create a one-off type
+or pass a type as an argument:
+
+```cutlet
+my T = object is end
+say(type(make T()))    # prints: <anonymous object>
+```
+
+The `type()` builtin returns `"<anonymous object>"` for instances of anonymous
+types, similar to how anonymous functions display as `"<anonymous fn>"`.
+
+### Objects as expressions
+
+Object definitions are expressions, just like function definitions. A named
+`object...end` at the top level auto-binds to its name, but you can also
+assign the result to a variable, creating an alias:
+
+```cutlet
+my Alias = object Foo is
+  fn id(self) is 1 end
+end
+
+# Both names work:
+say(make Foo().id())      # prints: 1
+say(make Alias().id())    # prints: 1
+```
+
+Inside a function body, named objects bind as local variables instead of
+globals. This means you can define types that are scoped to a function:
+
+```cutlet
+fn make-it() is
+  object Local is
+    fn val(self) is 99 end
+  end
+  make Local()
+end
+
+say(make-it().val())    # prints: 99
+# Local is not visible here -- it is scoped to make-it
+```
+
+### Local type resolution in `make`
+
+`make` resolves the type name using normal variable lookup: local variables
+first, then upvalues (captured variables from enclosing functions), then
+globals. This means locally-defined and captured types work naturally:
+
+```cutlet
+fn factory() is
+  object Inner is
+    fn val(self) is 42 end
+  end
+  fn build() is
+    make Inner()    # captures Inner as an upvalue
+  end
+  build()
+end
+
+say(factory().val())    # prints: 42
+```
+
+The same applies to mixin resolution in `with` clauses -- locally-defined
+mixins work inside functions:
+
+```cutlet
+fn go() is
+  object Greetable is
+    fn hi(self) is 1 end
+  end
+  object Bot with Greetable is end
+  make Bot().hi()
+end
+
+say(go())    # prints: 1
+```
+
 ### Truthiness
 
 Both object types and instances are truthy values:

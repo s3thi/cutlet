@@ -101,8 +101,18 @@ void gc_unlink(Obj *obj);
  * Free a single GC-tracked object: unlink it from the list, then free.
  * Does NOT free internal contents (name, data arrays, etc.) — only
  * the object struct itself. Callers should free contents first if needed.
+ *
+ * No-op when the GC is sweeping or tearing down (gc_free_all) to avoid
+ * double-free on objects still in the GC list.
  */
 void gc_free_object(Obj *obj);
+
+/*
+ * Returns true when the GC is in sweep or teardown mode (gc_sweep or
+ * gc_free_all is running). Used by value_free helpers to skip freeing
+ * GC-managed sub-objects that will be handled by the sweep/teardown loop.
+ */
+bool gc_is_sweeping(void);
 
 /*
  * Free all objects on the GC list. For each object, frees internal
@@ -212,12 +222,20 @@ void gc_pin(Obj *obj);
  */
 void gc_unpin(void);
 
+/* Pop n entries from the temporary root stack (calls gc_unpin n times). */
+void gc_unpin_n(int n);
+
 /*
- * Pin the heap object (if any) inside a Value as a temporary GC root.
- * Handles VAL_STRING, VAL_FUNCTION, VAL_CLOSURE, VAL_ARRAY, VAL_MAP.
- * No-op for scalar types (VAL_NUMBER, VAL_BOOL, VAL_NOTHING, VAL_ERROR).
+ * Pin the GC-managed heap object(s) inside a Value as temporary GC roots.
+ * Returns the number of entries pushed onto the pin stack.
+ *
+ * For most types, this is 0 (scalars) or 1 (string, function, closure,
+ * array, map). For VAL_OBJECT_TYPE and VAL_INSTANCE, it may push 1-2
+ * entries (methods map, data map) since their sub-objects are GC-managed.
+ *
+ * Callers must call gc_unpin() exactly the returned number of times.
  */
-void gc_pin_value(struct Value *v);
+int gc_pin_value(struct Value *v);
 
 /* ---- Compiler root tracking ---- */
 

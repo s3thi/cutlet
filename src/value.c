@@ -452,12 +452,32 @@ Value make_instance(ObjInstance *inst) { return (Value){.type = VAL_INSTANCE, .i
 static void free_owned_map(ObjMap *m) {
     if (!m)
         return;
+
+    /* During sweep or teardown (gc_free_all), the map is a GC-managed
+     * object whose entries will be freed by free_object_contents(OBJ_MAP)
+     * when the GC loop processes it.  Skip everything here to prevent
+     * double-free on the entries array and the map struct. */
+    if (gc_is_sweeping())
+        return;
+
+    /* Free the map's entry contents (keys and values) immediately to
+     * release any refcounted resources (closures, nested types).
+     * Then clear the entries array and reset count/capacity so the
+     * map is empty.
+     *
+     * IMPORTANT: do NOT call gc_free_object here. The map is a
+     * GC-managed object and may still be referenced from the VM stack,
+     * global table, or temp root pins. Freeing it now would create
+     * dangling pointers. Instead, leave the (now empty) map on the GC
+     * list — the next gc_collect will sweep it once nothing points to it. */
     for (size_t i = 0; i < m->count; i++) {
         value_free(&m->entries[i].key);
         value_free(&m->entries[i].value);
     }
     free(m->entries);
-    gc_free_object((Obj *)m);
+    m->entries = NULL;
+    m->count = 0;
+    m->capacity = 0;
 }
 
 /*

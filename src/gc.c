@@ -69,27 +69,58 @@ void gc_unpin(void) {
     }
 }
 
-void gc_pin_value(Value *v) {
+void gc_unpin_n(int n) {
+    for (int i = 0; i < n; i++)
+        gc_unpin();
+}
+
+int gc_pin_value(Value *v) {
     if (v == NULL)
-        return;
+        return 0;
     switch (v->type) {
     case VAL_STRING:
         gc_pin((Obj *)v->string);
-        break;
+        return 1;
     case VAL_FUNCTION:
         gc_pin((Obj *)v->function);
-        break;
+        return 1;
     case VAL_CLOSURE:
         gc_pin((Obj *)v->closure);
-        break;
+        return 1;
     case VAL_ARRAY:
         gc_pin((Obj *)v->array);
-        break;
+        return 1;
     case VAL_MAP:
         gc_pin((Obj *)v->map);
-        break;
+        return 1;
+    case VAL_OBJECT_TYPE: {
+        /* ObjObjectType is refcounted, not GC-managed.  But its
+         * methods ObjMap IS GC-managed and must be pinned. */
+        int n = 0;
+        if (v->object_type && v->object_type->methods) {
+            gc_pin((Obj *)v->object_type->methods);
+            n++;
+        }
+        return n;
+    }
+    case VAL_INSTANCE: {
+        /* ObjInstance is refcounted.  Its data ObjMap and the type's
+         * methods ObjMap are both GC-managed and need pinning. */
+        int n = 0;
+        if (v->instance) {
+            if (v->instance->data) {
+                gc_pin((Obj *)v->instance->data);
+                n++;
+            }
+            if (v->instance->type && v->instance->type->methods) {
+                gc_pin((Obj *)v->instance->type->methods);
+                n++;
+            }
+        }
+        return n;
+    }
     default:
-        break;
+        return 0;
     }
 }
 
@@ -374,9 +405,18 @@ void gc_unlink(Obj *obj) {
 void gc_free_object(Obj *obj) {
     if (!obj)
         return;
+
+    /* During sweep or teardown (gc_free_all), the caller already manages
+     * the object list and frees each object.  Do not unlink or free here
+     * to avoid double-free / use-after-free on the GC list. */
+    if (gc.sweeping)
+        return;
+
     gc_unlink(obj);
     free(obj);
 }
+
+bool gc_is_sweeping(void) { return gc.sweeping; }
 
 /*
  * Free the internal contents of an object based on its type.
@@ -450,6 +490,12 @@ static void free_object_contents(Obj *obj) {
 }
 
 void gc_free_all(void) {
+    /* Set sweeping so that gc_free_object (called indirectly from
+     * value_free -> free_object_type -> free_owned_map) is a no-op.
+     * GC-managed sub-objects like method maps will be freed when the
+     * loop reaches them, preventing double-free. */
+    gc.sweeping = true;
+
     Obj *obj = gc.objects;
     while (obj) {
         Obj *next = obj->next;
@@ -459,6 +505,7 @@ void gc_free_all(void) {
     }
     gc.objects = NULL;
     gc.bytes_allocated = 0;
+    gc.sweeping = false;
 
     /* Free the intern table array and reset state.
      * All ObjStrings have already been freed above, so the table

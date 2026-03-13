@@ -364,6 +364,14 @@ TEST(test_disassemble_recursive_function) {
     ASSERT(strstr(s, "42") != NULL, "should contain inner constant value");
 
     free(s);
+
+    /* Manual cleanup: value_free skips VAL_FUNCTION (GC-managed at runtime),
+     * but in this test we allocated fn/inner/name by hand. Free before
+     * chunk_free destroys the constant pool pointer. */
+    chunk_free(inner);
+    free(inner);
+    free(fn->name);
+    free(fn);
     chunk_free(&outer);
     PASS();
 }
@@ -400,6 +408,11 @@ TEST(test_disassemble_recursive_anonymous_function) {
     ASSERT(strstr(s, "== <fn> ==") != NULL, "should contain anonymous function header");
 
     free(s);
+
+    /* Manual cleanup: fn and inner were hand-allocated (not GC-managed). */
+    chunk_free(inner);
+    free(inner);
+    free(fn);
     chunk_free(&outer);
     PASS();
 }

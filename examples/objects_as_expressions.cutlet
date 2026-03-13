@@ -1,0 +1,97 @@
+# Objects as expressions: anonymous objects, local scoping, upvalue capture
+
+# --- Anonymous objects ---
+
+# An object without a name produces an unnamed type value
+my T = object is
+  fn greet(self) is "hello from anonymous" end
+end
+
+say(make T().greet())           # hello from anonymous
+
+# typeof returns "<anonymous object>" for anonymous instances
+say(type(make T()))             # <anonymous object>
+
+# Anonymous object with init
+my Pair = object is
+  fn init(self, a, b) is
+    self.a = a
+    self.b = b
+  end
+
+  fn sum(self) is
+    self.a + self.b
+  end
+end
+
+say(make Pair(3, 7).sum())      # 10
+
+# --- Objects as expressions with aliases ---
+
+# Named objects can be aliased to another variable
+my Alias = object Foo is
+  fn id(self) is 1 end
+end
+
+# Both the original name and the alias work
+say(make Foo().id())            # 1
+say(make Alias().id())          # 1
+
+# --- Local type resolution in make ---
+
+# Object types defined inside functions are local variables
+fn make-it() is
+  object Local is
+    fn val(self) is 99 end
+  end
+  make Local()
+end
+
+say(make-it().val())            # 99
+
+# make resolves types through local -> upvalue -> global lookup
+fn factory() is
+  object Inner is
+    fn val(self) is 42 end
+  end
+  fn build() is
+    make Inner()
+  end
+  build()
+end
+
+say(factory().val())            # 42
+
+# --- Local mixin resolution ---
+
+# Mixin types defined locally work inside functions
+fn compose() is
+  object Greetable is
+    fn hi(self) is "hi" end
+  end
+  object Bot with Greetable is
+    fn name(self) is "bot" end
+  end
+  my b = make Bot()
+  say(b.hi())
+  say(b.name())
+end
+
+compose()                       # hi
+                                # bot
+
+# --- Combining features ---
+
+# Local named object with a local mixin
+fn build-combo() is
+  object Base is
+    fn base-val(self) is 100 end
+  end
+  object Combo with Base is
+    fn extra(self) is 200 end
+  end
+  my c = make Combo()
+  c.base-val() + c.extra()
+end
+
+say(build-combo())              # 300
