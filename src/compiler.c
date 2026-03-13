@@ -220,6 +220,10 @@ static void end_scope(Compiler *c, int line) {
 /* Forward declaration: compile any AST node. */
 static void compile_node(Compiler *c, const AstNode *node);
 
+/* Forward declaration: emit bytecode to load a named callable
+ * using local -> upvalue -> global resolution. */
+static void emit_load_callable(Compiler *c, const char *name, int line);
+
 /* Compile a number literal. */
 static void compile_number(Compiler *c, const AstNode *node) {
     double n = strtod(node->value, NULL);
@@ -1177,7 +1181,7 @@ static void compile_function(Compiler *c, const AstNode *node) {
  * Compile an object type definition.
  *
  * An AST_OBJECT_DEF node has:
- *   value       = type name string
+ *   value       = type name string (NULL for anonymous objects)
  *   params      = mixin name strings (e.g., from "with A, B")
  *   param_count = number of mixins
  *   children    = array of AST_FUNCTION nodes (methods)
@@ -1185,12 +1189,16 @@ static void compile_function(Compiler *c, const AstNode *node) {
  *
  * Emitted bytecode:
  *   For each mixin (if any):
- *     OP_GET_GLOBAL <mixin_name_idx>    -- push mixin type onto stack
+ *     <local/upvalue/global load>       -- push mixin type onto stack
  *   For each method:
  *     OP_CONSTANT <method_name_string>  -- push method name
  *     OP_CLOSURE  <method_function>     -- push method closure
  *   OP_OBJECT_TYPE <name_idx> <method_count> <mixin_count>
- *   OP_DEFINE_GLOBAL <name_idx>
+ *
+ * Named objects then bind:
+ *   - In function context: register as local (mirrors compile_function)
+ *   - In script context: OP_DEFINE_GLOBAL
+ * Anonymous objects: no binding, value stays on stack as expression result.
  *
  * Stack layout before OP_OBJECT_TYPE:
  *   [mixin1_type, mixin2_type, ..., method1_name, method1_closure, ..., methodN_name,
@@ -1199,8 +1207,10 @@ static void compile_function(Compiler *c, const AstNode *node) {
 static void compile_object_def(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
-    /* Add the type name to the constant pool. */
-    char *type_name = compiler_strdup(c, node->value);
+    /* Add the type name to the constant pool. For anonymous objects
+     * (node->value == NULL), use "<anonymous object>" as the display name. */
+    const char *display_name = node->value ? node->value : "<anonymous object>";
+    char *type_name = compiler_strdup(c, display_name);
     if (!type_name)
         return;
     int name_idx = chunk_find_or_add_constant(c->chunk, make_string(type_name));
@@ -1209,20 +1219,13 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
         return;
     }
 
-    /* Emit OP_GET_GLOBAL for each mixin name so the mixin type values are
-     * on the stack BEFORE the method name-closure pairs.  The VM will pop
-     * the methods first, then the mixins, applying mixin methods in
-     * left-to-right order (later mixins overwrite earlier ones). */
+    /* Load each mixin type onto the stack BEFORE the method name-closure
+     * pairs.  Uses local -> upvalue -> global resolution so that mixins
+     * defined as local variables (e.g. inside a function) are found. */
     for (size_t i = 0; i < node->param_count; i++) {
-        char *mixin_name = compiler_strdup(c, node->params[i]);
-        if (!mixin_name)
+        emit_load_callable(c, node->params[i], line);
+        if (c->had_error)
             return;
-        int mixin_idx = chunk_find_or_add_constant(c->chunk, make_string(mixin_name));
-        if (mixin_idx < 0) {
-            compiler_error(c, "too many constants");
-            return;
-        }
-        emit_bytes(c, OP_GET_GLOBAL, (uint8_t)mixin_idx, line);
     }
 
     /* Compile each method: push its name string then its closure. */
@@ -1256,8 +1259,33 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
     emit_byte(c, (uint8_t)node->child_count, line);
     emit_byte(c, (uint8_t)node->param_count, line);
 
-    /* Store the type as a global variable. */
-    emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
+    /* Bind the name, mirroring compile_function's pattern:
+     * - Named + function context: register as local variable
+     * - Named + script context: define as global
+     * - Anonymous: no binding, leave value on stack */
+    if (node->value) {
+        if (c->context == COMPILE_FUNCTION) {
+            /* Same pattern as compile_function in COMPILE_FUNCTION:
+             * OP_OBJECT_TYPE placed the type value at the local_count
+             * position on the stack. Register the local, then push a
+             * clone as the expression result. */
+            int slot = c->local_count;
+            if (c->local_count >= LOCALS_MAX) {
+                compiler_error(c, "too many local variables");
+                return;
+            }
+            c->locals[c->local_count++] = (Local){
+                .name = node->value,
+                .length = (int)strlen(node->value),
+                .depth = c->scope_depth,
+            };
+            emit_bytes(c, OP_GET_LOCAL, (uint8_t)slot, line);
+        } else {
+            /* Script context: global variable binding. */
+            emit_bytes(c, OP_DEFINE_GLOBAL, (uint8_t)name_idx, line);
+        }
+    }
+    /* Anonymous objects: no binding, value stays on stack as expression result. */
 }
 
 /*
