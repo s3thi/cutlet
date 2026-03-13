@@ -2908,6 +2908,49 @@ TEST(test_object_def_multiple_mixins) {
 }
 
 /* ============================================================
+ * Anonymous object definition parsing tests
+ * ============================================================ */
+
+/* object is fn greet() is 42 end end → anonymous object with one method */
+TEST(test_anon_object_one_method) {
+    ASSERT(ast_matches("object is fn greet() is 42 end end",
+                       "AST [OBJECT_DEF [FN greet() [NUMBER 42]]]"),
+           "anonymous object with one method");
+    PASS();
+}
+
+/* my T = object is fn x() is 1 end end → anonymous object assigned to variable */
+TEST(test_anon_object_in_assignment) {
+    ASSERT(ast_matches("my T = object is fn x() is 1 end end",
+                       "AST [DECL T [OBJECT_DEF [FN x() [NUMBER 1]]]]"),
+           "anonymous object in declaration");
+    PASS();
+}
+
+/* object is end → anonymous empty object */
+TEST(test_anon_object_empty) {
+    ASSERT(ast_matches("object is end", "AST [OBJECT_DEF]"), "anonymous empty object");
+    PASS();
+}
+
+/* parser_is_complete: anonymous object cases */
+TEST(test_anon_object_complete) {
+    ASSERT(parser_is_complete("object is end"), "anonymous empty object should be complete");
+    PASS();
+}
+
+TEST(test_anon_object_complete_with_method) {
+    ASSERT(parser_is_complete("object is fn a() is 1 end end"),
+           "anonymous object with method should be complete");
+    PASS();
+}
+
+TEST(test_anon_object_incomplete_no_end) {
+    ASSERT(!parser_is_complete("object is"), "anonymous object without end should be incomplete");
+    PASS();
+}
+
+/* ============================================================
  * Object definition error tests
  * ============================================================ */
 
@@ -3485,6 +3528,16 @@ int main(void) {
     RUN_TEST(test_object_def_multiple_methods);
     RUN_TEST(test_object_def_one_mixin);
     RUN_TEST(test_object_def_multiple_mixins);
+
+    printf("\nAnonymous object definition parsing:\n");
+    RUN_TEST(test_anon_object_one_method);
+    RUN_TEST(test_anon_object_in_assignment);
+    RUN_TEST(test_anon_object_empty);
+
+    printf("\nparser_is_complete() - anonymous objects:\n");
+    RUN_TEST(test_anon_object_complete);
+    RUN_TEST(test_anon_object_complete_with_method);
+    RUN_TEST(test_anon_object_incomplete_no_end);
 
     printf("\nObject definition error cases:\n");
     RUN_TEST(test_object_def_non_ident_name);

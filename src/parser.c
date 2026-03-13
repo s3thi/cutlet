@@ -2541,21 +2541,25 @@ static AstNode *parse_object(Parser *p) {
     /* Consume 'object' keyword (already verified by caller) */
     advance(p);
 
-    /* Expect identifier for type name (must not be reserved keyword) */
-    if (p->current.type != TOK_IDENT || is_reserved_keyword(&p->current)) {
-        parser_error(p, p->current.line, p->current.col, "expected type name after 'object'");
+    /* Parse optional type name. Anonymous objects start directly with 'is'. */
+    char *type_name = NULL;
+    if (token_is_keyword(&p->current, "is")) {
+        /* Anonymous object: no name, skip straight to 'is' */
+    } else if (p->current.type == TOK_IDENT && !is_reserved_keyword(&p->current)) {
+        /* Named object: save heap-allocated copy of the type name */
+        type_name = malloc(p->current.value_len + 1);
+        if (!type_name) {
+            parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
+            return NULL;
+        }
+        memcpy(type_name, p->current.value, p->current.value_len);
+        type_name[p->current.value_len] = '\0';
+        advance(p);
+    } else {
+        parser_error(p, p->current.line, p->current.col,
+                     "expected type name or 'is' after 'object'");
         return NULL;
     }
-
-    /* Save heap-allocated copy of the type name */
-    char *type_name = malloc(p->current.value_len + 1);
-    if (!type_name) {
-        parser_error(p, obj_tok.line, obj_tok.col, "memory allocation failed");
-        return NULL;
-    }
-    memcpy(type_name, p->current.value, p->current.value_len);
-    type_name[p->current.value_len] = '\0';
-    advance(p);
 
     /* Parse optional 'with' clause for mixin names */
     PtrArray mixin_names;
@@ -3724,15 +3728,18 @@ static char *ast_format_node(const AstNode *node) {
 
     /* AST_OBJECT_DEF: [OBJECT_DEF Name] or [OBJECT_DEF Name with A, B] or
      * [OBJECT_DEF Name [FN ...] [FN ...]] or [OBJECT_DEF Name with A [FN ...]]
-     * value = type name, params = mixin names, children = method AST_FUNCTION nodes. */
+     * Anonymous: [OBJECT_DEF] or [OBJECT_DEF [FN ...]]
+     * value = type name (NULL for anonymous), params = mixins, children = methods. */
     if (node->type == AST_OBJECT_DEF) {
         /* Format method children. */
         PtrArray method_strs;
         if (!ptr_array_init(&method_strs, node->child_count))
             return NULL;
 
-        /* Start with "[OBJECT_DEF Name" */
-        size_t total_len = 1 + strlen(type_str) + 1 + strlen(node->value);
+        /* Start with "[OBJECT_DEF" or "[OBJECT_DEF Name" */
+        size_t total_len = 1 + strlen(type_str); /* "[OBJECT_DEF" */
+        if (node->value)
+            total_len += 1 + strlen(node->value); /* " Name" */
 
         /* Add " with A, B, C" if mixins present */
         if (node->param_count > 0) {
@@ -3767,7 +3774,10 @@ static char *ast_format_node(const AstNode *node) {
         }
 
         size_t pos = 0;
-        pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s", type_str, node->value);
+        if (node->value)
+            pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s %s", type_str, node->value);
+        else
+            pos += (size_t)snprintf(buf + pos, total_len - pos, "[%s", type_str);
 
         /* Append " with A, B, C" if mixins */
         if (node->param_count > 0) {
