@@ -1297,7 +1297,7 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
  *   child_count = number of arguments
  *
  * Emitted bytecode:
- *   OP_GET_GLOBAL <type_name_idx>   -- look up the type by name
+ *   <load type>                     -- local -> upvalue -> global lookup
  *   compile(arg1)                   -- push each argument
  *   compile(arg2)
  *   ...
@@ -1306,18 +1306,10 @@ static void compile_object_def(Compiler *c, const AstNode *node) {
 static void compile_make(Compiler *c, const AstNode *node) {
     int line = (int)node->line;
 
-    /* Add the type name to the constant pool as a string constant. */
-    char *type_name = compiler_strdup(c, node->value);
-    if (!type_name)
-        return;
-    int name_idx = chunk_find_or_add_constant(c->chunk, make_string(type_name));
-    if (name_idx < 0) {
-        compiler_error(c, "too many constants");
-        return;
-    }
-
-    /* Emit OP_GET_GLOBAL to look up the type by name. */
-    emit_bytes(c, OP_GET_GLOBAL, (uint8_t)name_idx, line);
+    /* Resolve the type name through local -> upvalue -> global lookup,
+     * so that `make T()` works when T is a local variable, a captured
+     * upvalue, or a global. */
+    emit_load_callable(c, node->value, line);
 
     /* Compile each argument expression. */
     for (size_t i = 0; i < node->child_count; i++) {

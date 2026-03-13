@@ -546,8 +546,12 @@ static ObjUpvalue *capture_upvalue(VM *vm, Value *slot) {
 static void close_upvalues(VM *vm, Value *last) {
     while (vm->open_upvalues != NULL && vm->open_upvalues->location >= last) {
         ObjUpvalue *uv = vm->open_upvalues;
-        /* Copy the stack value into the upvalue's closed field. */
-        uv->closed = *uv->location;
+        /* Clone the stack value into the upvalue's closed field.
+         * We use value_clone (not raw copy) so that refcounted types
+         * (VAL_OBJECT_TYPE, VAL_INSTANCE) get their refcount incremented.
+         * The original stack slot will be freed by the caller, which
+         * decrements the refcount — the clone keeps the value alive. */
+        value_clone(&uv->closed, uv->location);
         /* Redirect location to the upvalue's own closed field. */
         uv->location = &uv->closed;
         /* Remove from the open list. */

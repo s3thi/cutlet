@@ -4041,7 +4041,7 @@ TEST(test_obj_expr_anonymous) {
 TEST(test_obj_expr_local_type_lookup) {
     assert_vm_number("fn make-it() is\n"
                      "  object Local is\n"
-                     "    fn val() is 99 end\n"
+                     "    fn val(self) is 99 end\n"
                      "  end\n"
                      "  make Local()\n"
                      "end\n"
@@ -4061,16 +4061,21 @@ TEST(test_obj_expr_alias_binding) {
  * object type and instantiates it later, after the defining function
  * has returned.  make must resolve the type through upvalue lookup. */
 TEST(test_obj_expr_upvalue_capture) {
+    /* A closure captures a locally-defined object type and instantiates
+     * it later.  We avoid chained calls (outer()().val()) since the parser
+     * does not support them; instead we bind intermediate results to
+     * variables. */
     assert_vm_number("fn outer() is\n"
                      "  object Local is\n"
-                     "    fn val() is 7 end\n"
+                     "    fn val(self) is 7 end\n"
                      "  end\n"
                      "  fn inner() is\n"
                      "    make Local()\n"
                      "  end\n"
                      "  inner\n"
                      "end\n"
-                     "outer()().val()",
+                     "my maker = outer()\n"
+                     "maker().val()",
                      7.0, "upvalue capture of object type");
 }
 
@@ -4080,7 +4085,7 @@ TEST(test_obj_expr_upvalue_capture) {
 TEST(test_obj_expr_local_mixin) {
     assert_vm_number("fn go() is\n"
                      "  object Greetable is\n"
-                     "    fn hi() is 1 end\n"
+                     "    fn hi(self) is 1 end\n"
                      "  end\n"
                      "  object Bot with Greetable is\n"
                      "  end\n"
